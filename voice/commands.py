@@ -5,7 +5,7 @@ import os
 import re
 from difflib import get_close_matches
 from automation.screenshot import take_screenshot
-from voice.voice_output import speak
+from voice.voice_manager import speak
 from automation.app_launcher    import open_app, execute_special_command
 from automation.system_control  import (
     close_app, switch_to_app,

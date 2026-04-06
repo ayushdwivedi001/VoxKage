@@ -71,6 +71,7 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
         if use_tools:
             # Multi-turn tool execution loop
             max_tool_turns = 10
+            _tools_ran_this_turn = False  # Guard: only fire browser interceptor before any tool runs
             for turn in range(max_tool_turns):
                 # Respect Ctrl+Space interruption between turns
                 if manager.was_interrupted:
@@ -123,6 +124,7 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
                             return
 
                         # Execute local tool
+                        _tools_ran_this_turn = True
                         result = execute_tool_call(tool_name, arguments)
                         # Show result on dashboard, don't speak it
                         result_preview = str(result)[:150].replace("\n", " ")
@@ -143,9 +145,12 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
                 else:
                     content = message.content or ""
                     
-                    # Intercept browser intent if the LLM is just talking instead of searching
-                    if _detect_browser_intent(content, prompt):
-                        logger.info("Browser intent detected in text. Launching agentic loop.")
+                    # Intercept browser intent ONLY if no tools have run yet this turn.
+                    # After search_web/browse_and_extract returns results, the LLM summary
+                    # contains words like 'currently' or 'I found' that would falsely trigger
+                    # the interceptor and re-launch an unnecessary agentic loop.
+                    if not _tools_ran_this_turn and _detect_browser_intent(content, prompt):
+                        logger.info("Browser intent detected in text (no tools ran yet). Launching agentic loop.")
                         async for chunk in execute_agentic_loop(
                             prompt, messages, client, TOOLS_SCHEMA, [], _conversation_history, _llm_chat_with_retry
                         ):

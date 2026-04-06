@@ -1144,8 +1144,8 @@ def _pw_worker():
                         
                         # Speak to the user via TTS
                         try:
-                            from voice.voice_manager import speak_text
-                            speak_text(f"I've reached the {site_name} login page. Please log in or clear the security check so I can continue.")
+                            from voice.voice_manager import speak
+                            speak(f"I've reached the {site_name} login page. Please log in or clear the security check so I can continue.")
                         except Exception as tts_err:
                             logger.debug(f"[28] TTS notification failed: {tts_err}")
                         
@@ -1167,8 +1167,8 @@ def _pw_worker():
                             if not still_login:
                                 logger.info(f"[28] Login wall CLEARED after {(wait_cycle+1)*2}s. Resuming workflow...")
                                 try:
-                                    from voice.voice_manager import speak_text
-                                    speak_text("Thank you! I can see you're logged in. Let me continue with your task.")
+                                    from voice.voice_manager import speak
+                                    speak("Thank you! I can see you're logged in. Let me continue with your task.")
                                 except:
                                     pass
                                 # Wait for page to settle after login

@@ -65,19 +65,32 @@ def start_assistant():
                         command = f.read().strip()
                     if command:
                         from voice.voice_manager import log_to_hud
-                        
+
+                        # Detect file injection — must NEVER appear on the dashboard
+                        is_silent_injection = "[UI_FILE_INJECTION]" in command
+
                         if command == "exit" or "quit assistant" in command:
-                            speak("Goodbye!")
+                            speak("Goodbye, sir.")
                             with open(".ui_command", "w", encoding="utf-8") as f:
                                 f.write("")
                             break
-                        
-                        print(f"User - {command}")
-                        log_to_hud("User", command)
-                        result = process_command(command)
-                        if result == "exit":
-                            speak("Goodbye!")
-                            break
+
+                        if is_silent_injection:
+                            # Route silently to LLM — no HUD log, no tool calls
+                            from llm.llm_client import ask_llm_sync
+                            try:
+                                response = ask_llm_sync(command)
+                                # Response is handled by ask_llm_sync TTS internally
+                            except Exception as e:
+                                print("Error in file injection LLM call:", e)
+                        else:
+                            print(f"User - {command}")
+                            log_to_hud("User", command)
+                            result = process_command(command)
+                            if result == "exit":
+                                speak("Goodbye, sir.")
+                                break
+
                     with open(".ui_command", "w", encoding="utf-8") as f:
                         f.write("")
                 except Exception as e:

@@ -131,40 +131,55 @@ def _detect_browser_intent(llm_text: str, user_prompt: str) -> bool:
     """
     Returns True if the user's prompt clearly requires a browser action
     but the LLM returned text instead of calling a tool.
-    This powers the Browser Intent Interceptor in generate_response_stream.
+    Only fires on the FIRST LLM response before any tools have run.
     """
     prompt_lower = user_prompt.lower()
     text_lower = llm_text.lower()
 
+    # Safe starters — Jarvis-style responses that are NEVER hallucination
+    _SAFE_STARTERS = [
+        "good morning", "good afternoon", "good evening", "good night",
+        "certainly, sir", "right away, sir", "understood, sir", "of course, sir",
+        "i've analyzed", "i've completed", "here is the summary",
+        "i found ", "here are ", "the results", "based on",
+        "i'm voxkage", "voxkage here", "standing by", "online and",
+        "at your service", "happy to help", "✅", "done, sir",
+    ]
+    if any(text_lower.startswith(s) or s in text_lower[:120] for s in _SAFE_STARTERS):
+        return False
+
     # Trigger verbs in the user prompt that imply browser use
     browser_verbs = [
-        'search', 'find', 'look up', 'open', 'navigate', 'go to',
-        'show me', 'get me', 'browse', 'check', 'visit', 'load',
-        'what is on', 'latest', 'current', 'price of', 'buy', 'shop',
-        'play', 'watch', 'stream',
+        'search', 'find', 'look up', 'navigate', 'go to',
+        'show me', 'get me', 'browse', 'visit', 'load',
+        'what is on', 'latest', 'price of', 'buy', 'shop',
     ]
     # Known web domains/keywords in the prompt that imply browsing
     web_keywords = [
-        'youtube', 'steam', 'reddit', 'amazon', 'flipkart', 'google',
-        'wikipedia', 'github', 'linkedin', 'twitter', 'instagram',
-        '.com', '.in', '.org', 'website', 'site', 'page', 'online',
-        'internet', 'web', 'url', 'link',
+        'youtube', 'steam', 'reddit', 'amazon', 'flipkart',
+        'wikipedia', 'github', 'linkedin',
+        '.com', '.in', '.org', 'website', 'site', 'online',
+        'internet', 'url', 'link',
     ]
 
     has_browser_verb = any(v in prompt_lower for v in browser_verbs)
     has_web_keyword = any(k in prompt_lower for k in web_keywords)
 
-    # If the LLM text looks like it tried to answer from memory (has prices,
-    # dates, or made-up results) but no tool was called, that's hallucination
+    # Signals that the LLM answered from memory without evidence
     hallucination_signals = [
         'release date', 'developer:', 'publisher:', 'available for',
         '₹', '$', 'price:', 'out of 5', 'rating:', 'metacritic',
-        'you can find', 'the latest version', 'as of ', 'currently',
+        'the latest version', 'as of my knowledge',
     ]
     looks_hallucinated = any(s in text_lower for s in hallucination_signals)
 
-    # Trigger if: (has web verb OR has web keyword) AND either hallucinated or text is long
-    return (has_browser_verb or has_web_keyword) and (looks_hallucinated or len(llm_text) > 100)
+    # STRICT rule: only trigger if BOTH a web verb AND a web keyword are present
+    # AND the response looks like hallucinated data (or explicitly mentions a domain)
+    if not (has_browser_verb and has_web_keyword):
+        return False
+
+    return looks_hallucinated or len(llm_text) > 200
+
 
 
 def clear_session_memory():

@@ -18,14 +18,24 @@ MAX_TEXT_RETRIES = 3
 
 # Patterns that are NEVER allowed in spoken/user-facing output
 _AGENT_NOISE_PATTERNS = [
-    r"FAILING TO CALL A TOOL.*",
-    r"━+.*YOU MUST CALL.*━+.*",
-    r"Do NOT write any text\..*",
-    r"Call exactly one tool now.*",
-    r"THINKING LOGGED:.*",
-    r"NEXT PLANNED:.*",
-    r"━━━.*━━━",
-    r"<summary>.*",
+    r"FAILING TO CALL A TOOL[^\n]*",
+    r"━+\s*YOU MUST CALL[^\n]*",
+    r"━━━[^\n]*━━━[^\n]*",
+    r"Do NOT write any text[^\n]*",
+    r"Call exactly one tool now[^\n]*",
+    r"THINKING LOGGED:[^\n]*",
+    r"NEXT PLANNED:[^\n]*",
+    r"→ If next is[^\n]*",
+    r"\u2192 If next is[^\n]*",
+    r"→ If task is done[^\n]*",
+    r"→ If the task[^\n]*",
+    r"tool with exact parameters[^\n]*",
+    r"<summary>[^<]*</summary>",
+    r"<summary>[^\n]*",
+    r"\[INTERNAL_DATA_START\].*?\[INTERNAL_DATA_END\]",
+    r"\[UI_FILE_INJECTION\][^\n]*",
+    r"\[INTERNAL_DATA_START\][^\n]*",
+    r"\[INTERNAL_DATA_END\][^\n]*",
     r"<\w+>",
 ]
 
@@ -34,8 +44,10 @@ def _sanitize_response(text: str) -> str:
     import re as _re
     for pat in _AGENT_NOISE_PATTERNS:
         text = _re.sub(pat, "", text, flags=_re.DOTALL | _re.IGNORECASE)
-    # Collapse excessive whitespace
+    # Collapse excessive whitespace / blank lines
     text = _re.sub(r"\n{3,}", "\n\n", text).strip()
+    # Remove any trailing stray punctuation left by pattern removal
+    text = _re.sub(r"^[\s\.\,\-\=]+$", "", text, flags=_re.MULTILINE).strip()
     return text
 
 
@@ -194,9 +206,21 @@ async def execute_agentic_loop(
                         continue
                 
                 text_response_retries = 0  # Reset counter on valid response
-                
-                # Intermediate text responses are dashboard-only, not spoken
-                log_to_hud("VoxKage", f"💬 {content[:200]}")
+
+                # Sanitize intermediate text before logging to dashboard
+                clean_content = _sanitize_response(content)
+
+                # Only log to dashboard if the content is genuinely informative
+                # Skip generic LLM preambles like "Standing by, sir" that add noise
+                _preamble_noise = [
+                    "standing by", "online and", "at your service", "ready when",
+                    "voxkage online", "systems green", "synchronized", "what's the priority",
+                    "what can i", "how can i", "shall i", "systems nominal",
+                ]
+                _is_preamble = any(p in clean_content.lower()[:100] for p in _preamble_noise)
+                if clean_content and len(clean_content) > 30 and not _is_preamble:
+                    log_to_hud("VoxKage", f"ð¬ {clean_content[:200]}")
+
                 accumulated_response += content
                 
                 # Check if this seems like a final response
