@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# VoxKage Runtime (created at runtime, not in source)
+.hud_log
+.ui_command
+C:\VoxKage\
+
+# Model files (large binaries - users should download themselves)
+models/tts/kokoro/kokoro-v1_0.pth
+models/tts/kokoro/voices/af_heart.pt
+
+# Ollama models (user's local)
+*.gguf
+
+# Logs
+*.log
+
+# Temporary
+temp/
+tmp/
+*.tmp
+
+# Configuration (sensitive - user creates their own)
+config.json
+
+# VoxKage user-specific data (runtime generated)
+last_search.json
+out25.txt
+clean_out25.txt
+
+# ChromeDriver (large binary - users download their own)
+chromedriver-win64/
+
+# Build/compile artifacts (if using PyInstaller)
+VoxKage.spec
+build/
+dist/

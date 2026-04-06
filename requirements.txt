@@ -1,0 +1,15 @@
+opencv-python
+pyttsx3
+SpeechRecognition
+pyaudio
+pyautogui
+keyboard
+pyjokes
+pywhatkit
+datetime
+requests
+pystray
+Pillow
+deepface
+kokoro>=0.9.4
+soundfile
