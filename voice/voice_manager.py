@@ -33,14 +33,14 @@ def log_to_hud(sender: str, text: str):
 
 # Local model paths - 100% offline operation
 KOKORO_MODEL_PATH = get_resource_path(os.path.join('models', 'tts', 'kokoro', 'kokoro-v1_0.pth'))
-KOKORO_VOICE_PATH = get_resource_path(os.path.join('models', 'tts', 'kokoro', 'voices', 'af_heart.pt'))
+KOKORO_VOICE_PATH = get_resource_path(os.path.join('models', 'tts', 'kokoro', 'voices', 'af_sky.pt'))
 KOKORO_REPO_ID = "hexgrad/Kokoro-82M"  # Used for metadata only, no downloads when model path is local
 
 # TTS Configuration
-DEFAULT_VOICE = "af_heart"
+DEFAULT_VOICE = "af_sky"
 KOKORO_LANG_CODE = "a"  # American English
 KOKORO_SAMPLE_RATE = 24000  # Kokoro native sample rate
-TTS_SPEED = 1.0
+TTS_SPEED = 1.2
 
 class VoiceManager:
     def __init__(self):
