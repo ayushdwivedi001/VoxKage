@@ -6,8 +6,11 @@ from automation.browser_control import open_website, search_google
 from automation.system_control import (
     set_volume, set_brightness, toggle_wifi, toggle_bluetooth, change_wallpaper_from_folder
 )
-from automation.web_agent import browse_and_extract, search_media_options, play_media_selection, execute_browser_workflow_sync, get_browser_state, agent_step_sync
+from automation.web_agent import browse_and_extract, search_media_options, play_media_selection, execute_browser_workflow_sync, get_browser_state, agent_step_sync, control_media_web
 from automation.document_parser import analyze_specific_file_sync, find_file
+from automation.spotify_control import search_spotify_app, play_spotify_app, control_spotify_app, USER_PLAYLISTS, browse_spotify_search, browse_spotify_play, control_spotify_web, is_spotify_app_installed
+from automation.gmail_manager import check_gmail, get_email_summary
+
 
 # Define schemas for Ollama
 TOOLS_SCHEMA = [
@@ -176,6 +179,123 @@ TOOLS_SCHEMA = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_spotify",
+            "description": "Searches Spotify for a topic and returns the top 5 track titles. You MUST use this tool FIRST when the user asks to play a song on Spotify. DO NOT hallucinate song names.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search term for songs."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "play_spotify_selection",
+            "description": "Plays a specific song by selecting its number (1 to 5) from the previous search results.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "number": {
+                        "type": "integer",
+                        "description": "The number of the song the user wants to play (e.g., 1, 2, 3, 4, 5)."
+                    }
+                },
+                "required": ["number"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "play_user_playlist",
+            "description": "Plays one of the user's saved playlists (e.g., 'true end', 'scenarios'). Use this when the user says 'play my usual songs' or asks for a specific playlist.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "playlist_name": {
+                        "type": "string",
+                        "description": "The name of the playlist, or 'random' to pick one randomly."
+                    }
+                },
+                "required": ["playlist_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "media_control",
+            "description": "Pauses, plays, stops, skips music/videos, or retrieves currently playing song status. Use this when the user says 'pause', 'stop', 'resume', 'next song', or 'what song is playing?'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["play", "pause", "stop", "next", "prev", "status", "fullscreen"],
+                        "description": "The action to perform."
+                    },
+                    "target": {
+                        "type": "string",
+                        "enum": ["auto", "spotify", "youtube"],
+                        "description": "The target to control. Use 'auto' if you aren't sure."
+                    }
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_gmail",
+            "description": "Checks the user's Gmail inbox for recent emails. Can filter by label (INBOX, UNREAD, SPAM) or search query.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Optional search term (e.g., 'from:linkedin.com' or 'project update')."
+                    },
+                    "label": {
+                        "type": "string",
+                        "enum": ["INBOX", "UNREAD", "SPAM", "SENT", "STARRED"],
+                        "description": "The Gmail label to search within (default: INBOX)."
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Number of emails to fetch (default: 5)."
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_email_summary",
+            "description": "Gets the full text body of a specific email ID retrieved from check_gmail. Crucial for summarizing the actual contents of an email after finding it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "email_id": {
+                        "type": "string",
+                        "description": "The target email ID."
+                    }
+                },
+                "required": ["email_id"]
+            }
+        }
+    },
+
     {
         "type": "function",
         "function": {
@@ -354,11 +474,91 @@ def execute_tool_call(tool_name: str, arguments: dict):
             return get_browser_state()
             
         elif tool_name == "search_media_options":
-            # === PHASE 4: Default platform to youtube when LLM omits it ===
             platform = arguments.get("platform", "youtube")
             query = arguments.get("query", "")
             return search_media_options(platform, query)
             
+        elif tool_name == "search_spotify":
+            query = arguments.get("query", "")
+            if is_spotify_app_installed():
+                # Provide a nice list response like Youtube does
+                opts = search_spotify_app(query)
+                if opts:
+                    log_text = "Found Spotify Tracks:\n" + "\n".join([f"{r['number']}: {r['title']}" for r in opts])
+                    try:
+                        from voice.voice_manager import log_to_hud
+                        log_to_hud("VoxKage", log_text)
+                    except:
+                        pass
+                    return (
+                        f"Found {len(opts)} tracks on Spotify. Read these options to the user clearly (e.g. 'I found 5 songs. 1: [Title 1], 2: [Title 2]... Which one should I play?').\n"
+                        f"OPTIONS: {opts}"
+                    )
+                # If opts is empty, likely we lack API keys. Fall through to web explicitly.
+            return browse_spotify_search(query)
+                
+        elif tool_name == "play_spotify_selection":
+            number = arguments.get("number", 1)
+            if is_spotify_app_installed():
+                from automation.spotify_control import play_spotify_selection_api
+                res = play_spotify_selection_api(number)
+                # If it failed or we don't have API keys, play_spotify_app returns a string starting with "Failed"
+                if not "Failed" in res:
+                    return res
+            # Fallback
+            return browse_spotify_play(number)
+            
+        elif tool_name == "play_user_playlist":
+            pname = arguments.get("playlist_name", "random").lower()
+            if "true end" in pname:
+                uri = USER_PLAYLISTS["true end???"]
+            elif "scenario" in pname:
+                uri = USER_PLAYLISTS["scenarios"]
+            else:
+                import random
+                uri = random.choice(list(USER_PLAYLISTS.values()))
+                
+            if is_spotify_app_installed():
+                return play_spotify_app(uri) + " Note to self: Goal Met. Tell the user the playlist is started and ask if they need anything else."
+            else:
+                # web fallback won't have a direct URI playlist play easily unless we goto the URI in browser.
+                # Spotify web can handle URIs! Just convert spotify:playlist:123 to open.spotify.com/playlist/123
+                web_url = uri.replace("spotify:playlist:", "https://open.spotify.com/playlist/")
+                from automation.web_agent import _dispatch_task
+                return _dispatch_task("play_spotify_web_url", {"url": web_url}) + " Note to self: Goal Met. Tell the user the playlist is started."
+
+        elif tool_name == "media_control":
+            action = arguments.get("action")
+            target = arguments.get("target", "auto")
+            if target == "youtube":
+                return control_media_web(action)
+            elif target == "spotify":
+                if is_spotify_app_installed():
+                    return control_spotify_app(action)
+                else:
+                    return control_spotify_web(action)
+            else:
+                # Auto - try both
+                r1 = control_media_web(action)
+                if is_spotify_app_installed():
+                    r2 = control_spotify_app(action)
+                else:
+                    r2 = control_spotify_web(action)
+                return f"Auto control attempted. YouTube: {r1}. Spotify: {r2}."
+
+        elif tool_name == "check_gmail":
+            return check_gmail(
+                query=arguments.get("query", ""),
+                label=arguments.get("label", "INBOX"),
+                max_results=arguments.get("max_results", 5)
+            )
+
+        elif tool_name == "get_email_summary":
+            return get_email_summary(arguments.get("email_id"))
+
+        # compose_email, edit_draft, send_draft are handled by the Python
+        # interceptor in llm_client.py — they never reach this function.
+
         elif tool_name == "execute_browser_workflow":
             goal = arguments.get("goal", "")
             steps = arguments.get("steps", [])

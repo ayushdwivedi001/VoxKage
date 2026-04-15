@@ -20,6 +20,7 @@ from llm.helpers import (
 from llm.utils import check_ollama_server, _llm_chat_with_retry
 from llm.system_prompt import get_default_system_prompt, get_datetime_context, get_persistent_memory
 from llm.agentic_loop import execute_agentic_loop
+from automation.gmail_manager import detect_email_intent, handle_compose, handle_edit, handle_send, handle_cancel
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -30,6 +31,94 @@ _conversation_history = []
 
 async def generate_response_stream(prompt: str, system_prompt: str = "", use_tools: bool = True):
     global _conversation_history
+    
+    # ═══════════ PRE-LLM EMAIL INTERCEPTOR ═══════════
+    # Catches email intents in pure Python BEFORE the prompt reaches the LLM.
+    # The LLM never sees compose/send/edit requests — zero hallucination possible.
+    email_intent = detect_email_intent(prompt)
+    if email_intent:
+        action = email_intent["action"]
+        logger.info(f"Email intent intercepted: {action}")
+        
+        def _speak_and_log(text: str):
+            """Speak text via TTS and write to HUD. Used by the email interceptor."""
+            log_to_hud("VoxKage", text)
+            streamer = SentenceStreamer()
+            streamer.add_token(text)
+            streamer.flush()
+            _conversation_history.append({"role": "user", "content": prompt})
+            _conversation_history.append({"role": "assistant", "content": text})
+        
+        try:
+            if action == "compose":
+                # Immediately announce, then run sub-agent
+                announce = "Drafting now, sir."
+                log_to_hud("VoxKage", announce)
+                streamer = SentenceStreamer()
+                streamer.add_token(announce)
+                streamer.flush()
+                yield announce
+                
+                log_to_hud("VoxKage", "📧 Composing email via sub-agent...")
+                result = handle_compose(email_intent["recipient"], email_intent["instructions"])
+                log_to_hud("VoxKage", result)
+                streamer2 = SentenceStreamer()
+                streamer2.add_token(result)
+                streamer2.flush()
+                yield result
+                _conversation_history.append({"role": "user", "content": prompt})
+                _conversation_history.append({"role": "assistant", "content": f"{announce} {result}"})
+                return
+            
+            elif action == "send":
+                result = handle_send()
+                log_to_hud("VoxKage", result)
+                streamer = SentenceStreamer()
+                streamer.add_token(result)
+                streamer.flush()
+                yield result
+                _conversation_history.append({"role": "user", "content": prompt})
+                _conversation_history.append({"role": "assistant", "content": result})
+                return
+            
+            elif action == "edit":
+                announce = "Updating draft now, sir."
+                log_to_hud("VoxKage", announce)
+                streamer = SentenceStreamer()
+                streamer.add_token(announce)
+                streamer.flush()
+                yield announce
+                
+                log_to_hud("VoxKage", "📧 Editing draft via sub-agent...")
+                result = handle_edit(email_intent["instructions"])
+                log_to_hud("VoxKage", result)
+                streamer2 = SentenceStreamer()
+                streamer2.add_token(result)
+                streamer2.flush()
+                yield result
+                _conversation_history.append({"role": "user", "content": prompt})
+                _conversation_history.append({"role": "assistant", "content": f"{announce} {result}"})
+                return
+            
+            elif action == "cancel":
+                result = handle_cancel()
+                log_to_hud("VoxKage", result)
+                streamer = SentenceStreamer()
+                streamer.add_token(result)
+                streamer.flush()
+                yield result
+                _conversation_history.append({"role": "user", "content": prompt})
+                _conversation_history.append({"role": "assistant", "content": result})
+                return
+                
+        except Exception as e:
+            err = f"Email operation failed: {str(e)}"
+            logger.error(err)
+            log_to_hud("VoxKage", err)
+            yield err
+            return
+    # ═══════════ END EMAIL INTERCEPTOR ═══════════
+
     is_running = await check_ollama_server()
     if not is_running:
         yield "Error: Ollama server is not running or unreachable. Please start Ollama."
@@ -145,7 +234,33 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
                 else:
                     content = message.content or ""
                     
-                    # Intercept browser intent ONLY if no tools have run yet this turn.
+                    # 2.1 Rescue Hallucinated Qwen XML Tool Calls
+                    # Qwen3.5:4b natively outputs <function=name>\n{json}\n</function> instead of tool_calls schema.
+                    function_match = re.search(r'<function=([^>]+)>\s*(.*?)\s*</function>', content, re.DOTALL)
+                    if function_match:
+                        tool_name = function_match.group(1).strip()
+                        try:
+                            # Sometimes Qwen includes a closing brace after the </function>. Let's cleanly grab the JSON block.
+                            json_str = function_match.group(2).strip()
+                            args = json.loads(json_str)
+                            
+                            logger.info(f"Rescued XML tool call hallucination: {tool_name}")
+                            _tools_ran_this_turn = True
+                            result = execute_tool_call(tool_name, args)
+                            
+                            result_preview = str(result)[:150].replace("\n", " ")
+                            log_to_hud("VoxKage", f"🔧 [{tool_name}] {result_preview}")
+                            
+                            messages.append({
+                                "role": "tool",
+                                "name": tool_name,
+                                "content": str(result)
+                            })
+                            continue # Loop back to let the LLM see the tool result and speak
+                        except Exception as e:
+                            logger.error(f"Failed to parse rescued XML args: {e}")
+                            
+                    # 2.2 Intercept browser intent ONLY if no tools have run yet this turn.
                     # After search_web/browse_and_extract returns results, the LLM summary
                     # contains words like 'currently' or 'I found' that would falsely trigger
                     # the interceptor and re-launch an unnecessary agentic loop.

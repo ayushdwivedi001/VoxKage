@@ -417,6 +417,114 @@ def _pw_worker():
                         
                     res_q.put(("ok", GLOBAL_VIDEO_OPTIONS))
                     
+                elif action == "search_spotify_web":
+                    query = kwargs.get('query')
+                    from automation.spotify_control import GLOBAL_SPOTIFY_OPTIONS
+                    encoded_query = urllib.parse.quote(query)
+                    search_url = f"https://open.spotify.com/search/{encoded_query}/tracks"
+                    page.goto(search_url)
+                    page.wait_for_load_state("networkidle", timeout=10000)
+                    
+                    # Wait for track results - spotify web UI changes occasionally
+                    try:
+                        page.wait_for_selector('div[data-testid="tracklist-row"]', timeout=10000)
+                    except:
+                        pass # Sometimes it just loads slowly
+                        
+                    tracks = page.locator('div[data-testid="tracklist-row"]').all()
+                    
+                    GLOBAL_SPOTIFY_OPTIONS.clear()
+                    
+                    for i, tr in enumerate(tracks[:5]):
+                        try:
+                            # The title is usually in a div inside the row
+                            title_el = tr.locator('a[data-testid="internal-track-link-name"]')
+                            title = title_el.inner_text()
+                            
+                            # Artists
+                            artist_els = tr.locator('a[href^="/artist/"]').all()
+                            artists = ", ".join([a.inner_text() for a in artist_els])
+                            
+                            GLOBAL_SPOTIFY_OPTIONS.append({"number": i+1, "title": f"{title} by {artists}", "element_index": i})
+                        except Exception:
+                            continue
+                            
+                    res_q.put(("ok", GLOBAL_SPOTIFY_OPTIONS))
+
+                elif action == "play_spotify_web":
+                    number = kwargs.get('number')
+                    from automation.spotify_control import GLOBAL_SPOTIFY_OPTIONS
+                    
+                    if number < 1 or number > len(GLOBAL_SPOTIFY_OPTIONS):
+                        res_q.put(("error", "Invalid selection number."))
+                        continue
+                        
+                    # Find the track row and double click or click play button
+                    idx = GLOBAL_SPOTIFY_OPTIONS[number - 1].get("element_index", number - 1)
+                    tracks = page.locator('div[data-testid="tracklist-row"]').all()
+                    if idx < len(tracks):
+                        tr = tracks[idx]
+                        
+                        # Use evaluating a double click or hover to show play button
+                        tr.hover()
+                        page.wait_for_timeout(500)
+                        
+                        try:
+                            # Play button inside the track row appears on hover
+                            play_btn = tr.locator('button[data-testid="play-button"]')
+                            play_btn.click()
+                            res_q.put(("ok", "Playing Spotify track on Web."))
+                        except:
+                            # Fallback to double clicking the row
+                            tr.dblclick()
+                            res_q.put(("ok", "Double-clicked Spotify track on Web."))
+                    else:
+                        res_q.put(("error", "Could not locate the track row."))
+
+                elif action == "play_spotify_web_url":
+                    url = kwargs.get('url')
+                    page.goto(url)
+                    page.wait_for_load_state("networkidle", timeout=10000)
+                    # Click the giant play button
+                    # The locator can be 'play-button' or 'action-bar-button' or 'aria-label="Play"' depending on layout
+                    try:
+                        for selector in [
+                            'button[data-testid="play-button"]', 
+                            'button[data-testid="action-bar-button"]',
+                            'button[aria-label="Play"]'
+                        ]:
+                            btn = page.locator(selector).first
+                            if btn.is_visible(timeout=2000):
+                                btn.click()
+                                res_q.put(("ok", "Started playing playlist on Spotify Web."))
+                                break
+                        else:
+                            res_q.put(("error", "Failed to find the play button on playlist page."))
+                    except Exception as e:
+                        res_q.put(("error", f"Failed to click play on playlist: {e}"))
+
+
+                elif action == "control_spotify_web":
+                    btn_action = kwargs.get('action')
+                    try:
+                        # Bottom player bar
+                        if btn_action == "play" or btn_action == "resume" or btn_action == "pause" or btn_action == "stop":
+                            btn = page.locator('button[data-testid="control-button-playpause"]')
+                            btn.click(timeout=5000)
+                            res_q.put(("ok", f"Toggled play/pause on Spotify Web."))
+                        elif btn_action == "next":
+                            btn = page.locator('button[data-testid="control-button-skip-forward"]')
+                            btn.click(timeout=5000)
+                            res_q.put(("ok", f"Skipped forward on Spotify Web."))
+                        elif btn_action == "prev" or btn_action == "previous":
+                            btn = page.locator('button[data-testid="control-button-skip-back"]')
+                            btn.click(timeout=5000)
+                            res_q.put(("ok", f"Skipped backward on Spotify Web."))
+                        else:
+                            res_q.put(("error", f"Unsupported control action: {btn_action}"))
+                    except Exception as e:
+                        res_q.put(("error", f"Failed to control Spotify web player. Not on page or element not found: {e}"))
+                    
                 elif action == "get_state":
                     try:
                         # Try preferred location, fall back to system temp dir
@@ -509,6 +617,47 @@ def _pw_worker():
                             res_q.put(("error", f"Invalid selection. I only found {len(GLOBAL_VIDEO_OPTIONS)} videos. Please say 'play number 1', or 'play number {len(GLOBAL_VIDEO_OPTIONS)}'."))
                     except Exception as e:
                         res_q.put(("error", f"Failed to play selection: {e}"))
+                        
+                elif action == "control_media_web":
+                    btn_action = kwargs.get('action', '').lower()
+                    try:
+                        # Ensure we are on a page containing a video before controlling
+                        if "youtube.com" not in page.url:
+                            res_q.put(("error", "YouTube is not currently open in the active browser tab."))
+                            continue
+                            
+                        # First determine if video is playing or paused
+                        is_paused = page.evaluate("() => { const v = document.querySelector('video'); return v ? v.paused : true; }")
+                        
+                        if btn_action in ["pause", "stop"]:
+                            if is_paused:
+                                res_q.put(("ok", "Video is already paused."))
+                            else:
+                                page.evaluate("() => { const v = document.querySelector('video'); if(v) v.pause(); }")
+                                res_q.put(("ok", "Video paused successfully."))
+                        elif btn_action in ["play", "resume"]:
+                            if not is_paused:
+                                res_q.put(("ok", "Video is already playing."))
+                            else:
+                                page.evaluate("() => { const v = document.querySelector('video'); if(v) v.play(); }")
+                                res_q.put(("ok", "Video resumed successfully."))
+                        elif btn_action in ["next", "skip"]:
+                            page.keyboard.press("Shift+N") # YouTube native shortcut for next video
+                            res_q.put(("ok", "Skipped to next video on YouTube."))
+                        elif btn_action == "prev" or btn_action == "previous":
+                            page.keyboard.press("Shift+P") # YouTube native shortcut inside playlists
+                            res_q.put(("ok", "Skipped to previous video on YouTube."))
+                        elif btn_action == "fullscreen":
+                            page.keyboard.press("f")
+                            res_q.put(("ok", "Toggled fullscreen mode."))
+                        elif btn_action == "status":
+                            title = page.title().replace(" - YouTube", "")
+                            state = "paused" if is_paused else "playing"
+                            res_q.put(("ok", f"Currently {state} on YouTube: {title}. Note to self: If the user asked about the creator, search_web. Otherwise, Goal Met: tell the user exactly what is playing."))
+                        else:
+                            res_q.put(("error", f"Unknown media control action: {btn_action}"))
+                    except Exception as e:
+                        res_q.put(("error", f"Failed to control YouTube media: {e}"))
                 
                 elif action == "agent_step":
                     # === PHASE 3: SINGLE ATOMIC ACTION WITH SCREENSHOT ===
@@ -1798,6 +1947,18 @@ def play_media_selection(number: int):
     except Exception as e:
         logger.error(f"Error playing selection: {e}")
         return f"Failed to play selection: {str(e)}"
+
+def control_media_web(action: str):
+    """
+    Controls media (YouTube) in the active browser page.
+    """
+    logger.info(f"Executing web media control: {action}")
+    try:
+        return _dispatch_task("control_media_web", {"action": action})
+    except Exception as e:
+        logger.error(f"Error executing web media control: {e}")
+        return f"Failed to execute {action} on web: {str(e)}"
+
 
 def execute_browser_workflow_sync(goal: str, steps: list):
     """

@@ -37,6 +37,7 @@ Thumbs.db
 
 # VoxKage Runtime (created at runtime, not in source)
 .hud_log
+crash_log.txt
 .ui_command
 C:\VoxKage\
 
@@ -63,6 +64,9 @@ last_search.json
 out25.txt
 clean_out25.txt
 
+# VoxKage user-specific authentication data (contains sensitive tokens)
+data/
+
 # ChromeDriver (large binary - users download their own)
 chromedriver-win64/
 
@@ -70,3 +74,6 @@ chromedriver-win64/
 VoxKage.spec
 build/
 dist/
+
+# for testing the workings of voxkage
+test.py
