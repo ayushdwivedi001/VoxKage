@@ -1,8 +1,14 @@
+import os
+# ── Offline model flags (Whisper + sentence-transformers already cached) ────────
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
 from config_loader import load_config
 CONFIG = load_config()
 WAKE_WORD = CONFIG.get("wake_word", "vision").lower()
+
 import sys
-import os
 from voice.faster_listen import listen
 from voice.commands import process_command
 from voice.voice_manager import speak, manager
@@ -48,8 +54,25 @@ def _generate_startup_greeting() -> str:
 def start_assistant():
     from llm.llm_client import clear_session_memory
     clear_session_memory()
-    
+
+    # ── Pre-warm the Tool RAG index (runs once at startup, ~2s) ─────────────────
+    try:
+        from llm.tool_rag import ensure_index_fresh
+        ensure_index_fresh()
+    except Exception as _e:
+        import logging
+        logging.getLogger(__name__).warning(f"Tool RAG warm-up failed (non-fatal): {_e}")
+
+    # ── Pre-warm the Semantic Router (builds route embeddings once) ──────────────
+    try:
+        from voice.semantic_router import warmup as router_warmup
+        router_warmup()
+    except Exception as _e:
+        import logging
+        logging.getLogger(__name__).warning(f"Semantic Router warm-up failed (non-fatal): {_e}")
+
     speak(_generate_startup_greeting())
+
     while True:
         manager.wait_to_finish()
         
@@ -63,7 +86,12 @@ def start_assistant():
                 try:
                     with open(".ui_command", "r", encoding="utf-8") as f:
                         command = f.read().strip()
+                    
+                    # Clear the command file immediately so we don't accidentally re-process it on restart
                     if command:
+                        with open(".ui_command", "w", encoding="utf-8") as f:
+                            f.write("")
+                            
                         from voice.voice_manager import log_to_hud
 
                         # Detect file injection — must NEVER appear on the dashboard
@@ -71,8 +99,6 @@ def start_assistant():
 
                         if command == "exit" or "quit assistant" in command:
                             speak("Goodbye, sir.")
-                            with open(".ui_command", "w", encoding="utf-8") as f:
-                                f.write("")
                             break
 
                         if is_silent_injection:
@@ -91,8 +117,6 @@ def start_assistant():
                                 speak("Goodbye, sir.")
                                 break
 
-                    with open(".ui_command", "w", encoding="utf-8") as f:
-                        f.write("")
                 except Exception as e:
                     print("Error reading UI command:", e)
             continue

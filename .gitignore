@@ -31,6 +31,14 @@ wheels/
 *.swo
 *~
 
+# Environment files
+.env
+.env.*
+.envrc
+
+# Optimized Python bytecode
+*.pyo
+
 # OS
 .DS_Store
 Thumbs.db
@@ -39,11 +47,10 @@ Thumbs.db
 .hud_log
 crash_log.txt
 .ui_command
-C:\VoxKage\
 
 # Model files (large binaries - users should download themselves)
 models/tts/kokoro/kokoro-v1_0.pth
-models/tts/kokoro/voices/af_heart.pt
+models/tts/kokoro/voices/*.pt
 
 # Ollama models (user's local)
 *.gguf
@@ -70,10 +77,31 @@ data/
 # ChromeDriver (large binary - users download their own)
 chromedriver-win64/
 
-# Build/compile artifacts (if using PyInstaller)
-VoxKage.spec
-build/
-dist/
+# Caches
+.cache/
+.hf_cache/
+transformers_cache/
 
-# for testing the workings of voxkage
-test.py
+# Generated media files
+*.wav
+*.mp3
+*.ogg
+*.mp4
+*.avi
+*.mkv
+
+# Windows compiled extensions
+*.pyd
+*.dll
+*.lib
+*.exp
+
+# Testing/coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build artifact spec (decide: keep or ignore)
+VoxKage.spec

@@ -8,17 +8,24 @@ from datetime import datetime
 from dotenv import load_dotenv
 import os
 
-from llm.tool_registry import TOOLS_SCHEMA, execute_tool_call
+from llm.tool_registry import TOOLS_SCHEMA
+from llm.mcp_dispatcher import dispatch_tool_call as execute_tool_call
 from voice.voice_manager import SentenceStreamer, manager, log_to_hud
-from llm.constants import OLLAMA_HOST, MODEL_NAME, MAX_HISTORY, GLOBAL_LAST_RESULTS
+from llm.constants import (
+    OLLAMA_HOST, MODEL_NAME, MAX_HISTORY, GLOBAL_LAST_RESULTS,
+    USE_RAG, TOP_K_TOOLS, USE_MEMORY
+)
 from llm.helpers import (
-    _extract_json_tool_call, 
-    _parse_text_intent, 
-    _detect_browser_intent, 
+    _extract_json_tool_call,
+    _parse_text_intent,
+    _detect_browser_intent,
     clear_session_memory
 )
 from llm.utils import check_ollama_server, _llm_chat_with_retry
-from llm.system_prompt import get_default_system_prompt, get_datetime_context, get_persistent_memory
+from llm.system_prompt import (
+    get_personality_prompt, get_routing_hints,
+    get_datetime_context, get_persistent_memory
+)
 from llm.agentic_loop import execute_agentic_loop
 from automation.gmail_manager import detect_email_intent, handle_compose, handle_edit, handle_send, handle_cancel
 
@@ -28,10 +35,70 @@ logger = logging.getLogger(__name__)
 
 _conversation_history = []
 
+# ─── RAG: Tool retrieval helper ───────────────────────────────────────────────
+
+def _get_tools_for_query(prompt: str) -> tuple[list, list[str]]:
+    """
+    Return (tool_schemas, tool_names) for the given query.
+    Uses RAG if USE_RAG=True, falls back to full TOOLS_SCHEMA.
+    Also always ensures agent_thinking + agent_step are included if any browser
+    tool is retrieved, so agentic loop handover is always available.
+    """
+    if not USE_RAG:
+        from llm.tool_definitions import get_all_ollama_schemas, TOOL_DEFINITIONS
+        schemas = get_all_ollama_schemas()
+        names = [t["name"] for t in TOOL_DEFINITIONS]
+        return schemas, names
+
+    try:
+        from llm.tool_rag import retrieve_tools, retrieve_tool_names
+        schemas = retrieve_tools(prompt, top_k=TOP_K_TOOLS)
+        names = [s["function"]["name"] for s in schemas]
+
+        # Always ensure agentic loop tools are present if any browser tool retrieved
+        _browser_set = {"execute_browser_workflow", "browse_and_extract", "search_web"}
+        _agent_tools = {"agent_thinking", "agent_step"}
+        if (_browser_set & set(names)) and not (_agent_tools & set(names)):
+            from llm.tool_rag import get_schema_by_name
+            for at in ["agent_thinking", "agent_step"]:
+                s = get_schema_by_name(at)
+                if s and at not in names:
+                    schemas.append(s)
+                    names.append(at)
+
+        return schemas, names
+
+    except Exception as e:
+        logger.error(f"[RAG] Tool retrieval failed: {e}. Falling back to TOOLS_SCHEMA.")
+        from llm.tool_definitions import get_all_ollama_schemas, TOOL_DEFINITIONS
+        schemas = get_all_ollama_schemas()
+        names = [t["name"] for t in TOOL_DEFINITIONS]
+        return schemas, names
+
+
+def _ensure_tool_schema(tool_name: str, current_schemas: list) -> list:
+    """
+    If Qwen calls a tool not in the current retrieved set, add it on the fly.
+    This is the 'fallback fetch' that guarantees zero silent failures from RAG gaps.
+    """
+    current_names = {s["function"]["name"] for s in current_schemas}
+    if tool_name not in current_names:
+        try:
+            from llm.tool_rag import get_schema_by_name
+            s = get_schema_by_name(tool_name)
+            if s:
+                logger.info(f"[RAG] On-demand schema fetch for '{tool_name}' (wasn't in retrieved set).")
+                return current_schemas + [s]
+        except Exception:
+            pass
+    return current_schemas
+
+
+# ─── Main Response Stream ─────────────────────────────────────────────────────
 
 async def generate_response_stream(prompt: str, system_prompt: str = "", use_tools: bool = True):
     global _conversation_history
-    
+
     # ═══════════ PRE-LLM EMAIL INTERCEPTOR ═══════════
     # Catches email intents in pure Python BEFORE the prompt reaches the LLM.
     # The LLM never sees compose/send/edit requests — zero hallucination possible.
@@ -39,7 +106,7 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
     if email_intent:
         action = email_intent["action"]
         logger.info(f"Email intent intercepted: {action}")
-        
+
         def _speak_and_log(text: str):
             """Speak text via TTS and write to HUD. Used by the email interceptor."""
             log_to_hud("VoxKage", text)
@@ -48,17 +115,16 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
             streamer.flush()
             _conversation_history.append({"role": "user", "content": prompt})
             _conversation_history.append({"role": "assistant", "content": text})
-        
+
         try:
             if action == "compose":
-                # Immediately announce, then run sub-agent
                 announce = "Drafting now, sir."
                 log_to_hud("VoxKage", announce)
                 streamer = SentenceStreamer()
                 streamer.add_token(announce)
                 streamer.flush()
                 yield announce
-                
+
                 log_to_hud("VoxKage", "📧 Composing email via sub-agent...")
                 result = handle_compose(email_intent["recipient"], email_intent["instructions"])
                 log_to_hud("VoxKage", result)
@@ -69,7 +135,7 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
                 _conversation_history.append({"role": "user", "content": prompt})
                 _conversation_history.append({"role": "assistant", "content": f"{announce} {result}"})
                 return
-            
+
             elif action == "send":
                 result = handle_send()
                 log_to_hud("VoxKage", result)
@@ -80,7 +146,7 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
                 _conversation_history.append({"role": "user", "content": prompt})
                 _conversation_history.append({"role": "assistant", "content": result})
                 return
-            
+
             elif action == "edit":
                 announce = "Updating draft now, sir."
                 log_to_hud("VoxKage", announce)
@@ -88,7 +154,7 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
                 streamer.add_token(announce)
                 streamer.flush()
                 yield announce
-                
+
                 log_to_hud("VoxKage", "📧 Editing draft via sub-agent...")
                 result = handle_edit(email_intent["instructions"])
                 log_to_hud("VoxKage", result)
@@ -99,7 +165,7 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
                 _conversation_history.append({"role": "user", "content": prompt})
                 _conversation_history.append({"role": "assistant", "content": f"{announce} {result}"})
                 return
-            
+
             elif action == "cancel":
                 result = handle_cancel()
                 log_to_hud("VoxKage", result)
@@ -110,7 +176,7 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
                 _conversation_history.append({"role": "user", "content": prompt})
                 _conversation_history.append({"role": "assistant", "content": result})
                 return
-                
+
         except Exception as e:
             err = f"Email operation failed: {str(e)}"
             logger.error(err)
@@ -131,26 +197,49 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
         logger.info("File injection detected: disabling tools for this turn.")
 
     client = AsyncClient(host=OLLAMA_HOST)
-    
+
+    # ─── Retrieve relevant tools for this query (Phase 1: Tool RAG) ───────────
+    relevant_tools, retrieved_names = _get_tools_for_query(prompt)
+    logger.info(f"[RAG] Injecting {len(relevant_tools)} tools: {retrieved_names}")
+
+    # ─── Retrieve relevant memories for this query (Phase 2: Mem0) ──────────────
+    memory_snippet = ""
+    if USE_MEMORY:
+        try:
+            from llm.memory_manager import search_memory
+            memory_snippet = search_memory(prompt)
+        except Exception as _me:
+            logger.warning(f"[Memory] Search failed (non-fatal): {_me}")
+
+    # ─── Build message context ─────────────────────────────────────────────────
     messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    else:
-        messages.append({"role": "system", "content": get_default_system_prompt()})
-    
-    datetime_context = get_datetime_context()
-    messages.append({
-        "role": "system",
-        "content": datetime_context["content"]
-    })
-    
+
+    # System: personality (fixed, lean)
+    personality = system_prompt if system_prompt else get_personality_prompt()
+    messages.append({"role": "system", "content": personality})
+
+    # System: date/time (always)
+    messages.append({"role": "system", "content": get_datetime_context()["content"]})
+
+    # System: dynamic routing hints for retrieved tools (replaces hard-coded Part 1)
+    routing_hints = get_routing_hints(retrieved_names)
+    if routing_hints:
+        messages.append({"role": "system", "content": routing_hints})
+
+    # System: Mem0 memory snippet (Phase 2 — personalization context)
+    if memory_snippet:
+        messages.append({"role": "system", "content": memory_snippet})
+
+    # System: legacy search persistence (last_search.json)
     persistent_memory = get_persistent_memory()
     if persistent_memory:
         messages.append({"role": "system", "content": persistent_memory})
-    
+
+    # Conversation history
     for msg in _conversation_history:
         messages.append(msg)
-    
+
+    # User prompt
     messages.append({"role": "user", "content": prompt})
 
     manager.was_interrupted = False
@@ -160,20 +249,20 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
         if use_tools:
             # Multi-turn tool execution loop
             max_tool_turns = 10
-            _tools_ran_this_turn = False  # Guard: only fire browser interceptor before any tool runs
+            _tools_ran_this_turn = False
+
             for turn in range(max_tool_turns):
                 # Respect Ctrl+Space interruption between turns
                 if manager.was_interrupted:
                     logger.info("[llm_client] Interruption detected. Stopping tool loop.")
                     yield "Got it — stopping."
                     return
-                
-                response = await _llm_chat_with_retry(client, messages, tools=TOOLS_SCHEMA)
+
+                response = await _llm_chat_with_retry(client, messages, tools=relevant_tools)
                 message = response.message
-                
+
                 # 1. Handle tool calls
                 if hasattr(message, 'tool_calls') and message.tool_calls:
-                    # Convert response message to dict for history persistence
                     messages.append({
                         "role": "assistant",
                         "content": message.content or "",
@@ -186,10 +275,9 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
                             } for t in message.tool_calls
                         ]
                     })
-                    
+
                     for tool in message.tool_calls:
                         tool_name = tool.function.name
-                        # Safe extraction of arguments
                         args_raw = tool.function.arguments
                         if isinstance(args_raw, dict):
                             arguments = args_raw
@@ -199,15 +287,19 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
                             except Exception:
                                 arguments = {}
                                 logger.warning(f"Could not parse tool arguments: {args_raw}")
-                        
+
                         if not tool_name:
                             continue
-                            
+
+                        # ── On-demand schema fetch for out-of-set tools ─────────
+                        relevant_tools = _ensure_tool_schema(tool_name, relevant_tools)
+
                         # Agentic loop handover
                         if tool_name in ["agent_thinking", "agent_step"]:
                             logger.info(f"Handover to agentic loop via: {tool_name}")
                             async for chunk in execute_agentic_loop(
-                                prompt, messages, client, TOOLS_SCHEMA, [], _conversation_history, _llm_chat_with_retry
+                                prompt, messages, client, relevant_tools,
+                                [], _conversation_history, _llm_chat_with_retry
                             ):
                                 yield chunk
                             return
@@ -215,59 +307,49 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
                         # Execute local tool
                         _tools_ran_this_turn = True
                         result = execute_tool_call(tool_name, arguments)
-                        # Show result on dashboard, don't speak it
                         result_preview = str(result)[:150].replace("\n", " ")
                         log_to_hud("VoxKage", f"🔧 [{tool_name}] {result_preview}")
-                        
-                        # Add tool result to history for the next turn
-                        # Note: Ollama doesn't always provide a tool_call_id; we use tool_name as fallback
+
                         messages.append({
                             "role": "tool",
                             "name": tool_name,
                             "content": str(result)
                         })
-                    
-                    # Continue to next turn to get LLM summary of tool results
-                    continue
-                
-                # 2. Handle final text response (No tool calls)
+
+                    continue  # Next turn: let LLM summarize tool results
+
+                # 2. Handle final text response (no tool calls)
                 else:
                     content = message.content or ""
-                    
+
                     # 2.1 Rescue Hallucinated Qwen XML Tool Calls
-                    # Qwen3.5:4b natively outputs <function=name>\n{json}\n</function> instead of tool_calls schema.
                     function_match = re.search(r'<function=([^>]+)>\s*(.*?)\s*</function>', content, re.DOTALL)
                     if function_match:
                         tool_name = function_match.group(1).strip()
                         try:
-                            # Sometimes Qwen includes a closing brace after the </function>. Let's cleanly grab the JSON block.
                             json_str = function_match.group(2).strip()
                             args = json.loads(json_str)
-                            
                             logger.info(f"Rescued XML tool call hallucination: {tool_name}")
+                            relevant_tools = _ensure_tool_schema(tool_name, relevant_tools)
                             _tools_ran_this_turn = True
                             result = execute_tool_call(tool_name, args)
-                            
                             result_preview = str(result)[:150].replace("\n", " ")
                             log_to_hud("VoxKage", f"🔧 [{tool_name}] {result_preview}")
-                            
                             messages.append({
                                 "role": "tool",
                                 "name": tool_name,
                                 "content": str(result)
                             })
-                            continue # Loop back to let the LLM see the tool result and speak
+                            continue
                         except Exception as e:
                             logger.error(f"Failed to parse rescued XML args: {e}")
-                            
-                    # 2.2 Intercept browser intent ONLY if no tools have run yet this turn.
-                    # After search_web/browse_and_extract returns results, the LLM summary
-                    # contains words like 'currently' or 'I found' that would falsely trigger
-                    # the interceptor and re-launch an unnecessary agentic loop.
+
+                    # 2.2 Intercept browser intent ONLY if no tools have run yet this turn
                     if not _tools_ran_this_turn and _detect_browser_intent(content, prompt):
                         logger.info("Browser intent detected in text (no tools ran yet). Launching agentic loop.")
                         async for chunk in execute_agentic_loop(
-                            prompt, messages, client, TOOLS_SCHEMA, [], _conversation_history, _llm_chat_with_retry
+                            prompt, messages, client, relevant_tools,
+                            [], _conversation_history, _llm_chat_with_retry
                         ):
                             yield chunk
                         return
@@ -275,21 +357,26 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
                     # Handle conversational text
                     streamer.add_token(content)
                     yield content
-                    
-                    # Update global history
-                    # User prompt is already at the beginning of this function turn,
-                    # so we only append the new turn result to the global history.
+
                     _conversation_history.append({"role": "user", "content": prompt})
                     _conversation_history.append({"role": "assistant", "content": content})
-                    # Keep history within reasonable bounds
                     while len(_conversation_history) > MAX_HISTORY * 2:
                         _conversation_history.pop(0)
-                    
-                    # Finished with this turn
+
+                    # ── Async memory update (non-blocking, Phase 2) ──────────────
+                    if USE_MEMORY:
+                        try:
+                            import asyncio
+                            from llm.memory_manager import add_memory_async
+                            asyncio.ensure_future(add_memory_async(prompt, content))
+                        except Exception:
+                            pass
+
                     break
-            
+
             streamer.flush()
         else:
+            # No-tools mode (file injection)
             full_response = ""
             streamer = SentenceStreamer()
             async_stream = await client.chat(model=MODEL_NAME, messages=messages, stream=True)
@@ -302,17 +389,15 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
                     full_response += text
                     streamer.add_token(text)
                     yield text
-            
+
             streamer.flush()
-            
-            # streamer.flush() already handled logging to HUD
-            
+
             _conversation_history.append({"role": "user", "content": prompt})
             _conversation_history.append({"role": "assistant", "content": full_response})
             if len(_conversation_history) > MAX_HISTORY * 2:
                 _conversation_history.pop(0)
                 _conversation_history.pop(0)
-                
+
     except Exception as e:
         err_str = str(e)
         if "500" in err_str or "xml" in err_str.lower() or "syntax error" in err_str.lower():
@@ -329,17 +414,18 @@ def ask_llm_sync(prompt: str, system_prompt: str = "", use_tools: bool = True):
         async for chunk in generate_response_stream(prompt, system_prompt, use_tools):
             response += chunk
         return response
-    
+
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = None
-    
+
     if loop and loop.is_running():
         import threading
-        
+
         result: list[str] = [""]
         err: list[BaseException | None] = [None]
+
         def _thread_target():
             new_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(new_loop)
@@ -349,11 +435,11 @@ def ask_llm_sync(prompt: str, system_prompt: str = "", use_tools: bool = True):
                 err[0] = e
             finally:
                 new_loop.close()
-                
+
         t = threading.Thread(target=_thread_target)
         t.start()
         t.join()
-        
+
         if err[0] is not None:
             raise err[0]
         return result[0]

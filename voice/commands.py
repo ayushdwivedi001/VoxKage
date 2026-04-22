@@ -77,6 +77,25 @@ def process_command(command):
     intent_data = detect_intent(cmd)
     intent = intent_data.get("intent")
 
+    # ── Phase 3: Semantic Router — instant bypass for simple commands ──────────
+    # Runs BEFORE the regex intent engine for better coverage and Hinglish support.
+    # Only fires when USE_SEMANTIC_ROUTER=True and similarity > THRESHOLD.
+    try:
+        from voice.semantic_router import route_command
+        from llm.constants import USE_SEMANTIC_ROUTER
+        if USE_SEMANTIC_ROUTER:
+            semantic_result = route_command(command)
+            if semantic_result:
+                # Override the intent_data with the semantic router's result
+                # (only if the regex engine returned "unknown")
+                if intent == "unknown" or semantic_result["intent"] != "unknown":
+                    intent_data = semantic_result
+                    intent = intent_data.get("intent")
+    except Exception as _se:
+        import logging
+        logging.getLogger(__name__).debug(f"[SemanticRouter] Non-fatal: {_se}")
+    # ── End Semantic Router ────────────────────────────────────────────────────
+
     # Volume / Brightness
     if intent == "set_volume":
         lvl = intent_data.get("level")
