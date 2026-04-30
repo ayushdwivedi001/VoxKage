@@ -287,7 +287,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     force = "--force" in sys.argv or "--build" in sys.argv
     build_tool_index(force=force)
-    print("✅ Tool index built successfully.")
+    print("Tool index built successfully.")
     
     # Quick smoke test
     if "--test" in sys.argv:

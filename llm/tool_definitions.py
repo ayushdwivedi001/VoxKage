@@ -770,6 +770,308 @@ TOOL_DEFINITIONS = [
             "required": []
         }
     },
+
+    # ─────────────────────────────────────────────
+    # RAG MEMORY
+    # ─────────────────────────────────────────────
+    {
+        "name": "check_and_index",
+        "description": "RAG MEMORY GATE: Call this FIRST before reading any file. Automatically indexes new files, reindexes changed files, returns instantly from cache for unchanged files.",
+        "tags": ["rag", "memory", "index", "file", "cache", "document"],
+        "example_queries": ["index this file", "add this document to memory", "check and index file"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Absolute path to the file to check and index."}
+            },
+            "required": ["file_path"]
+        }
+    },
+    {
+        "name": "query_rag",
+        "description": "RAG MEMORY SEARCH: Semantic search across all indexed documents. Use to answer questions about any file VoxKage has seen before WITHOUT re-reading it. Always check_and_index the file first.",
+        "tags": ["rag", "memory", "search", "query", "knowledge"],
+        "example_queries": ["search memory for", "what does the indexed file say", "query rag memory"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Natural language question, e.g. 'how did we handle API fallbacks'"},
+                "n_results": {"type": "integer", "description": "Number of snippets to return (default 5)"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "index_document",
+        "description": "Forces indexing of a single document into the RAG memory. Only use if check_and_index fails.",
+        "tags": ["rag", "memory", "index", "force"],
+        "example_queries": ["force index document", "add document to knowledge base"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Absolute path to the file"}
+            },
+            "required": ["file_path"]
+        }
+    },
+    {
+        "name": "list_indexed_documents",
+        "description": "Lists all documents currently stored in the RAG memory.",
+        "tags": ["rag", "memory", "list", "indexed", "documents"],
+        "example_queries": ["what is in your memory", "list indexed files", "show rag memory contents"],
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
+        "name": "delete_from_rag",
+        "description": "Deletes a specific document from the RAG memory.",
+        "tags": ["rag", "memory", "delete", "remove"],
+        "example_queries": ["remove file from memory", "delete document from rag"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Absolute path to the file to remove"}
+            },
+            "required": ["file_path"]
+        }
+    },
+    {
+        "name": "index_directory",
+        "description": "Crawls and indexes an entire directory (like a codebase) into RAG memory. Use when asked to learn a whole project.",
+        "tags": ["rag", "memory", "index", "directory", "codebase", "folder"],
+        "example_queries": ["index my project folder", "learn this codebase", "add this directory to memory"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "dir_path": {"type": "string", "description": "Absolute path to the directory"}
+            },
+            "required": ["dir_path"]
+        }
+    },
+
+    # ─────────────────────────────────────────────
+    # GITHUB OPERATIONS
+    # ─────────────────────────────────────────────
+    {
+        "name": "git_clone",
+        "description": "Clones a remote repository to the local machine.",
+        "tags": ["git", "github", "clone", "repository"],
+        "example_queries": ["clone repo", "download repository", "git clone"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo_url": {"type": "string", "description": "URL of the repository to clone"},
+                "dest_folder": {"type": "string", "description": "Optional destination folder name"}
+            },
+            "required": ["repo_url"]
+        }
+    },
+    {
+        "name": "git_status",
+        "description": "Gets the current git status of a local repository.",
+        "tags": ["git", "github", "status", "changes"],
+        "example_queries": ["git status", "what changed in repo", "check git status"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string", "description": "Path to the local repository"}
+            },
+            "required": ["repo_path"]
+        }
+    },
+    {
+        "name": "git_diff_summary",
+        "description": "Gets a summary of unstaged and uncommitted changes in a local repository.",
+        "tags": ["git", "github", "diff", "changes"],
+        "example_queries": ["show git diff", "what are the local changes", "git diff"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string", "description": "Path to the local repository"}
+            },
+            "required": ["repo_path"]
+        }
+    },
+    {
+        "name": "git_smart_commit",
+        "description": "Commits all changes in a local repository with a provided message, optionally pushing.",
+        "tags": ["git", "github", "commit", "push", "save"],
+        "example_queries": ["commit changes", "push to github", "git commit and push"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string", "description": "Path to the local repository"},
+                "commit_message": {"type": "string", "description": "Commit message"},
+                "push": {"type": "boolean", "description": "Whether to push after committing (default true)"}
+            },
+            "required": ["repo_path", "commit_message"]
+        }
+    },
+    {
+        "name": "git_pull",
+        "description": "Pulls latest changes from the remote repository.",
+        "tags": ["git", "github", "pull", "update"],
+        "example_queries": ["git pull", "update repository", "pull changes"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string", "description": "Path to the local repository"}
+            },
+            "required": ["repo_path"]
+        }
+    },
+    {
+        "name": "fake_commit",
+        "description": "Creates a fake, empty commit to trigger CI/CD pipelines.",
+        "tags": ["git", "github", "commit", "trigger", "ci"],
+        "example_queries": ["trigger build", "fake commit", "empty commit"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string", "description": "Path to the local repository"},
+                "message": {"type": "string", "description": "Commit message"}
+            },
+            "required": ["repo_path", "message"]
+        }
+    },
+    {
+        "name": "detect_and_install_deps",
+        "description": "Detects project type (Node, Python, etc.) and auto-installs dependencies.",
+        "tags": ["git", "dependencies", "install", "npm", "pip", "project"],
+        "example_queries": ["install dependencies", "setup project", "npm install", "pip install"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string", "description": "Path to the local repository"}
+            },
+            "required": ["repo_path"]
+        }
+    },
+    {
+        "name": "run_project",
+        "description": "Runs a cloned project in the background (e.g. npm start, python app.py).",
+        "tags": ["project", "run", "start", "server", "background"],
+        "example_queries": ["run the project", "start the server", "run app"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string", "description": "Path to the local repository"},
+                "command": {"type": "string", "description": "Optional custom command to run"}
+            },
+            "required": ["repo_path"]
+        }
+    },
+    {
+        "name": "kill_project",
+        "description": "Kills a background project started with run_project.",
+        "tags": ["project", "kill", "stop", "server"],
+        "example_queries": ["stop the server", "kill project", "stop running app"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string", "description": "Path to the local repository"}
+            },
+            "required": ["repo_path"]
+        }
+    },
+    {
+        "name": "check_project_health",
+        "description": "Checks if a background project is still running and healthy.",
+        "tags": ["project", "health", "status", "server"],
+        "example_queries": ["is the server running", "check project health", "server status"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string", "description": "Path to the local repository"}
+            },
+            "required": ["repo_path"]
+        }
+    },
+    {
+        "name": "get_github_profile",
+        "description": "Fetches the authenticated user's GitHub profile information.",
+        "tags": ["github", "profile", "user"],
+        "example_queries": ["show my github profile", "who am i on github", "my github info"],
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
+        "name": "list_my_repos",
+        "description": "Lists the authenticated user's GitHub repositories.",
+        "tags": ["github", "repos", "repositories", "list"],
+        "example_queries": ["list my repos", "what repos do i have", "show my repositories"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "Max number of repos to return (default 10)"}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "create_repo_local",
+        "description": "Creates a new GitHub repository and clones it locally in one step.",
+        "tags": ["github", "create", "repo", "new", "repository"],
+        "example_queries": ["create a new repo", "make a github repository", "create private repo"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Repository name"},
+                "description": {"type": "string", "description": "Repository description"},
+                "private": {"type": "boolean", "description": "Whether the repo is private (default true)"},
+                "init_readme": {"type": "boolean", "description": "Initialize with README (default true)"}
+            },
+            "required": ["name"]
+        }
+    },
+    {
+        "name": "actions_list",
+        "description": "GITHUB: Lists recent GitHub Actions workflow runs for a repository.",
+        "tags": ["github", "actions", "workflows", "ci"],
+        "example_queries": ["check github actions", "list workflow runs", "did my build pass"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repository name with owner (e.g., ayushdwivedi001/VoxKage)"},
+                "limit": {"type": "integer", "description": "Max runs to return (default 10)"}
+            },
+            "required": ["repo"]
+        }
+    },
+    {
+        "name": "actions_get",
+        "description": "GITHUB: Gets details and jobs for a specific GitHub Actions workflow run.",
+        "tags": ["github", "actions", "jobs", "workflow"],
+        "example_queries": ["get action details", "why did workflow fail", "action run details"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repository name with owner"},
+                "run_id": {"type": "string", "description": "Workflow run ID"}
+            },
+            "required": ["repo", "run_id"]
+        }
+    },
+    {
+        "name": "get_job_logs",
+        "description": "GITHUB: Downloads the raw logs for a specific GitHub Actions job.",
+        "tags": ["github", "actions", "logs", "job", "ci", "error"],
+        "example_queries": ["get job logs", "show me why the build failed", "github action logs"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repository name with owner"},
+                "job_id": {"type": "string", "description": "Job ID from actions_get"}
+            },
+            "required": ["repo", "job_id"]
+        }
+    }
 ]
 
 # Fast lookup by name — used by tool_rag.py and mcp_dispatcher.py
