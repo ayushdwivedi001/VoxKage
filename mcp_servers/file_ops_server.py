@@ -41,6 +41,7 @@ def _fscore(query, name):
     if not n: return 0.0
     return len(q & n) / len(q)
 
+
 def _resolve_dir(description: str) -> str | None:
     """Find a real directory path from a natural language description."""
     from config_loader import load_config
@@ -48,7 +49,11 @@ def _resolve_dir(description: str) -> str | None:
     user_home = os.path.expanduser("~")
     T = 0.5
 
-    # 1. Config app_launch_commands paths
+    # 1. Absolute path given directly
+    if os.path.isdir(description):
+        return description
+
+    # 2. Config app_launch_commands paths
     for alias, cmd in config.get("app_launch_commands", {}).items():
         if _fscore(description, alias) >= T:
             parts = cmd.split('"')
@@ -64,11 +69,7 @@ def _resolve_dir(description: str) -> str | None:
         if _fscore(description, name) >= T and os.path.isdir(path):
             return path
 
-    # 3. Absolute path given directly
-    if os.path.isdir(description):
-        return description
-
-    # 4. C:\ root folders
+    # 3. C:\ root folders
     try:
         for entry in os.scandir("C:\\"):
             if entry.is_dir() and _fscore(description, entry.name) >= T:

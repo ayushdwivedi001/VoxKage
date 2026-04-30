@@ -5,19 +5,19 @@ Enables VoxKage to spawn background Gemini CLI sub-agents for long-running
 multi-step tasks, keeping the main session free for continued interaction.
 
 Architecture:
-  Main VoxKage session  →  spawn_task()  →  Hidden gemini CLI sub-agent
+  Main VoxKage session  ->  spawn_task()  ->  Hidden gemini CLI sub-agent
                                               (runs autonomously with full MCP access)
                                               calls complete_task() when done
-  Main session          →  check_tasks()  →  Sees completed results
+  Main session          ->  check_tasks()  ->  Sees completed results
 
 Tools for Main Agent:
-  spawn_task(description, model)  — Launch a background sub-agent
-  check_tasks(status_filter)      — Check all task statuses
-  get_task_result(task_id)        — Read full sub-agent output
-  cancel_task(task_id)            — Kill a running sub-agent
+  spawn_task(description, model)   --  Launch a background sub-agent
+  check_tasks(status_filter)       --  Check all task statuses
+  get_task_result(task_id)         --  Read full sub-agent output
+  cancel_task(task_id)             --  Kill a running sub-agent
 
 Tools for Sub-Agent (called by background gemini CLI):
-  complete_task(task_id, summary, success, details) — Sub-agent reports completion
+  complete_task(task_id, summary, success, details)  --  Sub-agent reports completion
 
 Run standalone: python mcp_servers/task_server.py
 """
@@ -41,13 +41,13 @@ load_dotenv(os.path.join(_ROOT, ".env"))
 from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("voxkage-tasks")
 
-# ── Storage ───────────────────────────────────────────────────────────────────
+# -- Storage -------------------------------------------------------------------
 _MEM_DIR  = os.path.join(os.path.expanduser("~"), ".voxkage")
 _TASK_FILE = os.path.join(_MEM_DIR, "tasks.jsonl")
 _LOG_DIR   = os.path.join(_MEM_DIR, "task_logs")
 os.makedirs(_LOG_DIR, exist_ok=True)
 
-# ── Gemini CLI executable resolution ─────────────────────────────────────────
+# -- Gemini CLI executable resolution -----------------------------------------
 # On Windows, 'gemini' is installed as a .cmd wrapper by npm.
 # subprocess.Popen(['gemini', ...]) does NOT resolve .cmd files without shell=True.
 # We resolve the path once at import time for reliability.
@@ -70,17 +70,17 @@ def _find_gemini_exe() -> str:
     ]:
         if os.path.isfile(candidate):
             return candidate
-    return "gemini"  # last resort — may fail, but gives a clear error
+    return "gemini"  # last resort  --  may fail, but gives a clear error
 
 _GEMINI_EXE = _find_gemini_exe()
 
-# ── Model catalogue & selection ────────────────────────────────────────────────
+# -- Model catalogue & selection ------------------------------------------------
 # Ordered by capability (most capable first within each tier)
 _MODELS = {
-    # Tier: HEAVY — complex multi-step research + document creation
+    # Tier: HEAVY  --  complex multi-step research + document creation
     "pro-latest":   "gemini-3.1-pro-preview",
     "pro-stable":   "gemini-2.5-pro",
-    # Tier: STANDARD — moderate multi-step, single-site research, simple tasks
+    # Tier: STANDARD  --  moderate multi-step, single-site research, simple tasks
     "flash-latest": "gemini-3-flash-preview",
     "flash-stable": "gemini-2.5-flash",
 }
@@ -106,14 +106,14 @@ _MODEL_ALIASES = {
 }
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# -- Helpers -------------------------------------------------------------------
 
 def _select_model(description: str) -> tuple[str, str]:
     """
     Auto-selects the best model for the task complexity.
 
-    HEAVY   (research + creation, deep analysis)   → gemini-3.1-pro-preview
-    STANDARD (single-step research, simple browse)  → gemini-2.5-flash
+    HEAVY   (research + creation, deep analysis)   -> gemini-3.1-pro-preview
+    STANDARD (single-step research, simple browse)  -> gemini-2.5-flash
 
     Returns (model_id, reason).
     """
@@ -141,7 +141,7 @@ def _select_model(description: str) -> tuple[str, str]:
 
     # Decision tree
     if research_hits >= 1 and creation_hits >= 1:
-        # Classic "research + write" — heaviest task type
+        # Classic "research + write"  --  heaviest task type
         return _MODEL_HEAVY, f"Research+creation task ({research_hits} research, {creation_hits} creation indicators)"
 
     if research_hits >= 2 or chain_hits >= 2:
@@ -153,7 +153,7 @@ def _select_model(description: str) -> tuple[str, str]:
         return _MODEL_STANDARD, f"Moderate task ({research_hits}R+{chain_hits}C+{creation_hits}X indicators)"
 
     # Simple/quick task
-    return _MODEL_STANDARD, "Simple task — flash model sufficient"
+    return _MODEL_STANDARD, "Simple task  --  flash model sufficient"
 
 
 def _load_tasks() -> list[dict]:
@@ -197,7 +197,7 @@ def _append_step(task_id: str, step: dict) -> bool:
     tasks = _load_tasks()
     for t in tasks:
         if t.get("id") == task_id:
-            steps = t.get("steps") or []   # coerce None → [] for old records
+            steps = t.get("steps") or []   # coerce None -> [] for old records
             steps.append(step)
             t["steps"] = steps
             t["current_step"] = step.get("action", "")
@@ -214,41 +214,41 @@ def _build_sub_agent_prompt(task_id: str, description: str) -> str:
     Builds the full prompt injected into the background gemini CLI session.
     Overrides VoxKage's JARVIS personality and mandates step logging.
     """
-    return f"""[SUB-AGENT MODE — TASK {task_id}]
+    return f"""[SUB-AGENT MODE  --  TASK {task_id}]
 You are VoxKage Sub-Agent. You are running as a background process.
 The user is interacting with the MAIN VoxKage session simultaneously.
-Do NOT open any browser windows, Chrome, or visible UI — you are headless.
+Do NOT open any browser windows, Chrome, or visible UI  --  you are headless.
 
 YOUR TASK:
 {description}
 
 === MANDATORY EXECUTION RULES ===
 
-1. STEP LOGGING — Call log_step() BEFORE and AFTER every major action:
+1. STEP LOGGING  --  Call log_step() BEFORE and AFTER every major action:
    log_step(task_id="{task_id}", step_num=1, action="Searching web for X", status="started", details="")
    [do the action]
    log_step(task_id="{task_id}", step_num=1, action="Searching web for X", status="done", details="Found 5 results from NASA, Wikipedia")
    Log errors too: log_step(..., status="error", details="Error message + what you will retry")
 
-2. AUTO-CONFIRM ALL FILE OPERATIONS — always pass confirmed=True:
+2. AUTO-CONFIRM ALL FILE OPERATIONS  --  always pass confirmed=True:
    create_file(..., confirmed=True)
    edit_file(..., confirmed=True)
    delete_file(..., confirmed=True)
    convert_file(..., confirmed=True)
    clean_junk_files(..., confirmed=True)
 
-3. USE HEADLESS TOOLS ONLY — you are a background process with no visible window:
+3. USE HEADLESS TOOLS ONLY  --  you are a background process with no visible window:
    For web research: search_web(query=...) or browse_and_extract_tool(url=..., query=...)
    For YouTube: search_media_options(platform="youtube", query=...)
    Do NOT use agent_step with "goto" that opens a visible Chrome window unless essential.
    Prefer search_web for quick facts, browse_and_extract_tool for deep page reads.
 
-4. COMPLETE THE TASK — do not stop until you have:
+4. COMPLETE THE TASK  --  do not stop until you have:
    a) Gathered all needed information
    b) Created/edited all requested files
    c) Verified the output exists
 
-5. FINISH — call these TWO tools in order:
+5. FINISH  --  call these TWO tools in order:
    a) complete_task():
       SUCCESS: complete_task(task_id="{task_id}", summary="Created X at path Y", success=True, details="Step-by-step of what was done")
       FAILURE: complete_task(task_id="{task_id}", summary="Failed because Z", success=False, details="What was attempted")
@@ -256,9 +256,9 @@ YOUR TASK:
       SUCCESS: notify_task_done(task_id="{task_id}", title="Task Complete", message="<1-2 sentence user-friendly summary of what was accomplished>")
       FAILURE: notify_task_done(task_id="{task_id}", title="Task Failed", message="<brief reason why it failed>")
 
-6. Do NOT call spawn_task — you are already a sub-agent.
-7. Do NOT ask the user for any input or confirmation — decide and execute.
-8. Do NOT repeat personality rules — just execute.
+6. Do NOT call spawn_task  --  you are already a sub-agent.
+7. Do NOT ask the user for any input or confirmation  --  decide and execute.
+8. Do NOT repeat personality rules  --  just execute.
 
 STEP LOG FORMAT REFERENCE:
   step_num  = sequential number starting from 1
@@ -269,7 +269,7 @@ STEP LOG FORMAT REFERENCE:
 BEGIN EXECUTING NOW. Start with log_step step 1 = your plan."""
 
 
-# ── MCP Tools ─────────────────────────────────────────────────────────────────
+# -- MCP Tools -----------------------------------------------------------------
 
 @mcp.tool()
 def spawn_task(
@@ -290,18 +290,18 @@ def spawn_task(
 
     Parameters:
       description    : Full natural language task description for the sub-agent.
-                       Be specific — include where to save files, what sites to use, etc.
+                       Be specific  --  include where to save files, what sites to use, etc.
       model_override : Force a specific model: "flash" or "pro". Leave blank for auto-select.
 
     Returns a task ID. Inform the user the task has been initiated and you will notify them when done.
     """
     task_id = str(uuid.uuid4())[:8]
 
-    # Model resolution — alias → canonical model ID from the 6-model catalogue
+    # Model resolution  --  alias -> canonical model ID from the 6-model catalogue
     override_key = (model_override or "").lower().strip()
     if override_key:
         model = _MODEL_ALIASES.get(override_key, model_override)  # pass-through if exact model string
-        model_reason = f"Specified: '{model_override}' → {model}"
+        model_reason = f"Specified: '{model_override}' -> {model}"
     else:
         model, model_reason = _select_model(description)
 
@@ -331,7 +331,7 @@ def spawn_task(
 
     # Launch background gemini CLI process
     # On Windows we must use the .cmd wrapper path directly.
-    # shell=True is NOT used — it causes extra cmd.exe overhead and PID tracking issues.
+    # shell=True is NOT used  --  it causes extra cmd.exe overhead and PID tracking issues.
     log_path = task["log_file"]
     try:
         with open(log_path, "w", encoding="utf-8") as log_f:
@@ -372,7 +372,7 @@ def spawn_task(
     except FileNotFoundError:
         _update_task(task_id, {"status": "failed", "summary": "gemini CLI not found in PATH"})
         return (
-            f"[ERROR] Could not spawn sub-agent — 'gemini' command not found in PATH.\n"
+            f"[ERROR] Could not spawn sub-agent  --  'gemini' command not found in PATH.\n"
             f"Make sure the Gemini CLI is installed and accessible from this terminal."
         )
     except Exception as e:
@@ -389,7 +389,7 @@ def complete_task(
 ) -> str:
     """
     Called by a background sub-agent to report task completion.
-    DO NOT call this from the main session — this is for sub-agents only.
+    DO NOT call this from the main session  --  this is for sub-agents only.
 
     Parameters:
       task_id : The task ID provided at spawn
@@ -407,7 +407,7 @@ def complete_task(
     })
 
     if not updated:
-        # Task record might be in a different session — create a new entry
+        # Task record might be in a different session  --  create a new entry
         task = {
             "id":           task_id,
             "status":       status,
@@ -424,7 +424,7 @@ def complete_task(
         }
         _save_task(task)
 
-    icon = "✅" if success else "❌"
+    icon = "[OK]" if success else "[FAIL]"
     return (
         f"{icon} Task {task_id} marked as {status}.\n"
         f"Summary recorded. The main VoxKage session will see this on next check_tasks() call."
@@ -454,40 +454,65 @@ def check_tasks(status_filter: str = "all") -> str:
     if not tasks:
         return f"[TASKS] No tasks with status '{status_filter}'."
 
-    # Sort newest first
+    # Sort newest first - crash-safe
     tasks = sorted(tasks, key=lambda t: t.get("created_at", ""), reverse=True)
 
     lines = [f"[BACKGROUND TASKS] {len(tasks)} task(s):\n"]
     for t in tasks:
-        status = t.get("status", "?")
-        icon = {"running": "⏳", "done": "✅", "failed": "❌", "spawning": "🚀", "cancelled": "🚫"}.get(status, "•")
-        lines.append(f"{icon} [{t['id']}] {status.upper()} — {t.get('model', '?')}")
-        lines.append(f"   Task     : {t.get('description', 'N/A')[:100]}")
-        lines.append(f"   Created  : {t.get('created_at', 'N/A')[:19]}")
+        try:
+            task_id  = t.get("id") or "unknown"
+            status   = t.get("status") or "unknown"
+            model    = t.get("model") or "?"
+            desc     = t.get("description") or "N/A"
+            created  = (t.get("created_at") or "")[:19]
+            icon = {"running": "[RUN]", "done": "[DONE]", "failed": "[FAIL]", "spawning": "[SPAWN]", "cancelled": "[CANCELLED]"}.get(status, "[?]")
+            lines.append(f"{icon} [{task_id}] {status.upper()} -- {model}")
+            lines.append(f"   Task     : {desc[:100]}")
+            lines.append(f"   Created  : {created}")
 
-        # Live progress for running tasks
-        if status == "running" and t.get("current_step"):
-            step_time  = t.get("step_updated_at", "")[:19]
-            step_count = len(t.get("steps") or [])   # coerce None → []
-            lines.append(f"   Progress : Step {step_count} \u2014 {t['current_step']}")
-            if step_time:
-                lines.append(f"   Updated  : {step_time}")
+            # Live progress for running tasks
+            if status == "running":
+                current_step = t.get("current_step") or "Initialising..."
+                step_time    = (t.get("step_updated_at") or "")[:19]
+                step_count   = len(t.get("steps") or [])
+                lines.append(f"   Progress : Step {step_count} - {current_step}")
+                if step_time:
+                    lines.append(f"   Updated  : {step_time}")
+                # Show last line of log for live feedback
+                log_file = t.get("log_file")
+                if log_file and os.path.exists(log_file):
+                    try:
+                        with open(log_file, encoding="utf-8", errors="ignore") as lf:
+                            tail = lf.read()[-500:].strip()
+                        if tail:
+                            last_line = [l for l in tail.splitlines() if l.strip()][-1]
+                            lines.append(f"   Log tail : {last_line[:120]}")
+                    except Exception:
+                        pass
 
+            finished = t.get("completed_at")
+            if finished:
+                lines.append(f"   Finished : {str(finished)[:19]}")
+            summary = t.get("summary")
+            if summary:
+                lines.append(f"   Result   : {summary}")
+            lines.append("")
+        except Exception as row_err:
+            lines.append(f"[!] Malformed task record skipped: {row_err}")
+            lines.append("")
 
-        if t.get("completed_at"):
-            lines.append(f"   Finished : {t['completed_at'][:19]}")
-        if t.get("summary"):
-            lines.append(f"   Result   : {t['summary']}")
-        lines.append("")
-
-    # Notify about completed tasks
-    done_tasks  = [t for t in tasks if t.get("status") == "done"]
-    failed_tasks = [t for t in tasks if t.get("status") == "failed"]
+    # Footer hints
+    done_tasks    = [t for t in tasks if t.get("status") == "done"]
+    failed_tasks  = [t for t in tasks if t.get("status") == "failed"]
+    running_tasks = [t for t in tasks if t.get("status") == "running"]
     if done_tasks:
-        lines.append(f"📬 {len(done_tasks)} task(s) completed. Call get_task_result('<id>') for full details.")
-        lines.append(f"   Call clear_completed_tasks() to clean up done tasks.")
+        lines.append(f"[DONE] {len(done_tasks)} task(s) complete -- call get_task_result('<id>') for output.")
+        lines.append(f"   Call clear_completed_tasks() to clean up.")
     if failed_tasks:
-        lines.append(f"⚠️  {len(failed_tasks)} task(s) failed. Call get_task_result('<id>') for error details.")
+        lines.append(f"[WARN] {len(failed_tasks)} task(s) failed -- call get_task_result('<id>') for error details.")
+    if running_tasks:
+        lines.append(f"[RUN] {len(running_tasks)} task(s) running -- call cancel_task('<id>') to stop one.")
+        lines.append(f"   Call cancel_all_tasks() to stop everything at once.")
 
     return "\n".join(lines)
 
@@ -495,7 +520,7 @@ def check_tasks(status_filter: str = "all") -> str:
 @mcp.tool()
 def get_task_result(task_id: str) -> str:
     """
-    Get the full details of a completed background task — what the sub-agent did,
+    Get the full details of a completed background task  --  what the sub-agent did,
     what was created, and what errors occurred.
 
     Use when user says "what did the research task find" / "show me results of task X".
@@ -510,7 +535,7 @@ def get_task_result(task_id: str) -> str:
         return f"[TASKS] No task found with ID '{task_id}'."
 
     status = task.get("status", "?")
-    icon = {"done": "✅", "failed": "❌", "running": "⏳"}.get(status, "•")
+    icon = {"done": "[OK]", "failed": "[FAIL]", "running": "[RUN]"}.get(status, "*")
 
     lines = [
         f"=== TASK RESULT: {task_id} ===",
@@ -523,16 +548,16 @@ def get_task_result(task_id: str) -> str:
         f"  {task.get('description', 'N/A')}",
         f"",
         f"SUMMARY:",
-        f"  {task.get('summary', 'No summary yet — task may still be running.')}",
+        f"  {task.get('summary', 'No summary yet  --  task may still be running.')}",
     ]
 
     # Step-by-step execution history
-    steps = task.get("steps") or []   # coerce None → [] for old records
+    steps = task.get("steps") or []   # coerce None -> [] for old records
     if steps:
         lines += ["", "EXECUTION STEPS:"]
         for s in steps:
-            step_icon = {"done": "✓", "started": "▶", "error": "✗", "skipped": "⊘"}.get(s.get("status", ""), "•")
-            lines.append(f"  {step_icon} Step {s.get('step_num', '?')} [{s.get('status', '?').upper()}] — {s.get('action', '')}")
+            step_icon = {"done": "OK", "started": "->", "error": "!!", "skipped": "--"}.get(s.get("status", ""), "*")
+            lines.append(f"  {step_icon} Step {s.get('step_num', '?')} [{s.get('status', '?').upper()}]  --  {s.get('action', '')}")
             if s.get("details"):
                 lines.append(f"      {s['details'][:200]}")
 
@@ -590,15 +615,18 @@ def log_step(
         "details":   details,
         "timestamp": datetime.now().isoformat(),
     }
-    _append_step(task_id, step)
-    icon = {"done": "✓", "started": "▶", "error": "✗", "skipped": "⊘"}.get(status, "•")
+    try:
+        _append_step(task_id, step)
+    except Exception as e:
+        return f"[log_step WARNING] Could not write step (non-fatal): {e}. Continuing."
+    icon = {"done": "OK", "started": "->", "error": "!!", "skipped": "--"}.get(status, "?")
     return f"{icon} Step {step_num} [{status}] logged for task {task_id}: {action}"
 
 
 @mcp.tool()
 def clear_task(task_id: str) -> str:
     """
-    Remove a specific task from the task list — done, failed, or cancelled tasks.
+    Remove a specific task from the task list  --  done, failed, or cancelled tasks.
 
     Use when the user says:
     - "clear task abc123"
@@ -614,7 +642,7 @@ def clear_task(task_id: str) -> str:
     tasks = [t for t in tasks if t.get("id") != task_id]
 
     if len(tasks) == original_count:
-        return f"[TASKS] No task found with ID '{task_id}' — nothing was removed."
+        return f"[TASKS] No task found with ID '{task_id}'  --  nothing was removed."
 
     with open(_TASK_FILE, "w", encoding="utf-8") as f:
         for t in tasks:
@@ -671,7 +699,7 @@ def cancel_task(task_id: str) -> str:
 
     status = task.get("status", "?")
     if status in ("done", "failed", "cancelled"):
-        return f"[TASKS] Task '{task_id}' is already {status} — nothing to cancel."
+        return f"[TASKS] Task '{task_id}' is already {status}  --  nothing to cancel."
 
     pid = task.get("pid")
     if pid:
@@ -696,6 +724,71 @@ def cancel_task(task_id: str) -> str:
 
     _update_task(task_id, {"status": "cancelled", "summary": "Cancelled by user (no PID recorded)"})
     return f"[TASKS] Task '{task_id}' marked as cancelled."
+
+
+@mcp.tool()
+def cancel_all_tasks() -> str:
+    """
+    Cancel ALL currently running or spawning background tasks at once.
+    Use when user says "stop all tasks", "cancel everything", "kill all background jobs".
+    """
+    tasks = _load_tasks()
+    running = [t for t in tasks if t.get("status") in ("running", "spawning")]
+    if not running:
+        return "[TASKS] No running tasks to cancel."
+
+    results = []
+    for t in running:
+        pid = t.get("pid")
+        task_id = t.get("id", "?")
+        if pid:
+            try:
+                import psutil
+                proc = psutil.Process(pid)
+                for child in proc.children(recursive=True):
+                    try: child.kill()
+                    except Exception: pass
+                proc.kill()
+            except Exception:
+                pass
+        _update_task(task_id, {
+            "status": "cancelled",
+            "summary": "Cancelled by user (cancel_all)",
+            "completed_at": datetime.now().isoformat(),
+        })
+        results.append(task_id)
+
+    return f"[TASKS] Cancelled {len(results)} task(s): {', '.join(results)}"
+
+
+@mcp.tool()
+def clear_all_tasks() -> str:
+    """
+    Remove ALL tasks from the task list (done, failed, cancelled, and running).
+    Use when user says "wipe all tasks", "clear everything", "fresh start on tasks".
+    Running tasks are cancelled before clearing.
+    """
+    tasks = _load_tasks()
+    if not tasks:
+        return "[TASKS] Task list is already empty."
+
+    for t in tasks:
+        if t.get("status") in ("running", "spawning") and t.get("pid"):
+            try:
+                import psutil
+                proc = psutil.Process(t["pid"])
+                for child in proc.children(recursive=True):
+                    try: child.kill()
+                    except Exception: pass
+                proc.kill()
+            except Exception:
+                pass
+
+    count = len(tasks)
+    with open(_TASK_FILE, "w", encoding="utf-8") as f:
+        pass  # truncate
+
+    return f"[TASKS] Cleared all {count} task(s). Task list is now empty."
 
 
 if __name__ == "__main__":

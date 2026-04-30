@@ -37,6 +37,8 @@ def _get_launcher():
     return execute_special_command, open_app
 
 
+
+
 @mcp.tool()
 def get_current_datetime() -> str:
     """
@@ -182,7 +184,6 @@ def run_shell_command(command: str) -> str:
         return "Command timed out after 30 seconds."
     except Exception as e:
         return f"Shell command failed: {e}"
-
 
 if __name__ == "__main__":
     mcp.run()

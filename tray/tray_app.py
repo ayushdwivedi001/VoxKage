@@ -1,10 +1,13 @@
 """
-tray/tray_app.py — VoxKage v2 System Tray Launcher
-====================================================
-Stripped-down tray app. No GUI, no main.py, no voice pipeline.
+tray/tray_app.py — VoxKage System Tray
+=======================================
+Launches VoxKage globally via the `voxkage` PowerShell function.
+The `voxkage` function (in $PROFILE) loads the global ~/.gemini/GEMINI.md
+and ~/.gemini/settings.json — giving full personality + all MCP tools
+from any directory.
 
 Menu:
-  ▶ Open VoxKage          → Opens CMD with Gemini CLI in project dir
+  ▶ Open VoxKage          → Opens PowerShell with `voxkage` in project dir
   📴 Open VoxKage (Offline) → Opens CMD with Ollama fallback
   ⚙ Settings              → Opens config.json in default editor
   ✕ Exit                  → Quit tray
@@ -38,9 +41,10 @@ _ICON = os.path.join(_ROOT, "icons", "icon.png")
 _OLLAMA_SCRIPT = os.path.join(_ROOT, "scripts", "ollama_fallback.py")
 _TG_LISTENER = os.path.join(_ROOT, "tg_bridge", "inbound_listener.py")
 
-# Gemini CLI launch: open CMD in project root with the CLI running
+# VoxKage launch: open PowerShell in project root and run the global voxkage function
+# The `voxkage` function is defined in $PROFILE and handles all flags + config loading
 _GEMINI_CMD = (
-    f'start "VoxKage" cmd /k "cd /d {_ROOT} && gemini -m gemini-2.5-flash"'
+    f'start "VoxKage" powershell -NoExit -Command "cd \'\'{_ROOT}\'\'  ; voxkage"'
 )
 
 # Ollama fallback: open CMD with Python fallback script

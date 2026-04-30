@@ -853,6 +853,113 @@ TOOL_DEFINITIONS = [
     },
 
     # ─────────────────────────────────────────────
+    # WORKSPACE TELEPORTATION
+    # ─────────────────────────────────────────────
+    {
+        "name": "set_active_workspace",
+        "description": (
+            "Teleports VoxKage into a new workspace (folder/codebase). "
+            "After switching, all file edits, git commands, and shell commands run in that folder by default. "
+            "Background RAG indexing is triggered automatically. "
+            "Use when user says: 'switch to my Lume project', 'focus on the React app', "
+            "'work on my [project name]', 'open my codebase', 'focus on [folder name]'."
+        ),
+        "tags": ["workspace", "switch", "codebase", "project", "focus", "teleport", "folder"],
+        "example_queries": [
+            "switch to my lume project", "focus on lume", "work on my react app",
+            "open my codebase", "change workspace", "switch project", "go to lume folder",
+            "work in the lume directory"
+        ],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path_or_name": {"type": "string", "description": "Folder name or absolute path, e.g. 'Lume' or 'C:\\\\Users\\\\AYUSH\\\\Desktop\\\\Lume'"}
+            },
+            "required": ["path_or_name"]
+        }
+    },
+    {
+        "name": "get_active_workspace",
+        "description": (
+            "Returns the currently active workspace path and a git status summary. "
+            "Call at the start of any coding, git, or file task to know which project VoxKage is in."
+        ),
+        "tags": ["workspace", "active", "current", "project", "status"],
+        "example_queries": ["what workspace are you in", "where are you working", "current project"],
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "reset_workspace",
+        "description": "Resets the active workspace back to VoxKage's home (Vision-Assistant). Use when user says 'go back to your codebase' or 'reset workspace'.",
+        "tags": ["workspace", "reset", "home", "vision-assistant"],
+        "example_queries": ["reset workspace", "go back to your codebase", "switch back to vision assistant"],
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "list_workspace_history",
+        "description": "Lists the recently used workspaces so the user can pick one to switch to.",
+        "tags": ["workspace", "history", "recent", "list"],
+        "example_queries": ["show workspace history", "recent projects", "what workspaces have you used"],
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "workspace_git_status",
+        "description": (
+            "Runs git status in the currently active workspace. "
+            "Use for: 'are there any pending changes?', 'check git status', 'what's changed?', "
+            "'any uncommitted work?', 'pending commits'. "
+            "ALWAYS prefer this over run_shell_command for git status queries."
+        ),
+        "tags": ["workspace", "git", "status", "changes", "pending", "commits"],
+        "example_queries": [
+            "git status", "any pending changes", "what changed in this project",
+            "are there uncommitted changes", "check git", "pending commits"
+        ],
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "workspace_git_diff",
+        "description": "Shows the uncommitted diff/changes in the currently active workspace.",
+        "tags": ["workspace", "git", "diff", "changes"],
+        "example_queries": ["show diff", "what files changed", "git diff", "what did i modify"],
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "workspace_git_log",
+        "description": "Shows recent git commit history in the currently active workspace.",
+        "tags": ["workspace", "git", "log", "history", "commits"],
+        "example_queries": ["show git log", "recent commits", "commit history", "last commits"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "n": {"type": "integer", "description": "Number of commits to show (default 5)"}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "workspace_shell",
+        "description": (
+            "Runs a shell command INSIDE the currently active workspace directory. "
+            "Use for project-specific commands: npm install, npm run dev, pytest, "
+            "python manage.py, cargo build, git commands with special flags. "
+            "Unlike run_shell_command (which runs in home dir), this ALWAYS runs in the active workspace."
+        ),
+        "tags": ["workspace", "shell", "command", "npm", "python", "run", "project"],
+        "example_queries": [
+            "run npm install", "start the dev server", "run tests", "build the project",
+            "run npm run dev", "run pytest", "run python manage.py migrate"
+        ],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "Shell command to run in the workspace, e.g. 'npm install'"}
+            },
+            "required": ["command"]
+        }
+    },
+
+    # ─────────────────────────────────────────────
     # GITHUB OPERATIONS
     # ─────────────────────────────────────────────
     {

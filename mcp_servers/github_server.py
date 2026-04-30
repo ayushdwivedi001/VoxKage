@@ -9,6 +9,10 @@ import urllib.request
 from datetime import datetime
 from dotenv import load_dotenv
 import threading
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("voxkage-github")
+
 
 # Optional: PyGithub for API features
 try:
@@ -474,28 +478,85 @@ def get_job_logs(kwargs):
     except Exception as e:
         return {"error": str(e)}
 
-# ====== DISPATCHER ======
+@mcp.tool()
+def github_clone_repo(url: str, dest_name: str = "") -> str:
+    """Clone a git repository locally"""
+    return json.dumps(git_clone({"url": url, "dest_name": dest_name}), indent=2)
 
-def handle_github_request(tool_name, kwargs):
-    try:
-        if tool_name == "git_clone": return git_clone(kwargs)
-        if tool_name == "git_status": return git_status(kwargs)
-        if tool_name == "git_diff_summary": return git_diff_summary(kwargs)
-        if tool_name == "git_smart_commit": return git_smart_commit(kwargs)
-        if tool_name == "git_pull": return git_pull(kwargs)
-        if tool_name == "fake_commit": return fake_commit(kwargs)
-        if tool_name == "detect_and_install_deps": return detect_and_install_deps(kwargs)
-        if tool_name == "run_project": return run_project(kwargs)
-        if tool_name == "kill_project": return kill_project(kwargs)
-        if tool_name == "check_project_health": return check_project_health(kwargs)
-        if tool_name == "get_github_profile": return get_github_profile(kwargs)
-        if tool_name == "list_my_repos": return list_my_repos(kwargs)
-        if tool_name == "create_repo_local": return create_repo_local(kwargs)
-        if tool_name == "actions_list": return actions_list(kwargs)
-        if tool_name == "actions_get": return actions_get(kwargs)
-        if tool_name == "get_job_logs": return get_job_logs(kwargs)
-        
-        return {"error": f"Unknown github tool: {tool_name}"}
-    except Exception as e:
-        logger.error(f"Error executing {tool_name}: {e}", exc_info=True)
-        return {"error": f"Internal error executing {tool_name}: {str(e)}"}
+@mcp.tool()
+def github_repo_status(repo_path: str) -> str:
+    """Get git status and recent commits for a local repo"""
+    return json.dumps(git_status({"repo_path": repo_path}), indent=2)
+
+@mcp.tool()
+def github_diff_summary(repo_path: str) -> str:
+    """Get a summary of pending changes in a local repo"""
+    return json.dumps(git_diff_summary({"repo_path": repo_path}), indent=2)
+
+@mcp.tool()
+def github_smart_commit(repo_path: str, message: str = "", push: bool = False) -> str:
+    """Commit all changes with an optional message (auto-generated if empty) and optionally push"""
+    return json.dumps(git_smart_commit({"repo_path": repo_path, "message": message, "push": push}), indent=2)
+
+@mcp.tool()
+def github_pull(repo_path: str) -> str:
+    """Pull latest changes from remote"""
+    return json.dumps(git_pull({"repo_path": repo_path}), indent=2)
+
+@mcp.tool()
+def github_fake_commit(repo_path: str, message: str = "", count: int = 1) -> str:
+    """Create empty fake commits (useful for activity)"""
+    return json.dumps(fake_commit({"repo_path": repo_path, "message": message, "count": count}), indent=2)
+
+@mcp.tool()
+def github_detect_and_install_deps(repo_path: str) -> str:
+    """Automatically detect package managers (npm, pip, cargo) and install dependencies"""
+    return json.dumps(detect_and_install_deps({"repo_path": repo_path}), indent=2)
+
+@mcp.tool()
+def github_run_project(repo_path: str, command: str = "") -> str:
+    """Run a project in the background (starts dev servers, etc)"""
+    return json.dumps(run_project({"repo_path": repo_path, "command": command}), indent=2)
+
+@mcp.tool()
+def github_kill_project(repo_path: str) -> str:
+    """Kill a background project started by github_run_project"""
+    return json.dumps(kill_project({"repo_path": repo_path}), indent=2)
+
+@mcp.tool()
+def github_check_project_health(repo_path: str) -> str:
+    """Check if a background project is still running"""
+    return json.dumps(check_project_health({"repo_path": repo_path}), indent=2)
+
+@mcp.tool()
+def github_get_profile() -> str:
+    """Get the authenticated GitHub user profile"""
+    return json.dumps(get_github_profile({}), indent=2)
+
+@mcp.tool()
+def github_list_my_repos(limit: int = 10, sort: str = "updated") -> str:
+    """List repositories owned by the authenticated user"""
+    return json.dumps(list_my_repos({"limit": limit, "sort": sort}), indent=2)
+
+@mcp.tool()
+def github_create_repo_local(path: str, name: str, private: bool = True, push: bool = True) -> str:
+    """Initialize a local directory, create a GitHub repo, and push it"""
+    return json.dumps(create_repo_local({"path": path, "name": name, "private": private, "push": push}), indent=2)
+
+@mcp.tool()
+def github_actions_list(repo: str, status: str = "") -> str:
+    """List recent GitHub Actions workflow runs"""
+    return json.dumps(actions_list({"repo": repo, "status": status}), indent=2)
+
+@mcp.tool()
+def github_actions_get(repo: str, run_id: str) -> str:
+    """Get details of a specific GitHub Actions workflow run"""
+    return json.dumps(actions_get({"repo": repo, "run_id": run_id}), indent=2)
+
+@mcp.tool()
+def github_get_job_logs(repo: str, job_id: str) -> str:
+    """Get logs for a specific GitHub Actions job"""
+    return json.dumps(get_job_logs({"repo": repo, "job_id": job_id}), indent=2)
+
+if __name__ == "__main__":
+    mcp.run()

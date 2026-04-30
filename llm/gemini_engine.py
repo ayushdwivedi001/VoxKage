@@ -28,7 +28,6 @@ class GeminiCLIError(Exception):
     """Raised when the Gemini CLI fails after all retries are exhausted."""
     pass
 
-
 # ─── Startup Availability Check ───────────────────────────────────────────────
 
 def check_gemini_available(cli_path: str = "gemini") -> bool:
