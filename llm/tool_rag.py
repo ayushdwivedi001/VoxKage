@@ -186,7 +186,8 @@ def build_tool_index(force: bool = False) -> None:
 
     # Connect to LanceDB and (re)create table
     db = lancedb.connect(_LANCE_DIR)
-    if "tools" in db.table_names():
+    existing_tables = db.table_names() if hasattr(db, "table_names") else db.list_tables()
+    if "tools" in existing_tables:
         db.drop_table("tools")
     db.create_table("tools", data=[
         {k: table_data[k][i] for k in table_data}

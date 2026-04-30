@@ -846,9 +846,9 @@ TOOL_DEFINITIONS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "dir_path": {"type": "string", "description": "Absolute path to the directory"}
+                "directory": {"type": "string", "description": "Absolute path to the directory"}
             },
-            "required": ["dir_path"]
+            "required": ["directory"]
         }
     },
 

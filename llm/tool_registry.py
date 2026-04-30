@@ -10,6 +10,22 @@ from automation.web_agent import browse_and_extract, search_media_options, play_
 from automation.document_parser import analyze_specific_file_sync, find_file
 from automation.spotify_control import search_spotify_app, play_spotify_app, control_spotify_app, USER_PLAYLISTS, browse_spotify_search, browse_spotify_play, control_spotify_web, is_spotify_app_installed
 from automation.gmail_manager import check_gmail, get_email_summary
+# RAG Knowledge Base — imported lazily (rag_server resolves its own paths at import-time;
+# importing at module level from inside the llm package breaks __file__ resolution)
+def _rag(fn_name: str, **kwargs):
+    from mcp_servers.rag_server import (
+        index_document, check_and_index, query_rag,
+        list_indexed_documents, delete_from_rag, index_directory,
+    )
+    _fns = {
+        "index_document": index_document,
+        "check_and_index": check_and_index,
+        "query_rag": query_rag,
+        "list_indexed_documents": list_indexed_documents,
+        "delete_from_rag": delete_from_rag,
+        "index_directory": index_directory,
+    }
+    return _fns[fn_name](**kwargs)
 
 # GUI Pilot — imported lazily to avoid pyautogui import on headless machines
 def _gui(fn_name: str, **kwargs):
@@ -1139,6 +1155,35 @@ def execute_tool_call(tool_name: str, arguments: dict):
                 return f"Found file at {file_path}. Content:\n" + analyze_specific_file_sync(file_path, query)
             else:
                 return f"Could not find any file matching '{keyword}' in Documents, Downloads, or Desktop."
+
+        # ── RAG Knowledge Base ───────────────────────────────────────────────
+        elif tool_name == "check_and_index":
+            return _rag("check_and_index", file_path=arguments.get("file_path", ""))
+
+        elif tool_name == "query_rag":
+            return _rag(
+                "query_rag",
+                query=arguments.get("query", ""),
+                top_k=int(arguments.get("top_k", arguments.get("n_results", 5))),
+                file_filter=arguments.get("file_filter", ""),
+            )
+
+        elif tool_name == "index_document":
+            return _rag("index_document", file_path=arguments.get("file_path", ""))
+
+        elif tool_name == "list_indexed_documents":
+            return _rag("list_indexed_documents")
+
+        elif tool_name == "delete_from_rag":
+            return _rag("delete_from_rag", file_path=arguments.get("file_path", ""))
+
+        elif tool_name == "index_directory":
+            return _rag(
+                "index_directory",
+                directory=arguments.get("directory", ""),
+                extensions=arguments.get("extensions", ""),
+                recursive=bool(arguments.get("recursive", True)),
+            )
                 
         elif tool_name == "take_screenshot":
             from automation.screenshot import take_screenshot

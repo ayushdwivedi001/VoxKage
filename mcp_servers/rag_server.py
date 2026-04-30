@@ -64,19 +64,27 @@ _SKIP_DIRS = {
 # INTERNAL HELPERS
 # ═════════════════════════════════════════════════════════════════════════════
 
+# ── Module-level singletons (lazy-initialized, shared across all tool calls) ───
+_chroma_client = None
+_chroma_collection = None
+
+
 def _get_collection():
-    """Return the ChromaDB collection (lazy-initialized)."""
+    """Return the ChromaDB collection (lazy-initialized, module-level singleton)."""
+    global _chroma_client, _chroma_collection
+    if _chroma_collection is not None:
+        return _chroma_collection
     import chromadb
     from chromadb.config import Settings
-    client = chromadb.PersistentClient(
+    _chroma_client = chromadb.PersistentClient(
         path=_RAG_DIR,
         settings=Settings(anonymized_telemetry=False),
     )
-    collection = client.get_or_create_collection(
+    _chroma_collection = _chroma_client.get_or_create_collection(
         name="voxkage_knowledge",
         metadata={"hnsw:space": "cosine"},
     )
-    return collection
+    return _chroma_collection
 
 
 def _get_embedder():
@@ -349,7 +357,7 @@ def _do_index(file_path: str, force: bool = False) -> dict:
         "file": file_name,
         "chunks": len(chunks),
         "characters": len(text),
-        "message": f"✓ {action.capitalize()} '{file_name}' into RAG ({len(chunks)} chunks from {len(text):,} characters)",
+        "message": f"[OK] {action.capitalize()} '{file_name}' into RAG ({len(chunks)} chunks from {len(text):,} characters)",
     }
 
 
@@ -502,11 +510,11 @@ def list_indexed_documents() -> str:
         indexed_at = info.get("indexed_at", "unknown")[:19]
 
         # Check if file has changed
-        status = "✓ current"
+        status = "[OK] current"
         if not os.path.exists(file_path):
-            status = "⚠ FILE MISSING"
+            status = "[!!] FILE MISSING"
         elif _sha256(file_path) != info.get("hash", ""):
-            status = "⚡ CHANGED — needs reindex"
+            status = "[!!] CHANGED -- needs reindex"
 
         lines.append(f"{fn:<45} {str(chunks):>6}  {str(size_kb):>8}  {indexed_at:<22}  {status}")
 
@@ -595,20 +603,20 @@ def index_directory(
                 action = result.get("action", "")
                 if status == "success" and action == "indexed":
                     results["indexed"] += 1
-                    processed.append(f"  ✓ NEW: {fname}")
+                    processed.append(f"  [NEW]: {fname}")
                 elif status == "success" and action == "reindexed":
                     results["reindexed"] += 1
-                    processed.append(f"  ⚡ UPDATED: {fname}")
+                    processed.append(f"  [UPDATED]: {fname}")
                 elif status == "unchanged":
                     results["unchanged"] += 1
                 elif status == "skipped":
                     results["skipped"] += 1
                 else:
                     results["errors"] += 1
-                    processed.append(f"  ✗ ERROR: {fname} — {result.get('message', '')}")
+                    processed.append(f"  [ERROR]: {fname} -- {result.get('message', '')}")
             except Exception as e:
                 results["errors"] += 1
-                processed.append(f"  ✗ EXCEPTION: {fname} — {e}")
+                processed.append(f"  [EXCEPTION]: {fname} -- {e}")
 
     summary_lines = [
         f"[RAG] Directory indexing complete for: {directory}",
