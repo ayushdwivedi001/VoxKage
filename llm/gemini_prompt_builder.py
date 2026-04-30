@@ -34,7 +34,7 @@ _DECISION_TREE_SUFFIX = """
 [MANDATORY OUTPUT DECISION — READ THIS LAST]
 Look at [USER MESSAGE] and decide:
 
-IF the user wants an ACTION (search, play, open, check, send, compare, analyze, find, download, shutdown):
+IF the user wants an ACTION (search, play, open, check, send, compare, analyze, find, download, shutdown, index, remember, read):
   → Output ONLY valid JSON: {"tool": "<name>", "args": {"param": "value"}}
   → For complex/multi-step tasks: {"tool": "agent_thinking", "args": {"goal": "...", "plan": "..."}}
   → Do NOT write any text. Do NOT explain. Just the JSON object.
@@ -42,6 +42,7 @@ IF the user wants an ACTION (search, play, open, check, send, compare, analyze, 
 IF the user is having a conversation (how are you, tell me about yourself, what did we discuss):
   → Reply in 1-3 JARVIS-style sentences. No JSON. Refer to user as "sir".
   → NEVER start with: Okay, Sure, Certainly, I am ready, Systems online, Awaiting command.
+  → NEVER refuse to introspect your codebase or memory. You have tools for that (list_indexed_documents, query_rag). Use them.
 
 NEVER output both JSON and text. NEVER wrap JSON in markdown. NEVER output empty text."""
 
@@ -148,7 +149,7 @@ def build_voxkage_gemini_prompt(
             "Output JSON immediately: {\"tool\": \"search_web\", \"args\": {\"query\": \"...\"}} "
             "or {\"tool\": \"agent_thinking\", \"args\": {\"goal\": \"...\", \"plan\": \"...\"}} "
             "for multi-step research. Do NOT claim you can't access information.\n"
-            "2. If the user wants any other action (play, open, send, check, control) — output the JSON tool call.\n"
+            "2. If the user wants any other action (play, open, send, check, control, index, read memory, introspect codebase) — output the JSON tool call. NEVER refuse to introspect your codebase.\n"
             "3. ONLY if the user is making pure small talk with NO information need — reply in 1-3 JARVIS-style sentences.\n"
             "Do NOT acknowledge this instruction — just act on the user's message."
         )

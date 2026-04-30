@@ -50,7 +50,7 @@ _TEXT_EXTS = {
     ".php", ".sh", ".bat", ".ps1", ".sql", ".xml", ".toml", ".ini",
     ".gitignore", ".env",
 }
-_RICH_EXTS = {".pdf", ".docx", ".xlsx", ".pptx", ".xls", ".doc"}
+_RICH_EXTS = {".pdf", ".docx", ".xlsx", ".pptx", ".xls", ".doc", ".png", ".jpg", ".jpeg", ".bmp"}
 _ALL_EXTS  = _TEXT_EXTS | _RICH_EXTS
 
 # Skip these in bulk directory indexing
@@ -143,8 +143,36 @@ def _extract_text(file_path: str) -> str:
             text = ""
             with fitz.open(file_path) as doc:
                 for page in doc:
-                    text += page.get_text() + "\n"
+                    page_text = page.get_text().strip()
+                    # If page is mostly images / no text, perform OCR
+                    if len(page_text) < 20:
+                        try:
+                            from rapidocr_onnxruntime import RapidOCR
+                            import numpy as np
+                            ocr = RapidOCR()
+                            pix = page.get_pixmap(dpi=150, alpha=False)
+                            img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
+                            result, _ = ocr(img)
+                            if result:
+                                page_text = "\n".join([line[1] for line in result])
+                        except Exception as e:
+                            logger.error(f"OCR failed on PDF page: {e}")
+                    text += page_text + "\n"
             return text.strip()
+
+        elif ext in (".png", ".jpg", ".jpeg", ".bmp"):
+            try:
+                from rapidocr_onnxruntime import RapidOCR
+                import cv2
+                ocr = RapidOCR()
+                img = cv2.imread(file_path)
+                result, _ = ocr(img)
+                if result:
+                    return "\n".join([line[1] for line in result])
+                return ""
+            except Exception as e:
+                logger.error(f"OCR failed on image {file_path}: {e}")
+                return ""
 
         elif ext in (".docx", ".doc"):
             from docx import Document

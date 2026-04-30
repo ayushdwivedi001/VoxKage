@@ -170,18 +170,20 @@ def dispatch_tool_call(tool_name: str, arguments: dict) -> str:
         logger.debug(f"Tool '{tool_name}' not mapped to an MCP server. Using direct fallback.")
         return fallback_execute_tool_call(tool_name, arguments)
 
+    # ── HEAVY TOOLS BYPASS ───────────────────────────────────────────────────
+    # Tools like RAG, GitHub, and GUI Pilot do heavy I/O and state management
+    # that is unreliable in stdio subprocesses. We always run them directly
+    # via the registry, bypassing the MCP subprocess overhead completely.
+    if tool_name in _HEAVY_TOOLS:
+        logger.info(f"[MCP] Heavy tool '{tool_name}' — bypassing subprocess, executing directly.")
+        return fallback_execute_tool_call(tool_name, arguments)
+
     try:
         logger.info(f"Routing '{tool_name}' to MCP Server: {server_file}")
         
         try:
             asyncio.get_running_loop()
             # We are inside an async context (generate_response_stream or LangGraph loop).
-            
-            if tool_name in _HEAVY_TOOLS:
-                # Heavy tools: skip MCP subprocess overhead — run directly via tool_registry.
-                # This is the same code that ran before the MCP integration and is proven stable.
-                logger.debug(f"[MCP] Heavy tool '{tool_name}' — using direct execution inside async context.")
-                return fallback_execute_tool_call(tool_name, arguments)
             
             # Light stateless tools (telegram, email): safe to spawn via thread pool.
             import concurrent.futures
@@ -193,7 +195,7 @@ def dispatch_tool_call(tool_name: str, arguments: dict) -> str:
                 return future.result(timeout=75)
 
         except RuntimeError:
-            # No running event loop — safe to use asyncio.run directly for all tools.
+            # No running event loop — safe to use asyncio.run directly for light tools.
             return asyncio.run(_dispatch_mcp_tool(tool_name, arguments, server_file))
             
     except Exception as e:

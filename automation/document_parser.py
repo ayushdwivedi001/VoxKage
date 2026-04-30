@@ -21,8 +21,35 @@ def extract_text(file_path: str) -> str:
             text = ""
             with fitz.open(file_path) as doc:
                 for page in doc:
-                    text += page.get_text() + "\n"
+                    page_text = page.get_text().strip()
+                    if len(page_text) < 20:
+                        try:
+                            from rapidocr_onnxruntime import RapidOCR
+                            import numpy as np
+                            ocr = RapidOCR()
+                            pix = page.get_pixmap(dpi=150, alpha=False)
+                            img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
+                            result, _ = ocr(img)
+                            if result:
+                                page_text = "\n".join([line[1] for line in result])
+                        except Exception as e:
+                            logger.error(f"OCR failed on PDF page: {e}")
+                    text += page_text + "\n"
             return text.strip()
+            
+        elif ext in ('.png', '.jpg', '.jpeg', '.bmp'):
+            try:
+                from rapidocr_onnxruntime import RapidOCR
+                import cv2
+                ocr = RapidOCR()
+                img = cv2.imread(file_path)
+                result, _ = ocr(img)
+                if result:
+                    return "\n".join([line[1] for line in result])
+                return ""
+            except Exception as e:
+                logger.error(f"OCR failed on image {file_path}: {e}")
+                return ""
             
         elif ext == '.docx':
             doc = Document(file_path)
