@@ -271,6 +271,25 @@ class VoiceManager:
 # Global singleton instance
 manager = VoiceManager()
 
+# ─── TTS Suppression Flag ─────────────────────────────────────────────────────
+# When True, speak() and SentenceStreamer skip audio but still log to HUD.
+# Used for Telegram-origin messages — response is text-only, no audio.
+_tts_suppressed: bool = False
+
+def suppress_tts():
+    """Mute all TTS output. HUD logging still works."""
+    global _tts_suppressed
+    _tts_suppressed = True
+
+def restore_tts():
+    """Re-enable TTS output."""
+    global _tts_suppressed
+    _tts_suppressed = False
+
+def is_tts_suppressed() -> bool:
+    return _tts_suppressed
+
+
 def init_voice():
     manager.load_voice()
     manager.start_playback_thread()
@@ -289,20 +308,25 @@ def speak(text: str):
     """
     Standard block-speak function for backward compatibility.
     Senses sentence boundaries and queues them for Kokoro TTS.
+    When TTS is suppressed (e.g. Telegram-origin commands), logs to HUD only.
     """
     if not text:
         return
-        
+
     log_to_hud("VoxKage", text)
-        
+
+    # Silent mode — used for Telegram responses (text-only, no audio)
+    if _tts_suppressed:
+        return
+
     if not manager.pipeline:
         init_voice()
-        
+
     sentences = re.split(r'(?<=[.!?])\s*', text.replace('\n', ' '))
     for sentence in sentences:
         if sentence.strip():
             manager.speak_sentence(sentence.strip())
-            
+
     # Block until playback completes so the script doesn't start listening too early
     manager.wait_to_finish()
 
@@ -342,7 +366,8 @@ class SentenceStreamer:
                 if sentence:
                     from voice.voice_manager import log_to_hud
                     log_to_hud("VoxKage", sentence)
-                    manager.speak_sentence(sentence)
+                    if not _tts_suppressed:
+                        manager.speak_sentence(sentence)
 
     def flush(self):
         """Speak any remaining text in the buffer."""
@@ -354,5 +379,6 @@ class SentenceStreamer:
         if buf and not buf.upper().startswith("IGNORE"):
             from voice.voice_manager import log_to_hud
             log_to_hud("VoxKage", buf)
-            manager.speak_sentence(buf)
+            if not _tts_suppressed:
+                manager.speak_sentence(buf)
             self.buffer = ""

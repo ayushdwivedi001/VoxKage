@@ -1,140 +1,132 @@
-import sys
-import os
-import subprocess
+"""
+tray/tray_app.py — VoxKage v2 System Tray Launcher
+====================================================
+Stripped-down tray app. No GUI, no main.py, no voice pipeline.
 
-# Prevent PySide6/COM DPI overlapping crashes on initialization
+Menu:
+  ▶ Open VoxKage          → Opens CMD with Gemini CLI in project dir
+  📴 Open VoxKage (Offline) → Opens CMD with Ollama fallback
+  ⚙ Settings              → Opens config.json in default editor
+  ✕ Exit                  → Quit tray
+
+Also starts the Telegram inbound listener daemon on boot.
+"""
+
+import os
+import sys
+import subprocess
+import threading
+
+# ── Path setup ────────────────────────────────────────────────────────────────
+_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.abspath(os.path.join(_DIR, ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+# ── Qt imports ────────────────────────────────────────────────────────────────
 os.environ["QT_GQL_NO_DPI_AWARENESS"] = "1"
 
-if "--settings" in sys.argv:
-    from settings_gui import launch_settings_gui
-    launch_settings_gui()
-    sys.exit(0)
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import main
-
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QFileDialog
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PySide6.QtGui import QIcon, QAction
-from PySide6.QtCore import QObject, Signal, Slot, Qt
+from PySide6.QtCore import Qt
 
-import threading
-import queue
+# ── Project paths ─────────────────────────────────────────────────────────────
+_VENV_PYTHON = os.path.join(_ROOT, "venv", "Scripts", "python.exe")
+_PYTHON = _VENV_PYTHON if os.path.exists(_VENV_PYTHON) else sys.executable
+_CONFIG = os.path.join(_ROOT, "config.json")
+_ICON = os.path.join(_ROOT, "icons", "icon.png")
+_OLLAMA_SCRIPT = os.path.join(_ROOT, "scripts", "ollama_fallback.py")
+_TG_LISTENER = os.path.join(_ROOT, "tg_bridge", "inbound_listener.py")
 
-class TrayBridge(QObject):
-    request_file_picker = Signal()
+# Gemini CLI launch: open CMD in project root with the CLI running
+_GEMINI_CMD = (
+    f'start "VoxKage" cmd /k "cd /d {_ROOT} && gemini -m gemini-2.5-flash"'
+)
 
-tray_bridge = TrayBridge()
-picker_queue = queue.Queue()
+# Ollama fallback: open CMD with Python fallback script
+_OLLAMA_CMD = (
+    f'start "VoxKage Offline" cmd /k "cd /d {_ROOT} && {_PYTHON} scripts/ollama_fallback.py"'
+)
 
-@Slot()
-def handle_file_picker():
-    # Runs on Main UI Thread!
-    dialog = QFileDialog(None, "Select a Document for VoxKage to Read", "")
-    dialog.setNameFilter("Documents (*.pdf *.docx *.txt *.csv *.log *.py);;PDF Files (*.pdf);;Word Documents (*.docx);;Text Files (*.txt);;CSV Files (*.csv);;Log Files (*.log);;Python Scripts (*.py);;All Files (*.*)")
-    
-    # Strictly force dialog to stay permanently above all other windows
-    dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowStaysOnTopHint)
-    dialog.raise_()
-    dialog.activateWindow()
-    
-    if dialog.exec():
-        selected = dialog.selectedFiles()
-        path = selected[0] if selected else ""
-    else:
-        path = ""
-        
-    picker_queue.put(path)
 
-tray_bridge.request_file_picker.connect(handle_file_picker)
+def open_voxkage(icon=None, item=None):
+    """Open CMD with Gemini CLI running in the project directory."""
+    subprocess.Popen(_GEMINI_CMD, shell=True, cwd=_ROOT)
 
-# Import your assistant start function
-from main import start_assistant  # adjust to your main startup function
 
-settings_process = None 
-assistant_thread = None
+def open_voxkage_offline(icon=None, item=None):
+    """Open CMD with Ollama fallback chat."""
+    subprocess.Popen(_OLLAMA_CMD, shell=True, cwd=_ROOT)
 
-def run_assistant_thread():
-    try:
-        start_assistant()
-    except Exception as e:
-        import traceback
-        with open("crash_log.txt", "w", encoding="utf-8") as f:
-            f.write("Crash occurred during assistant startup or execution:\n")
-            f.write(traceback.format_exc())
-
-def run_assistant(icon=None, item=None):
-    global assistant_thread
-    # Prevent multiple assistant threads from starting
-    if assistant_thread and assistant_thread.is_alive():
-        print("Assistant is already running.")
-        return
-    assistant_thread = threading.Thread(target=run_assistant_thread, daemon=True)
-    assistant_thread.start()
 
 def open_settings(icon=None, item=None):
-    global settings_process
+    """Open config.json in the default editor."""
     try:
-        import pygetwindow as gw
-        windows = gw.getWindowsWithTitle("VoxKage Enterprise")
-        if windows:
-            win = windows[0]
-            if win.isMinimized:
-                win.restore()
-            win.activate()
-            return
+        os.startfile(_CONFIG)
     except Exception as e:
-        pass
+        print(f"Failed to open settings: {e}")
 
-    try:
-        if settings_process is None or settings_process.poll() is not None:
-            if getattr(sys, 'frozen', False):
-                settings_process = subprocess.Popen([sys.executable, "--settings"])
-            else:
-                settings_process = subprocess.Popen([sys.executable, "settings_gui.py"])
-        else:
-            print("Settings already open.")
-    except Exception as e:
-        print("Failed to open settings:", e)
 
 def quit_app(tray_icon):
-    global settings_process
-    if settings_process and settings_process.poll() is None:  # still running
-        settings_process.terminate()  # kill settings
+    """Stop the tray and all daemons."""
     tray_icon.hide()
-    
-    # Nuke the process forcefully since whisper/LLM daemons can become zombies
     os._exit(0)
 
+
+def start_telegram_listener():
+    """Launch the Telegram inbound listener as a background daemon process."""
+    if not os.path.exists(_TG_LISTENER):
+        return
+    try:
+        subprocess.Popen(
+            [_PYTHON, _TG_LISTENER],
+            cwd=_ROOT,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        print("[Tray] Telegram inbound listener started.")
+    except Exception as e:
+        print(f"[Tray] Failed to start Telegram listener: {e}")
+
+
 def setup_tray():
-    app = QApplication.instance()
-    if not app:
-        app = QApplication(sys.argv)
-    
+    app = QApplication.instance() or QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
 
-    from config_loader import get_resource_path
-    icon_path = get_resource_path(os.path.join("icons", "icon.png"))
-    
-    tray_icon = QSystemTrayIcon(QIcon(icon_path), app)
-    
+    icon = QIcon(_ICON) if os.path.exists(_ICON) else QIcon()
+    tray = QSystemTrayIcon(icon, app)
+    tray.setToolTip("VoxKage")
+
     menu = QMenu()
-    
-    start_action = QAction("Start VoxKage Assistant")
-    start_action.triggered.connect(lambda: run_assistant())
-    menu.addAction(start_action)
-    
-    settings_action = QAction("Settings")
-    settings_action.triggered.connect(lambda: open_settings())
-    menu.addAction(settings_action)
-    
-    exit_action = QAction("Exit")
-    exit_action.triggered.connect(lambda: quit_app(tray_icon))
-    menu.addAction(exit_action)
-    
-    tray_icon.setContextMenu(menu)
-    tray_icon.show()
-    
+
+    act_open = QAction("▶  Open VoxKage")
+    act_open.triggered.connect(open_voxkage)
+    menu.addAction(act_open)
+
+    act_offline = QAction("📴  Open VoxKage (Offline)")
+    act_offline.triggered.connect(open_voxkage_offline)
+    menu.addAction(act_offline)
+
+    menu.addSeparator()
+
+    act_settings = QAction("⚙  Settings (config.json)")
+    act_settings.triggered.connect(open_settings)
+    menu.addAction(act_settings)
+
+    menu.addSeparator()
+
+    act_exit = QAction("✕  Exit")
+    act_exit.triggered.connect(lambda: quit_app(tray))
+    menu.addAction(act_exit)
+
+    tray.setContextMenu(menu)
+    tray.show()
+
+    # Start Telegram listener daemon
+    threading.Thread(target=start_telegram_listener, daemon=True).start()
+
+    print("[VoxKage Tray] Running. Right-click the tray icon to open.")
     sys.exit(app.exec())
+
 
 if __name__ == "__main__":
     setup_tray()

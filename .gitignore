@@ -105,3 +105,13 @@ htmlcov/
 
 # Build artifact spec (decide: keep or ignore)
 VoxKage.spec
+# VoxKage AI config (contains internal system prompts)
+.gemini/
+
+# VoxKage RAG and local AI data
+C:\VoxKage\
+
+# Test/scratch files
+_pop_test.py
+test_json_extractor.py
+_archive/

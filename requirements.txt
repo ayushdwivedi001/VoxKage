@@ -29,3 +29,4 @@ qtawesome
 faster-whisper
 PyMuPDF
 python-docx
+python-telegram-bot>=20.0

@@ -11,6 +11,16 @@ from automation.document_parser import analyze_specific_file_sync, find_file
 from automation.spotify_control import search_spotify_app, play_spotify_app, control_spotify_app, USER_PLAYLISTS, browse_spotify_search, browse_spotify_play, control_spotify_web, is_spotify_app_installed
 from automation.gmail_manager import check_gmail, get_email_summary
 
+# GUI Pilot — imported lazily to avoid pyautogui import on headless machines
+def _gui(fn_name: str, **kwargs):
+    from mcp_servers.gui_server import gui_thinking, get_desktop_state, get_open_files, gui_step, read_active_document
+    _fns = {
+        "gui_thinking": gui_thinking, "get_desktop_state": get_desktop_state,
+        "get_open_files": get_open_files, "gui_step": gui_step,
+        "read_active_document": read_active_document,
+    }
+    return _fns[fn_name](**kwargs)
+
 
 # Define schemas for Ollama
 TOOLS_SCHEMA = [
@@ -28,6 +38,357 @@ TOOLS_SCHEMA = [
                     }
                 },
                 "required": ["app_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "close_application",
+            "description": "Safely closes a file, window, application, or folder process. Use this when the user asks to close an active file, app, or window.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "The name of the file (e.g. 'VoxKage app related information.txt'), application name (e.g. 'chrome'), process name, or exact folder path to close."
+                    }
+                },
+                "required": ["target"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_shell_command",
+            "description": "Execute a shell command on the user's PC and return output. USE THIS for VS Code extension management (code --list-extensions, code --install-extension), opening apps, process checks, and any task faster via CLI than GUI.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The shell command to execute, e.g. 'code --list-extensions | findstr prettier'"
+                    }
+                },
+                "required": ["command"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_and_index",
+            "description": "RAG MEMORY GATE: Call this FIRST before reading any file. Automatically indexes new files, reindexes changed files, returns instantly from cache for unchanged files.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Absolute path to the file to check and index."}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_rag",
+            "description": "RAG MEMORY SEARCH: Semantic search across all indexed documents. Use to answer questions about any file VoxKage has seen before WITHOUT re-reading it. Always check_and_index the file first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Natural language question, e.g. 'how did we handle API fallbacks'"},
+                    "top_k": {"type": "integer", "description": "Number of chunks to return (default 5)"},
+                    "file_filter": {"type": "string", "description": "Restrict search to files whose name/path contains this string"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "index_document",
+            "description": "RAG MEMORY: Index or re-index a single document. Auto-detects changes. Supports PDF, DOCX, XLSX, PPTX, TXT, and all code files.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Absolute path to file to index."}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "index_directory",
+            "description": "RAG MEMORY: Bulk-index an entire directory or codebase. Skips unchanged files automatically.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "directory": {"type": "string", "description": "Absolute path to the folder to index."},
+                    "extensions": {"type": "string", "description": "Optional comma-separated extensions, e.g. '.py,.md'. Leave empty for all."},
+                    "recursive": {"type": "boolean", "description": "Index subdirectories (default true)"}
+                },
+                "required": ["directory"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_indexed_documents",
+            "description": "RAG MEMORY: List all documents in VoxKage's knowledge base with their status.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_from_rag",
+            "description": "RAG MEMORY: Remove a document from VoxKage's knowledge base.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Absolute path to file to remove."}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_clone",
+            "description": "GITHUB: Clones a git repository to the local system.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Repository URL"},
+                    "dest_name": {"type": "string", "description": "Optional custom folder name. Defaults to repo name."}
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_status",
+            "description": "GITHUB: Returns git status and recent commits for a local repository.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Absolute path to local git repository"}
+                },
+                "required": ["repo_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_diff_summary",
+            "description": "GITHUB: Returns a summary of uncommitted changes (git diff) for a repository.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Absolute path to local git repository"}
+                },
+                "required": ["repo_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_smart_commit",
+            "description": "GITHUB: Adds all changes, commits, and optionally pushes to remote.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Absolute path to local git repository"},
+                    "message": {"type": "string", "description": "Commit message"},
+                    "push": {"type": "boolean", "description": "Whether to push after commit. Default true."}
+                },
+                "required": ["repo_path", "message"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_pull",
+            "description": "GITHUB: Pulls latest changes from remote.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Absolute path to local git repository"}
+                },
+                "required": ["repo_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fake_commit",
+            "description": "GITHUB: Creates an empty commit and pushes to keep activity green.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Absolute path to local git repository"},
+                    "message": {"type": "string", "description": "Optional commit message"}
+                },
+                "required": ["repo_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_and_install_deps",
+            "description": "GITHUB: Detects and installs project dependencies (pip, npm, etc).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Absolute path to local repository"}
+                },
+                "required": ["repo_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_project",
+            "description": "GITHUB: Runs a project command in the background.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Absolute path to local repository"},
+                    "command": {"type": "string", "description": "Command to run (e.g., 'npm start', 'python app.py')"},
+                    "port": {"type": "integer", "description": "Port the project runs on, for health checks"}
+                },
+                "required": ["repo_path", "command", "port"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "kill_project",
+            "description": "GITHUB: Kills a project running in the background.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Absolute path to local repository"}
+                },
+                "required": ["repo_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_project_health",
+            "description": "GITHUB: Checks if a background project is responding on its port.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "port": {"type": "integer", "description": "Port to check"},
+                    "url_path": {"type": "string", "description": "URL path to check (default '/')"}
+                },
+                "required": ["port"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_github_profile",
+            "description": "GITHUB: Gets profile details for a GitHub user or authenticated user.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "username": {"type": "string", "description": "Optional GitHub username. If omitted, returns authenticated user."}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_my_repos",
+            "description": "GITHUB: Lists the authenticated user's repositories.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max repos to return (default 20)"}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_repo_local",
+            "description": "GITHUB: Creates a new GitHub repository remotely AND clones it locally automatically.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Repository name"},
+                    "description": {"type": "string", "description": "Repository description"},
+                    "private": {"type": "boolean", "description": "Whether the repo is private (default true)"},
+                    "init_readme": {"type": "boolean", "description": "Initialize with README (default true)"}
+                },
+                "required": ["name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "actions_list",
+            "description": "GITHUB: Lists recent GitHub Actions workflow runs for a repository.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string", "description": "Repository name with owner (e.g., ayushdwivedi001/VoxKage)"},
+                    "limit": {"type": "integer", "description": "Max runs to return (default 10)"}
+                },
+                "required": ["repo"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "actions_get",
+            "description": "GITHUB: Gets details and jobs for a specific GitHub Actions workflow run.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string", "description": "Repository name with owner"},
+                    "run_id": {"type": "string", "description": "Workflow run ID"}
+                },
+                "required": ["repo", "run_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_job_logs",
+            "description": "GITHUB: Downloads the raw logs for a specific GitHub Actions job.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string", "description": "Repository name with owner"},
+                    "job_id": {"type": "string", "description": "Job ID from actions_get"}
+                },
+                "required": ["repo", "job_id"]
             }
         }
     },
@@ -341,6 +702,56 @@ TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "create_file",
+            "description": "Creates a new file or folder. Supported types: word (.docx), excel (.xlsx), pptx, csv, txt, html, json, python, js, markdown, etc., or folder.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string"},
+                    "directory": {"type": "string", "description": "Absolute path to directory"},
+                    "content": {"type": "string", "description": "Content of the file (markdown supported for word files)"},
+                    "file_type": {"type": "string", "enum": ["word", "excel", "pptx", "csv", "txt", "html", "json", "python", "js", "markdown", "folder", "auto"]},
+                    "confirmed": {"type": "boolean", "description": "Always pass True unless you need user review first"}
+                },
+                "required": ["filename", "directory", "content", "file_type", "confirmed"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_file",
+            "description": "Edits an existing file by appending or replacing content. If file path is not absolute, it will be searched for automatically.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Absolute path or filename like 'AyushResume'"},
+                    "edit_instructions": {"type": "string", "description": "New content to append or replace"},
+                    "append": {"type": "boolean", "description": "True to add to end, False to replace entire file"},
+                    "confirmed": {"type": "boolean", "description": "Always pass True unless you need user review first"}
+                },
+                "required": ["file_path", "edit_instructions", "append", "confirmed"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_file",
+            "description": "Moves a file or folder to the recycle bin.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Absolute path to the file or folder"},
+                    "confirmed": {"type": "boolean", "description": "Must pass False first to show preview. If user agrees, call again with True."}
+                },
+                "required": ["path", "confirmed"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "take_screenshot",
             "description": "Takes a local screenshot of what the user is currently seeing on their screen. Use this when the user asks you to 'take a screenshot' or 'capture this'.",
             "parameters": {
@@ -437,8 +848,71 @@ TOOLS_SCHEMA = [
                 "required": ["action", "goal"]
             }
         }
+    },
+    # ── GUI Pilot ─────────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "gui_thinking",
+            "description": "Plan a multi-step desktop GUI automation task before acting. Call BEFORE any 3+ GUI step sequence. Like agent_thinking but for the local desktop.",
+            "parameters": {"type": "object", "properties": {
+                "goal": {"type": "string", "description": "What to accomplish on the desktop"},
+                "plan": {"type": "string", "description": "Numbered step-by-step plan"}
+            }, "required": ["goal", "plan"]}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_desktop_state",
+            "description": "Take a full desktop screenshot and list all open windows. Always call this first before GUI automation to see current state.",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_open_files",
+            "description": "Session awareness: returns all files currently open across all apps (Word, VS Code, VLC, Notepad, PDF viewers). Use when user says 'my open file', 'the PDF I have open', 'my current doc'.",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "gui_step",
+            "description": "Execute ONE atomic desktop GUI action with vision verification. Actions: screenshot, focus (bring app to front), click, right_click, double_click, find_and_click (vision-assisted — PREFERRED for clicking UI elements), type, hotkey, key, scroll, drag, read_screen, wait, open_file.",
+            "parameters": {"type": "object", "properties": {
+                "action":      {"type": "string", "enum": ["screenshot","focus","click","right_click","double_click","find_and_click","type","hotkey","key","scroll","drag","read_screen","wait","open_file"]},
+                "goal":        {"type": "string"},
+                "app":         {"type": "string", "description": "App name for focus/screenshot (e.g. 'VS Code', 'Notepad', 'Spotify')"},
+                "x":           {"type": "integer", "description": "Click x coordinate"},
+                "y":           {"type": "integer", "description": "Click y coordinate"},
+                "description": {"type": "string", "description": "Element description for find_and_click (e.g. 'Install button next to Prettier')"},
+                "text":        {"type": "string", "description": "Text to type"},
+                "keys":        {"type": "string", "description": "Hotkey combo e.g. 'ctrl+s', 'ctrl+shift+x', 'win+d'"},
+                "key":         {"type": "string", "description": "Single key e.g. 'enter', 'escape', 'tab', 'f5'"},
+                "direction":   {"type": "string", "enum": ["down","up"]},
+                "amount":      {"type": "integer"},
+                "ms":          {"type": "integer"},
+                "from_x":      {"type": "integer"},
+                "from_y":      {"type": "integer"},
+                "to_x":        {"type": "integer"},
+                "to_y":        {"type": "integer"},
+                "file_path":   {"type": "string", "description": "File path for open_file action"}
+            }, "required": ["action", "goal"]}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_active_document",
+            "description": "Read the full text of the currently active/focused document (Word, VS Code, Notepad, PDF). Use when user says 'what does my open file say' or 'summarize my current doc'.",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
     }
 ]
+
 
 # Map tool names to actual functions in the codebase
 def execute_tool_call(tool_name: str, arguments: dict):
@@ -701,7 +1175,22 @@ def execute_tool_call(tool_name: str, arguments: dict):
             
         elif tool_name == "agent_step":
             return agent_step_sync(arguments)
-                
+
+        elif tool_name == "gui_thinking":
+            return _gui("gui_thinking", goal=arguments.get("goal",""), plan=arguments.get("plan",""))
+
+        elif tool_name == "get_desktop_state":
+            return _gui("get_desktop_state")
+
+        elif tool_name == "get_open_files":
+            return _gui("get_open_files")
+
+        elif tool_name == "gui_step":
+            return _gui("gui_step", **arguments)
+
+        elif tool_name == "read_active_document":
+            return _gui("read_active_document")
+
         else:
             return f"Tool {tool_name} not found in registry."
             

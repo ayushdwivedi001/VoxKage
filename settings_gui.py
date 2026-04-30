@@ -133,9 +133,38 @@ class LiveInteractionHUD(QWidget):
         self.btn_voice_mode.clicked.connect(self.toggle_voice_mode)
         self.load_voice_mode_state()
         header_layout.addWidget(self.btn_voice_mode)
-        
+
+        # Brain Switcher Button
+        self.btn_brain = QPushButton()
+        self.btn_brain.setFixedSize(160, 36)
+        self.btn_brain.setCheckable(True)
+        self.btn_brain.setToolTip("Switch AI brain: Gemini CLI (cloud) or Ollama (local)")
+        self.btn_brain.setStyleSheet("""
+            QPushButton {
+                background-color: #2c3e50;
+                color: white;
+                border-radius: 12px;
+                padding: 6px 14px 6px 38px;
+                border: 1.5px solid #a78bfa;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:checked {
+                background-color: #a78bfa;
+                color: white;
+                border: 1.5px solid #c4b5fd;
+            }
+            QPushButton:hover {
+                background-color: rgba(167, 139, 250, 0.3);
+            }
+        """)
+        self.btn_brain.setIconSize(QSize(18, 18))
+        self.btn_brain.clicked.connect(self.toggle_brain)
+        self.load_brain_state()
+        header_layout.addWidget(self.btn_brain)
+
         layout.addLayout(header_layout)
-        
+
         sub = QLabel("Real-time feed from Whisper and qwen3.5:4b-q4_k_m.")
         sub.setStyleSheet("color: gray; font-size: 14px;")
         layout.addWidget(sub)
@@ -345,6 +374,70 @@ class LiveInteractionHUD(QWidget):
         except Exception as e:
             print(f"Failed to toggle voice mode: {e}")
             QMessageBox.warning(self, "Error", f"Failed to save voice mode setting: {e}")
+
+    def load_brain_state(self):
+        """Load brain engine from config and update the brain button."""
+        try:
+            cfg = load_config()
+            engine = cfg.get("engine", "gemini_cli")
+            is_gemini = (engine == "gemini_cli")
+            self.btn_brain.setChecked(is_gemini)
+            self._update_brain_button(is_gemini)
+        except Exception as e:
+            print(f"Failed to load brain state: {e}")
+
+    def _update_brain_button(self, is_gemini: bool):
+        """Update brain button icon and text."""
+        if is_gemini:
+            icon = qta.icon('fa5s.cloud', color='white')
+            self.btn_brain.setIcon(icon)
+            self.btn_brain.setText("Gemini")
+        else:
+            icon = qta.icon('fa5s.brain', color='white')
+            self.btn_brain.setIcon(icon)
+            self.btn_brain.setText("Ollama (Local)")
+
+    def toggle_brain(self):
+        """Switch between Gemini CLI and Ollama, persist, update runtime."""
+        try:
+            cfg = load_config()
+            is_gemini = self.btn_brain.isChecked()
+            new_engine = "gemini_cli" if is_gemini else "ollama"
+
+            # Persist to config
+            cfg["engine"] = new_engine
+            save_config(cfg)
+
+            # Update button appearance
+            self._update_brain_button(is_gemini)
+
+            # Patch the running constants module so this session uses the new engine
+            try:
+                import llm.constants as _const
+                _const.ENGINE = new_engine
+            except Exception:
+                pass
+
+            # If switching to Gemini, boot the REPL in background
+            if is_gemini:
+                try:
+                    import threading, asyncio
+
+                    def _reboot():
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        from llm.gemini_repl import reset_repl
+                        loop.run_until_complete(reset_repl())
+                        loop.close()
+
+                    t = threading.Thread(target=_reboot, daemon=True, name="brain-switch-repl")
+                    t.start()
+                except Exception as re:
+                    print(f"REPL restart failed: {re}")
+
+        except Exception as e:
+            print(f"Failed to toggle brain: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to switch brain: {e}")
 
 class AddCommandWizard(QDialog):
     def __init__(self, parent=None, default_category="Custom Commands"):

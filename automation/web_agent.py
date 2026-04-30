@@ -313,18 +313,20 @@ def _pw_worker():
                     break
                     
                 page = _ensure_page()
-                
+
                 if action == "browse":
-                    url = kwargs.get('url', '')
+                    url   = kwargs.get('url', '')
                     query = kwargs.get('query', '')
-                    
+
+                    # ── Only use DDG when the URL is blank OR is literally a search engine ──
+                    # IMPORTANT: do NOT check "search" in url — that would route
+                    # article URLs like reuters.com/...search... to DDG silently.
+                    _search_engine_domains = ("duckduckgo.com", "html.duckduckgo.com", "google.com", "bing.com")
                     use_ddg_search = (
                         not url
-                        or "google" in url.lower()
-                        or "duckduckgo" in url.lower()
-                        or "search" in url.lower()
+                        or any(d in url.lower() for d in _search_engine_domains)
                     )
-                    
+
                     if use_ddg_search:
                         # Use the HTML version of DDG (fastest, most reliable, no JS)
                         encoded_q = urllib.parse.quote_plus(query)
@@ -334,11 +336,11 @@ def _pw_worker():
                             page.wait_for_timeout(2000)
                         except Exception as ge:
                             logger.warning(f"[browse] DDG goto issue: {ge}")
-                        
+
                         # Take a screenshot for vision reference
                         screenshot_b64 = ""
                         try:
-                            import tempfile, base64 as _b64
+                            import base64 as _b64
                             ss_path = os.path.join(r"C:\VoxKage\Brain", "search_result.jpg")
                             os.makedirs(os.path.dirname(ss_path), exist_ok=True)
                             page.screenshot(path=ss_path, type="jpeg", quality=60)
@@ -346,17 +348,17 @@ def _pw_worker():
                                 screenshot_b64 = _b64.b64encode(f.read()).decode()
                         except Exception:
                             pass
-                        
+
                         # Extract rich result data: title + snippet + url
                         results_text = ""
                         try:
                             result_els = page.locator(".result").all()
                             for i, el in enumerate(result_els[:8]):
                                 try:
-                                    title = el.locator(".result__title").inner_text(timeout=500).strip()
+                                    title   = el.locator(".result__title").inner_text(timeout=500).strip()
                                     snippet = el.locator(".result__snippet").inner_text(timeout=500).strip()
-                                    href = ""
-                                    link = el.locator("a.result__url")
+                                    href    = ""
+                                    link    = el.locator("a.result__url")
                                     if link.count() > 0:
                                         href = link.first.get_attribute("href") or ""
                                     results_text += f"[{i+1}] {title}\n{snippet}\n{href}\n\n"
@@ -364,56 +366,170 @@ def _pw_worker():
                                     pass
                         except Exception:
                             pass
-                        
+
                         # Fallback: raw body text
                         if not results_text.strip():
                             try:
                                 results_text = page.locator("body").inner_text(timeout=5000)[:3000]
                             except Exception:
                                 results_text = "No results extracted."
-                        
+
                         result_payload = (
                             f"Search Results for '{query}' (DuckDuckGo):\n"
                             f"Current URL: {page.url}\n\n"
                             f"{results_text[:2500]}"
                         )
                         res_q.put(("ok", result_payload))
+
                     else:
+                        # ── Navigate to the actual article/page URL ──
                         if not url.startswith("http"):
                             url = "https://" + url
                         try:
-                            page.goto(url, wait_until="commit", timeout=20000)
+                            page.goto(url, wait_until="commit", timeout=25000)
                             page.wait_for_load_state("networkidle", timeout=10000)
                         except Exception as ge:
                             logger.warning(f"[browse] goto issue for {url}: {ge}")
-                        page_text = ""
+
+                        # Dismiss cookie / popup overlays
+                        _dismiss_selectors = [
+                            'button:has-text("Accept")', 'button:has-text("Accept All")',
+                            'button:has-text("I agree")', 'button:has-text("Got it")',
+                            'button:has-text("Close")', 'button:has-text("No thanks")',
+                            '[aria-label="Close"]', '[aria-label="Dismiss"]',
+                        ]
                         try:
-                            page_text = page.locator("body").inner_text(timeout=5000)
+                            page.keyboard.press("Escape")
+                            page.wait_for_timeout(400)
+                            for sel in _dismiss_selectors:
+                                try:
+                                    btn = page.locator(sel).first
+                                    if btn.is_visible(timeout=300):
+                                        btn.click()
+                                        page.wait_for_timeout(400)
+                                        break
+                                except Exception:
+                                    continue
                         except Exception:
-                            page_text = "Could not extract page text."
-                        res_q.put(("ok", f"Page Content from {url}:\n{page_text[:2500]}"))
-                        
+                            pass
+
+                        # Take a screenshot so the model can visually verify page state
+                        import base64 as _b64
+                        screenshot_b64 = ""
+                        try:
+                            ss_dir  = r"C:\VoxKage\Brain"
+                            os.makedirs(ss_dir, exist_ok=True)
+                            ss_path = os.path.join(ss_dir, "browse_result.jpg")
+                            page.screenshot(path=ss_path, type="jpeg", quality=55)
+                            with open(ss_path, "rb") as f:
+                                screenshot_b64 = _b64.b64encode(f.read()).decode()
+                        except Exception:
+                            pass
+
+                        # Extract above-the-fold content
+                        page_text = ""
+                        _content_selectors = [
+                            "article", "main", "#content", "#main-content",
+                            ".article-body", ".story-body", ".post-content",
+                        ]
+                        for sel in _content_selectors:
+                            try:
+                                el = page.locator(sel).first
+                                if el.is_visible(timeout=500):
+                                    page_text = el.inner_text(timeout=5000)
+                                    if len(page_text.strip()) > 300:
+                                        break
+                            except Exception:
+                                pass
+                        if not page_text.strip():
+                            try:
+                                page_text = page.locator("body").inner_text(timeout=5000)
+                            except Exception:
+                                page_text = "Could not extract page text."
+
+                        # Scroll down and grab more content if above-the-fold is thin
+                        if len(page_text.strip()) < 800:
+                            try:
+                                page.mouse.wheel(0, 1200)
+                                page.wait_for_timeout(1200)
+                                extra = ""
+                                for sel in _content_selectors:
+                                    try:
+                                        el = page.locator(sel).first
+                                        if el.is_visible(timeout=500):
+                                            extra = el.inner_text(timeout=5000)
+                                            if len(extra.strip()) > len(page_text.strip()):
+                                                page_text = extra
+                                                break
+                                    except Exception:
+                                        pass
+                                if not extra.strip():
+                                    try:
+                                        extra = page.locator("body").inner_text(timeout=5000)
+                                        if len(extra) > len(page_text):
+                                            page_text = extra
+                                    except Exception:
+                                        pass
+                                # Take another screenshot after scroll
+                                try:
+                                    ss_path2 = os.path.join(ss_dir, "browse_result_scrolled.jpg")
+                                    page.screenshot(path=ss_path2, type="jpeg", quality=55)
+                                    with open(ss_path2, "rb") as f:
+                                        screenshot_b64 = _b64.b64encode(f.read()).decode()
+                                except Exception:
+                                    pass
+                            except Exception:
+                                pass
+
+                        try:
+                            page_title = page.title()
+                        except Exception:
+                            page_title = "unknown"
+
+                        text_out = (
+                            f"=== PAGE LOADED ===\n"
+                            f"URL   : {page.url}\n"
+                            f"TITLE : {page_title}\n"
+                            f"--- CONTENT (up to 5000 chars) ---\n"
+                            f"{page_text[:5000]}\n"
+                            f"--- END ---\n"
+                            f"VERIFICATION: Confirm the URL above matches the target domain. "
+                            f"If content looks like a login wall or CAPTCHA, try search_web instead."
+                        )
+                        res_q.put(("ok", {"__vision__": True, "text": text_out, "screenshot_b64": screenshot_b64}))
+
                 elif action == "search_youtube":
                     query = kwargs.get('query')
                     encoded_title = urllib.parse.quote(query)
                     search_url = f"https://www.youtube.com/results?search_query={encoded_title}"
                     page.goto(search_url)
+                    
+                    # Wait for video renders
                     page.wait_for_selector('ytd-video-renderer', timeout=15000)
                     
-                    videos = page.locator('ytd-video-renderer').all()
+                    # Use page.evaluate to instantly scrape the top 5 videos in JS (avoids Playwright's auto-wait overhead)
+                    videos_data = page.evaluate("""() => {
+                        let vids = Array.from(document.querySelectorAll('ytd-video-renderer')).slice(0, 5);
+                        return vids.map((v, i) => {
+                            let titleEl = v.querySelector('a#video-title');
+                            if (!titleEl) return null;
+                            let title = titleEl.getAttribute('title') || titleEl.innerText;
+                            let href = titleEl.getAttribute('href');
+                            if (href && !href.startsWith('http')) {
+                                href = "https://www.youtube.com" + href;
+                            }
+                            return {
+                                number: i + 1,
+                                title: title ? title.replace(/\\n/g, ' ').trim() : 'Unknown',
+                                url: href
+                            };
+                        }).filter(v => v !== null);
+                    }""")
                     
                     # Clear and populate global local memory state
                     GLOBAL_VIDEO_OPTIONS.clear()
-                    
-                    for i, vid in enumerate(videos[:5]):
-                        title_el = vid.locator('a#video-title')
-                        title = title_el.get_attribute('title') or title_el.inner_text()
-                        href = title_el.get_attribute('href')
-                        if href and not href.startswith('http'):
-                            href = "https://www.youtube.com" + href
-                        
-                        title = title.replace('\n', ' ').strip()
-                        GLOBAL_VIDEO_OPTIONS.append({"number": i+1, "title": title, "url": href})
+                    if videos_data:
+                        GLOBAL_VIDEO_OPTIONS.extend(videos_data)
                         
                     res_q.put(("ok", GLOBAL_VIDEO_OPTIONS))
                     
@@ -1085,41 +1201,226 @@ def _pw_worker():
                         elif sub_action == "extract_text":
                             pass  # Text extraction happens after action
                             
+                        elif sub_action == "extract_image_urls":
+                            # Extract all image URLs from the live rendered DOM via JS evaluation.
+                            # Works on JavaScript-heavy sites (Unsplash, Pexels, Pixabay, Google Images).
+                            # Returns a JSON array of de-duplicated, high-res image URLs.
+                            try:
+                                js_result = page.evaluate("""() => {
+                                    const seen = new Set();
+                                    const urls = [];
+
+                                    function addUrl(u) {
+                                        if (!u || typeof u !== 'string') return;
+                                        // Normalise: strip query params for dedup key
+                                        const base = u.split('?')[0];
+                                        if (seen.has(base)) return;
+                                        // Skip tiny/icon/avatar images
+                                        const low = u.toLowerCase();
+                                        const skip = ['avatar', 'logo', 'icon', 'favicon', 'pixel', 'tracker',
+                                                      'badge', '1x1', 'spacer', 'blank', 'loading', 'placeholder'];
+                                        if (skip.some(s => low.includes(s))) return;
+                                        seen.add(base);
+                                        urls.push(u);
+                                    }
+
+                                    // 1. Standard img tags
+                                    document.querySelectorAll('img').forEach(img => {
+                                        addUrl(img.src);
+                                        addUrl(img.dataset.src);
+                                        addUrl(img.dataset.lazySrc);
+                                        addUrl(img.dataset.original);
+                                        // Parse srcset: pick the highest-res URL
+                                        if (img.srcset) {
+                                            const parts = img.srcset.split(',').map(s => s.trim().split(/\s+/)[0]);
+                                            parts.forEach(addUrl);
+                                        }
+                                    });
+
+                                    // 2. Picture source elements (srcset)
+                                    document.querySelectorAll('source[srcset]').forEach(src => {
+                                        const parts = src.srcset.split(',').map(s => s.trim().split(/\s+/)[0]);
+                                        parts.forEach(addUrl);
+                                    });
+
+                                    // 3. CSS background-image on common image containers
+                                    document.querySelectorAll('a[style], div[style], figure[style], span[style]').forEach(el => {
+                                        const bg = el.style.backgroundImage || '';
+                                        const m = bg.match(/url\\(['"]?([^'"\\)]+)['"]?\\)/);
+                                        if (m) addUrl(m[1]);
+                                    });
+
+                                    // 4. data attributes used by lazy loaders
+                                    document.querySelectorAll('[data-image], [data-photo-url], [data-full]').forEach(el => {
+                                        addUrl(el.dataset.image);
+                                        addUrl(el.dataset.photoUrl);
+                                        addUrl(el.dataset.full);
+                                    });
+
+                                    // Filter: keep only http/https URLs
+                                    return urls.filter(u => u && (u.startsWith('http://') || u.startsWith('https://')));
+                                }""")
+                                import json as _json
+                                img_urls_json = _json.dumps(js_result if isinstance(js_result, list) else [])
+                                action_result = {
+                                    "success": True,
+                                    "message": f"Extracted {len(js_result) if isinstance(js_result, list) else 0} image URLs from DOM",
+                                    "url_after": page.url,
+                                    "image_urls": js_result if isinstance(js_result, list) else [],
+                                    "image_urls_json": img_urls_json,
+                                }
+                            except Exception as js_e:
+                                action_result = {
+                                    "success": False,
+                                    "message": f"JS evaluation failed: {js_e}",
+                                    "url_after": page.url,
+                                    "image_urls": [],
+                                    "image_urls_json": "[]",
+                                }
+
+                        elif sub_action == "trigger_download":
+                            # Click a download button and capture the download event to get the real file URL.
+                            # Use this when a site hides the direct URL behind a button click.
+                            intent_label = kwargs.get("intent", "download")
+                            try:
+                                with page.expect_download(timeout=15000) as download_info:
+                                    # Try common download button patterns
+                                    clicked = False
+                                    for sel in [
+                                        f'[aria-label*="{intent_label}" i]',
+                                        f'a[download]',
+                                        f'button:has-text("{intent_label}")',
+                                        f'a:has-text("{intent_label}")',
+                                        f'[data-testid*="download"]',
+                                        f'[class*="download"]',
+                                    ]:
+                                        try:
+                                            el = page.locator(sel).first
+                                            if el.is_visible(timeout=1000):
+                                                el.click(timeout=5000)
+                                                clicked = True
+                                                break
+                                        except Exception:
+                                            continue
+                                    if not clicked:
+                                        raise Exception("No download button found")
+
+                                download = download_info.value
+                                download_url = download.url
+                                suggested_name = download.suggested_filename
+                                action_result = {
+                                    "success": True,
+                                    "message": f"Download triggered: {suggested_name}",
+                                    "url_after": page.url,
+                                    "download_url": download_url,
+                                    "suggested_filename": suggested_name,
+                                }
+                            except Exception as dl_e:
+                                action_result = {
+                                    "success": False,
+                                    "message": f"trigger_download failed: {dl_e}",
+                                    "url_after": page.url,
+                                }
+
                         else:
                             action_result = {"success": False, "message": f"Unknown action: {sub_action}", "url_after": page.url}
                         
                         # === CAPTURE SCREENSHOT AND PAGE TEXT ===
                         screenshot_b64 = _checkpoint_screenshot(sub_action)
-                        
+
+                        # Wait for dynamic content to settle before extracting
                         try:
-                            page_text = page.locator("body").inner_text(timeout=5000)
-                        except:
-                            page_text = "Could not extract page text."
-                        
+                            page.wait_for_load_state("networkidle", timeout=5000)
+                        except Exception:
+                            page.wait_for_timeout(1500)
+
+                        # Try to extract MAIN content region (skip nav headers)
+                        page_text = ""
+                        main_content_selectors = [
+                            # Amazon product grid
+                            '[data-component-type="s-search-result"]',
+                            '#search .s-result-list',
+                            '#search',
+                            # Flipkart product grid
+                            '._1YokD2._3Mn1Gg',
+                            '[data-id]._30jeq3',
+                            # Generic main content areas
+                            'main',
+                            '#main-content',
+                            '#content',
+                            'article',
+                        ]
+                        for sel in main_content_selectors:
+                            try:
+                                el = page.locator(sel).first
+                                if el.is_visible(timeout=500):
+                                    page_text = el.inner_text(timeout=5000)
+                                    if len(page_text.strip()) > 200:
+                                        break
+                            except Exception:
+                                pass
+
+                        # Fallback: full body text
+                        if not page_text or len(page_text.strip()) < 100:
+                            try:
+                                page_text = page.locator("body").inner_text(timeout=5000)
+                            except Exception:
+                                page_text = "Could not extract page text."
+
                         try:
                             page_title = page.title()
-                        except:
+                        except Exception:
                             page_title = "unknown"
-                        
+
                         status_msg = "Page loaded normally."
                         if action_result.get("success"):
                             status_msg = f"Action executed successfully: {action_result.get('message', '')}"
                         else:
                             status_msg = f"Action failed: {action_result.get('message', '')}"
-                        
+
+                        # Include current URL clearly so model can verify it landed on the right domain
+                        current_url = page.url
+
+                        # Build extra data block for actions that return structured data
+                        extra_lines = ""
+                        if sub_action == "extract_image_urls" and action_result.get("image_urls_json"):
+                            extra_lines = (
+                                f"\n--- IMAGE URLS (JSON) ---\n"
+                                f"{action_result['image_urls_json']}\n"
+                                f"--- END IMAGE URLS ---\n"
+                                f"TOTAL FOUND: {len(action_result.get('image_urls', []))} image URLs\n"
+                            )
+                        elif sub_action == "trigger_download":
+                            dl_url = action_result.get("download_url", "")
+                            dl_name = action_result.get("suggested_filename", "")
+                            if dl_url:
+                                extra_lines = (
+                                    f"\n--- DOWNLOAD CAPTURED ---\n"
+                                    f"DOWNLOAD URL: {dl_url}\n"
+                                    f"FILENAME: {dl_name}\n"
+                                    f"--- END DOWNLOAD ---\n"
+                                )
+
                         res_q.put(("ok", {
                             "__vision__": True,
                             "text": (
                                 f"=== AGENT STEP RESULT ===\n"
                                 f"ACTION: {sub_action}\n"
                                 f"RESULT: {'success' if action_result.get('success') else 'failed'}\n"
-                                f"URL AFTER: {action_result.get('url_after', page.url)}\n"
+                                f"CURRENT URL: {current_url}\n"
                                 f"PAGE TITLE: {page_title}\n"
-                                f"PAGE TEXT (first 600 chars): {page_text[:600]}\n"
+                                f"--- PAGE CONTENT (up to 3000 chars) ---\n"
+                                f"{page_text[:3000]}\n"
+                                f"--- END CONTENT ---\n"
                                 f"STATUS: {status_msg}\n"
-                                f"NEXT DECISION: Review the screenshot and page content, then call agent_thinking to decide your next action."
+                                f"{extra_lines}"
+                                f"VERIFICATION: Check that CURRENT URL contains the expected domain. If yes, this step succeeded."
                             ),
-                            "screenshot_b64": screenshot_b64
+                            "screenshot_b64": screenshot_b64,
+                            # Pass structured data through for programmatic consumers (download_server.py)
+                            "image_urls": action_result.get("image_urls", []),
+                            "download_url": action_result.get("download_url", ""),
+                            "suggested_filename": action_result.get("suggested_filename", ""),
                         }))
                         
                     except Exception as step_e:

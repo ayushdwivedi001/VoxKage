@@ -37,6 +37,16 @@ def open_app(app_name):
         except Exception as e:
             return f"Failed to open {app_name}: {e}"
     else:
+        # Check if it's a website command
+        website = CONFIG.get("website_commands", {}).get(app_name)
+        if website:
+            try:
+                import subprocess
+                subprocess.Popen(f'start "" "{website}"', shell=True)
+                return f"Opening website {app_name}"
+            except Exception as e:
+                return f"Failed to open website {app_name}: {e}"
+                
         return f"Application '{app_name}' is not supported"
 
 def execute_special_command(action):

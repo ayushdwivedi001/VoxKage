@@ -99,6 +99,200 @@ def _ensure_tool_schema(tool_name: str, current_schemas: list) -> list:
 async def generate_response_stream(prompt: str, system_prompt: str = "", use_tools: bool = True):
     global _conversation_history
 
+    # ═══════════ HYBRID ENGINE ROUTER ═══════════════════════════════════════════
+    # If ENGINE="gemini_cli", use the Gemini CLI subprocess as the reasoning brain.
+    # Full context is assembled identically to the Ollama pipeline:
+    #   personality + datetime + routing hints + Mem0 + persistent memory + history
+    # Gemini returns either plain text or a JSON tool call — the loop handles both.
+    # On failure (after MAX_CLI_RETRIES), silently falls through to Ollama.
+    try:
+        import llm.constants as _llm_const
+        _current_engine = _llm_const.ENGINE
+    except ImportError:
+        _current_engine = "ollama"
+
+    if _current_engine == "gemini_cli":
+        try:
+            from llm.gemini_engine import ask_voxkage_brain, GeminiCLIError, clean_cli_json
+            from llm.gemini_prompt_builder import build_voxkage_gemini_prompt
+            import llm.constants as _consts
+
+            # ── Phase 1: Assemble full context (mirrors Ollama pipeline exactly) ──────
+            relevant_tools, retrieved_names = _get_tools_for_query(prompt)
+            logger.info(f"[Gemini RAG] Injecting {len(relevant_tools)} tools: {retrieved_names}")
+
+            memory_snippet = ""
+            if USE_MEMORY:
+                try:
+                    from llm.memory_manager import search_memory
+                    memory_snippet = search_memory(prompt)
+                except Exception as _me:
+                    logger.warning(f"[Gemini Memory] Search failed (non-fatal): {_me}")
+
+            routing_hints = get_routing_hints(retrieved_names)
+            persistent_memory = get_persistent_memory()
+            personality = system_prompt if system_prompt else get_personality_prompt()
+            datetime_ctx = get_datetime_context()["content"]
+
+            # ── Phase 2: Tool dispatch loop (up to 8 turns) ───────────────────────────
+            MAX_GEMINI_TURNS = 8
+            _gemini_tool_history: list[str] = []   # Accumulates tool results for context
+            _tools_ran_this_turn = False
+            _final_yielded = False
+            _seen_tool_calls: set[str] = set()      # Guards against identical repeat calls
+            manager.was_interrupted = False
+
+            for _turn in range(MAX_GEMINI_TURNS):
+                if manager.was_interrupted:
+                    yield "Got it — stopping."
+                    return
+
+                # Build full stateless prompt for this turn
+                # When tool results exist, pass has_results=True so the prompt
+                # explicitly instructs Gemini to SUMMARIZE rather than act again.
+                full_prompt = build_voxkage_gemini_prompt(
+                    user_message=prompt,
+                    personality=personality,
+                    datetime_ctx=datetime_ctx,
+                    routing_hints=routing_hints,
+                    memory_snippet=memory_snippet,
+                    persistent_memory=persistent_memory,
+                    conversation_history=_conversation_history,
+                    tools=relevant_tools,
+                    tool_result_history=_gemini_tool_history,
+                    has_results=bool(_gemini_tool_history),
+                )
+
+                log_to_hud("VoxKage", "🤖 [Gemini] Thinking…")
+                raw_response = await ask_voxkage_brain(full_prompt)
+
+                # ── Detect tool call in response ───────────────────────────────────
+                tool_call = None
+                try:
+                    parsed = clean_cli_json(raw_response)
+                    if isinstance(parsed, dict) and "tool" in parsed:
+                        tool_call = parsed
+                except (ValueError, Exception):
+                    pass  # Not a tool call — plain text response
+
+                if tool_call:
+                    tool_name = tool_call.get("tool", "")
+                    tool_args = tool_call.get("args", {})
+
+                    if not tool_name or tool_name == "done":
+                        # Gemini signalled completion
+                        break
+
+                    # Agentic loop handover for browser tasks
+                    if tool_name in ("agent_thinking", "agent_step", "execute_browser_workflow"):
+                        logger.info(f"[Gemini] Browser handover via: {tool_name}")
+                        # Extract the goal string so the Gemini agentic brain knows its objective
+                        handover_goal = (
+                            tool_args.get("goal")
+                            or tool_args.get("thought")
+                            or prompt
+                        )
+                        client_ol = AsyncClient(host=OLLAMA_HOST)
+                        messages_ol = [
+                            {"role": "system", "content": personality},
+                            {"role": "system", "content": datetime_ctx},
+                        ] + list(_conversation_history) + [{"role": "user", "content": prompt}]
+                        async for chunk in execute_agentic_loop(
+                            prompt, messages_ol, client_ol, relevant_tools,
+                            [], _conversation_history, _llm_chat_with_retry,
+                            goal=handover_goal,
+                        ):
+                            yield chunk
+                        return
+
+                    # Execute normal MCP tool
+                    _tools_ran_this_turn = True
+                    relevant_tools = _ensure_tool_schema(tool_name, relevant_tools)
+
+                    # ── Duplicate call guard ───────────────────────────────────────
+                    # If Gemini calls the SAME tool with the SAME args again, it means
+                    # it failed to read the previous tool result. Break and surface results.
+                    import json as _json
+                    _call_fingerprint = f"{tool_name}:{_json.dumps(tool_args, sort_keys=True)}"
+                    if _call_fingerprint in _seen_tool_calls:
+                        logger.warning(
+                            f"[Gemini] Duplicate tool call detected: {tool_name}. "
+                            f"Breaking loop — surfacing existing results."
+                        )
+                        break
+                    _seen_tool_calls.add(_call_fingerprint)
+
+                    result = execute_tool_call(tool_name, tool_args)
+                    result_str = str(result)
+                    result_preview = result_str[:150].replace("\n", " ")
+                    log_to_hud("VoxKage", f"🔧 [{tool_name}] {result_preview}")
+                    _gemini_tool_history.append(
+                        f"[Tool: {tool_name} args={tool_args}] Result: {result_str[:600]}"
+                    )
+                    continue  # Next turn: Gemini summarises the tool result — has_results=True
+
+                # ── Plain text response — this is the final answer ─────────────────
+                else:
+                    # Detect browser intent in plain text when no tools ran yet
+                    if not _tools_ran_this_turn and _detect_browser_intent(raw_response, prompt):
+                        logger.info("[Gemini] Browser intent in text. Launching agentic loop.")
+                        client_ol = AsyncClient(host=OLLAMA_HOST)
+                        messages_ol = [
+                            {"role": "system", "content": personality},
+                            {"role": "system", "content": datetime_ctx},
+                        ] + list(_conversation_history) + [{"role": "user", "content": prompt}]
+                        async for chunk in execute_agentic_loop(
+                            prompt, messages_ol, client_ol, relevant_tools,
+                            [], _conversation_history, _llm_chat_with_retry
+                        ):
+                            yield chunk
+                        return
+
+                    streamer = SentenceStreamer()
+                    streamer.add_token(raw_response)
+                    streamer.flush()
+                    manager.wait_to_finish()
+
+                    log_to_hud("VoxKage", f"🤖 [Gemini] {raw_response}")
+                    _conversation_history.append({"role": "user", "content": prompt})
+                    _conversation_history.append({"role": "assistant", "content": raw_response})
+                    if len(_conversation_history) > MAX_HISTORY * 2:
+                        _conversation_history = _conversation_history[-(MAX_HISTORY * 2):]
+
+                    yield raw_response
+                    _final_yielded = True
+                    return
+
+            if not _final_yielded:
+                # Loop ended without a text response — surface the last tool result directly
+                if _gemini_tool_history:
+                    last_result = _gemini_tool_history[-1]
+                    # Extract just the result part (after "Result: ")
+                    result_text = last_result.split("] Result: ", 1)[-1] if "] Result: " in last_result else last_result
+                    streamer = SentenceStreamer()
+                    streamer.add_token(result_text)
+                    streamer.flush()
+                    manager.wait_to_finish()
+                    log_to_hud("VoxKage", result_text)
+                    _conversation_history.append({"role": "user", "content": prompt})
+                    _conversation_history.append({"role": "assistant", "content": result_text})
+                    yield result_text
+                else:
+                    yield "Done, sir."
+            return
+
+        except Exception as _gemini_err:
+            import llm.constants as _consts
+            _consts.ENGINE = "ollama"
+            logger.warning(
+                f"[HybridEngine] Gemini CLI failed: {_gemini_err}. "
+                f"Switching to Ollama for this session."
+            )
+            log_to_hud("VoxKage", "🏠 [Ollama] Gemini unavailable — switching to local model.")
+            # Falls through to the Ollama pipeline below
+
+    # ═══════════ END HYBRID ENGINE ROUTER ═══════════════════════════════════════
+
     # ═══════════ PRE-LLM EMAIL INTERCEPTOR ═══════════
     # Catches email intents in pure Python BEFORE the prompt reaches the LLM.
     # The LLM never sees compose/send/edit requests — zero hallucination possible.
@@ -193,8 +387,7 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
     is_file_injection = "[UI_FILE_INJECTION]" in prompt
     if is_file_injection:
         prompt = prompt.replace("[UI_FILE_INJECTION]", "").strip()
-        use_tools = False
-        logger.info("File injection detected: disabling tools for this turn.")
+        logger.info("File injection detected: passing to tool engine.")
 
     client = AsyncClient(host=OLLAMA_HOST)
 

@@ -639,6 +639,137 @@ TOOL_DEFINITIONS = [
             "required": ["filename_keyword", "query"]
         }
     },
+
+    # ─────────────────────────────────────────────
+    # TELEGRAM BRIDGE
+    # ─────────────────────────────────────────────
+    {
+        "name": "telegram_send_message",
+        "description": (
+            "Sends a short text message or notification to the user's personal Telegram app on their phone. "
+            "Use for: quick updates, alerts, reminders, short answers the user wants on their phone. "
+            "Requires Telegram bot to be configured in .env."
+        ),
+        "tags": ["telegram", "message", "phone", "notify", "send", "alert"],
+        "example_queries": [
+            "send a message to my telegram", "notify me on telegram", "message me on telegram",
+            "tell me on telegram", "send this to my phone", "push notification to telegram"
+        ],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "The text message to send to Telegram."
+                }
+            },
+            "required": ["message"]
+        }
+    },
+
+    {
+        "name": "telegram_send_report",
+        "description": (
+            "Sends a richly formatted summary, analysis, or report to the user's Telegram phone app. "
+            "Use when VoxKage generates a long research result, file summary, or detailed analysis "
+            "and the user wants to save it or read it later on their phone. "
+            "Formats with markdown for clean mobile reading."
+        ),
+        "tags": ["telegram", "report", "summary", "analysis", "save", "forward", "phone"],
+        "example_queries": [
+            "send the summary to telegram", "save this report to my telegram",
+            "forward this analysis to my phone", "put the results in telegram",
+            "send the research to my telegram app", "save to telegram"
+        ],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "A short title for the report (e.g. 'Python Tutorial Summary')."
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The full content of the report to send."
+                }
+            },
+            "required": ["title", "content"]
+        }
+    },
+
+    {
+        "name": "telegram_ask_save",
+        "description": (
+            "Asks the user via a Telegram button prompt whether they want the current information "
+            "saved/forwarded to their Telegram app. Shows a Yes/No button in Telegram and waits 30s. "
+            "Call this AFTER generating a substantial report or summary (>300 characters) to offer "
+            "the user an option to save it to their phone. Do NOT call for short conversational replies."
+        ),
+        "tags": ["telegram", "ask", "save", "prompt", "confirm", "phone"],
+        "example_queries": [
+            "should i save this to telegram", "want to keep this on phone",
+            "offer to send to telegram", "ask if they want the report on telegram"
+        ],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "content_description": {
+                    "type": "string",
+                    "description": "A very short description of what was generated (e.g. 'Python web scraping tutorial summary')."
+                }
+            },
+            "required": ["content_description"]
+        }
+    },
+
+    {
+        "name": "telegram_send_file",
+        "description": (
+            "Sends a local file from this PC directly to the user's Telegram app. "
+            "Supports PDFs, images, text files, CSVs, and any document type. "
+            "Use when the user says: 'send this file to telegram', 'forward my resume to telegram', "
+            "'push this PDF to my phone'."
+        ),
+        "tags": ["telegram", "file", "pdf", "image", "document", "send", "phone"],
+        "example_queries": [
+            "send this file to telegram", "forward the pdf to my phone",
+            "push my resume to telegram", "send the image to telegram",
+            "upload this file to my telegram"
+        ],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Absolute path to the file on this PC to send."
+                },
+                "caption": {
+                    "type": "string",
+                    "description": "Optional caption to include with the file."
+                }
+            },
+            "required": ["file_path"]
+        }
+    },
+
+    {
+        "name": "telegram_get_status",
+        "description": (
+            "Returns the current status of the Telegram bridge — whether the bot is connected "
+            "and which chat is linked. Use when the user asks: 'Is Telegram working?', "
+            "'telegram status', 'is the telegram bot connected?'."
+        ),
+        "tags": ["telegram", "status", "connected", "check", "bot"],
+        "example_queries": [
+            "is telegram connected", "telegram status", "check telegram", "is the bot running",
+            "is telegram bot active", "telegram connection status"
+        ],
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
 ]
 
 # Fast lookup by name — used by tool_rag.py and mcp_dispatcher.py

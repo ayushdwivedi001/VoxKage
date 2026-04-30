@@ -162,3 +162,70 @@ def change_wallpaper_from_folder(folder_path="C:\\wallpapers"):
     selected = os.path.join(folder_path, random.choice(wallpapers))
     ctypes.windll.user32.SystemParametersInfoW(20, 0, selected, 3)
     return f"Wallpaper changed to {os.path.basename(selected)}."
+
+def bring_console_to_front():
+    import ctypes
+    hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+    if hwnd:
+        ctypes.windll.user32.ShowWindow(hwnd, 9)
+        ctypes.windll.user32.SetForegroundWindow(hwnd)
+        return "Brought console to front."
+    return "Could not find console window to bring to front."
+
+def safe_close_target(target: str) -> str:
+    target = target.lower().strip()
+    import psutil
+    
+    # 1. Attempt safe window close (WM_CLOSE) by title matching
+    # This safely closes specific files open in VS Code, Notepad, etc.
+    closed_count = 0
+    for win in gw.getAllWindows():
+        try:
+            title = win.title.lower()
+            if not title: continue
+            
+            # Match file names or app names in window titles
+            if target in title:
+                # Protect the main VoxKage terminal window from accidentally killing itself
+                if "voxkage" in title and target != "voxkage":
+                    continue
+                win.close()
+                closed_count += 1
+        except Exception:
+            pass
+            
+    if closed_count > 0:
+        return f"Safely closed {closed_count} window(s) matching '{target}'."
+        
+    # 2. If it looks like a folder path, try Shell.Application COM object
+    if "\\" in target or "/" in target:
+        res = close_explorer_folder(target)
+        if "Closed folder" in res:
+            return res
+
+    # 3. If no windows matched, try safe process kill
+    if target.endswith(".exe"):
+        target_proc = target
+    else:
+        target_proc = f"{target}.exe"
+        
+    if target_proc == "explorer.exe":
+        return "Refusing to forcefully taskkill explorer.exe to protect desktop stability. Please specify the exact folder path to close."
+        
+    killed_count = 0
+    for proc in psutil.process_iter(['name']):
+        try:
+            pinfo = proc.info
+            pname = str(pinfo['name']).lower()
+            if pname == target_proc or pname == target:
+                if "explorer" in pname:
+                    continue # Extra protection
+                proc.kill()
+                killed_count += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+            
+    if killed_count > 0:
+        return f"Forcefully killed {killed_count} background process(es) matching '{target}'."
+        
+    return f"Could not find any open window, file tab, or safe process matching '{target}' to close."
