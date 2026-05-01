@@ -25,6 +25,17 @@ import time
 import logging
 from pathlib import Path
 from datetime import datetime
+import contextlib
+
+@contextlib.contextmanager
+def suppress_stdout():
+    with open(os.devnull, "w") as devnull:
+        old_stdout = sys.stdout
+        sys.stdout = devnull
+        try:
+            yield
+        finally:
+            sys.stdout = old_stdout
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
@@ -76,25 +87,41 @@ def _get_collection():
         return _chroma_collection
     import chromadb
     from chromadb.config import Settings
-    _chroma_client = chromadb.PersistentClient(
-        path=_RAG_DIR,
-        settings=Settings(anonymized_telemetry=False),
-    )
-    _chroma_collection = _chroma_client.get_or_create_collection(
-        name="voxkage_knowledge",
-        metadata={"hnsw:space": "cosine"},
-    )
+    with suppress_stdout():
+        _chroma_client = chromadb.PersistentClient(
+            path=_RAG_DIR,
+            settings=Settings(anonymized_telemetry=False),
+        )
+        _chroma_collection = _chroma_client.get_or_create_collection(
+            name="voxkage_knowledge",
+            metadata={"hnsw:space": "cosine"},
+        )
     return _chroma_collection
 
 
 def _get_embedder():
     """Return a sentence-transformer model (lazy-initialized, cached)."""
     if not hasattr(_get_embedder, "_model"):
-        from sentence_transformers import SentenceTransformer
-        # "all-MiniLM-L6-v2" — fast, 384-dim, good quality for local RAG
-        # Downloads ~90MB on first run, then cached locally forever
-        _get_embedder._model = SentenceTransformer("all-MiniLM-L6-v2")
+        with suppress_stdout():
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                from sentence_transformers import SentenceTransformer
+                # "all-MiniLM-L6-v2" — fast, 384-dim, good quality for local RAG
+                # Downloads ~90MB on first run, then cached locally forever
+                _get_embedder._model = SentenceTransformer("all-MiniLM-L6-v2")
     return _get_embedder._model
+
+
+def _get_ocr():
+    """Return RapidOCR instance (lazy-initialized singleton)."""
+    if not hasattr(_get_ocr, "_instance"):
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+            _get_ocr._instance = RapidOCR()
+        except ImportError:
+            _get_ocr._instance = None
+    return _get_ocr._instance
 
 
 def _sha256(file_path: str) -> str:
@@ -140,31 +167,43 @@ def _extract_text(file_path: str) -> str:
 
         elif ext == ".pdf":
             import fitz
+            import sys
             text = ""
             with fitz.open(file_path) as doc:
-                for page in doc:
+                total_pages = len(doc)
+                for i, page in enumerate(doc):
+                    # Periodically report progress to stderr to avoid JSON-RPC corruption
+                    if i % 5 == 0 or i == total_pages - 1:
+                        sys.stderr.write(f"\r[RAG] Extracting PDF: Page {i+1}/{total_pages} ...")
+                        sys.stderr.flush()
+                        
                     page_text = page.get_text().strip()
                     # If page is mostly images / no text, perform OCR
                     if len(page_text) < 20:
                         try:
-                            from rapidocr_onnxruntime import RapidOCR
                             import numpy as np
-                            ocr = RapidOCR()
-                            pix = page.get_pixmap(dpi=150, alpha=False)
-                            img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
-                            result, _ = ocr(img)
-                            if result:
-                                page_text = "\n".join([line[1] for line in result])
+                            ocr = _get_ocr()
+                            if ocr:
+                                sys.stderr.write(f"\r[RAG] OCR processing page {i+1}/{total_pages} ...")
+                                sys.stderr.flush()
+                                pix = page.get_pixmap(dpi=150, alpha=False)
+                                img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
+                                result, _ = ocr(img)
+                                if result:
+                                    page_text = "\n".join([line[1] for line in result])
                         except Exception as e:
-                            logger.error(f"OCR failed on PDF page: {e}")
+                            logger.error(f"OCR failed on PDF page {i+1}: {e}")
                     text += page_text + "\n"
+            sys.stderr.write("\r" + " " * 60 + "\r")
+            sys.stderr.flush()
             return text.strip()
 
         elif ext in (".png", ".jpg", ".jpeg", ".bmp"):
             try:
-                from rapidocr_onnxruntime import RapidOCR
                 import cv2
-                ocr = RapidOCR()
+                ocr = _get_ocr()
+                if not ocr:
+                    return ""
                 img = cv2.imread(file_path)
                 result, _ = ocr(img)
                 if result:
@@ -324,9 +363,10 @@ def _do_index(file_path: str, force: bool = False) -> dict:
     if not chunks:
         return {"status": "error", "message": "No content extracted from file"}
 
-    # Build embeddings
+    # Build embeddings (show progress bar for large files to keep user informed)
     embedder = _get_embedder()
-    embeddings = embedder.encode(chunks, show_progress_bar=False).tolist()
+    show_pb = len(chunks) > 10
+    embeddings = embedder.encode(chunks, show_progress_bar=show_pb).tolist()
 
     # Get collection and remove old chunks for this file
     collection = _get_collection()
@@ -607,7 +647,8 @@ def index_directory(
                        for e in extensions.split(",")}
         target_exts = target_exts & _ALL_EXTS
     else:
-        target_exts = _ALL_EXTS
+        # Default to TEXT extensions ONLY to avoid massive OCR hangs on codebase images
+        target_exts = _TEXT_EXTS
 
     results = {"indexed": 0, "reindexed": 0, "unchanged": 0, "skipped": 0, "errors": 0}
     processed = []
@@ -625,6 +666,11 @@ def index_directory(
                 continue
 
             fpath = os.path.join(root, fname)
+            import sys
+            # Print live progress to stderr to avoid corrupting MCP stdio JSON-RPC
+            sys.stderr.write(f"\r[RAG] Indexing: {fname[:50]:<50}")
+            sys.stderr.flush()
+            
             try:
                 result = _do_index(fpath, force=False)
                 status = result.get("status", "error")
@@ -645,6 +691,10 @@ def index_directory(
             except Exception as e:
                 results["errors"] += 1
                 processed.append(f"  [EXCEPTION]: {fname} -- {e}")
+
+    import sys
+    sys.stderr.write("\r" + " " * 70 + "\r")
+    sys.stderr.flush()
 
     summary_lines = [
         f"[RAG] Directory indexing complete for: {directory}",

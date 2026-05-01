@@ -66,8 +66,6 @@ TOOL_TO_SERVER = {
     "index_directory": "rag_server.py",
 
     "git_clone": "github_server.py",
-    "git_status": "github_server.py",
-    "git_diff_summary": "github_server.py",
     "git_smart_commit": "github_server.py",
     "git_pull": "github_server.py",
     "fake_commit": "github_server.py",
@@ -100,7 +98,7 @@ _HEAVY_TOOLS = {
     "index_document", "check_and_index", "query_rag",
     "list_indexed_documents", "delete_from_rag", "index_directory",
     # GitHub integration
-    "git_clone", "git_status", "git_diff_summary", "git_smart_commit",
+    "git_clone", "git_smart_commit",
     "git_pull", "fake_commit", "detect_and_install_deps", "run_project",
     "kill_project", "check_project_health", "get_github_profile",
     "list_my_repos", "create_repo_local", "actions_list", "actions_get", "get_job_logs",

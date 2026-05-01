@@ -889,32 +889,6 @@ TOOL_DEFINITIONS = [
         }
     },
     {
-        "name": "git_status",
-        "description": "Gets the current git status of a local repository.",
-        "tags": ["git", "github", "status", "changes"],
-        "example_queries": ["git status", "what changed in repo", "check git status"],
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "repo_path": {"type": "string", "description": "Path to the local repository"}
-            },
-            "required": ["repo_path"]
-        }
-    },
-    {
-        "name": "git_diff_summary",
-        "description": "Gets a summary of unstaged and uncommitted changes in a local repository.",
-        "tags": ["git", "github", "diff", "changes"],
-        "example_queries": ["show git diff", "what are the local changes", "git diff"],
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "repo_path": {"type": "string", "description": "Path to the local repository"}
-            },
-            "required": ["repo_path"]
-        }
-    },
-    {
         "name": "git_smart_commit",
         "description": "Commits all changes in a local repository with a provided message, optionally pushing.",
         "tags": ["git", "github", "commit", "push", "save"],

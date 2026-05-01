@@ -112,3 +112,7 @@ C:/VoxKage/
 _pop_test.py
 test_json_extractor.py
 _archive/
+
+# Untracked skill files (added by VoxKage)
+voxkage-shell-compatibility.skill.zip
+voxkage-shell-compatibility.skill/

@@ -490,15 +490,17 @@ def github_clone_repo(url: str, dest_name: str = "") -> str:
     """Clone a git repository locally"""
     return json.dumps(git_clone({"url": url, "dest_name": dest_name}), indent=2)
 
-@mcp.tool()
-def github_repo_status(repo_path: str) -> str:
-    """Get git status and recent commits for a local repo"""
-    return json.dumps(git_status({"repo_path": repo_path}), indent=2)
+# Deprecated: use native shell command `git status` instead.
+# @mcp.tool()
+# def github_repo_status(repo_path: str) -> str:
+#     """Get git status and recent commits for a local repo"""
+#     return json.dumps(git_status({"repo_path": repo_path}), indent=2)
 
-@mcp.tool()
-def github_diff_summary(repo_path: str) -> str:
-    """Get a summary of pending changes in a local repo"""
-    return json.dumps(git_diff_summary({"repo_path": repo_path}), indent=2)
+# Deprecated: use native shell command `git diff` instead.
+# @mcp.tool()
+# def github_diff_summary(repo_path: str) -> str:
+#     """Get a summary of pending changes in a local repo"""
+#     return json.dumps(git_diff_summary({"repo_path": repo_path}), indent=2)
 
 @mcp.tool()
 def github_smart_commit(repo_path: str, message: str = "", push: bool = False) -> str:
