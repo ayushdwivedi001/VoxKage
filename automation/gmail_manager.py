@@ -220,7 +220,7 @@ def handle_compose(recipient: str, instructions: str) -> str:
         except Exception:
             pass
 
-        return f"Sir, I have drafted this mail for you. Please have a look at the dashboard and confirm if it is ready to send."
+        return f"Sir, I have drafted this mail for you. Please review the draft and confirm if it is ready to send."
 
     except Exception as e:
         logger.error(f"Compose error: {e}")
@@ -266,7 +266,7 @@ def handle_edit(instructions: str) -> str:
         except Exception:
             pass
 
-        return "Draft has been updated, sir. Please review it on the dashboard."
+        return "Draft has been updated, sir. Please review the draft."
 
     except Exception as e:
         logger.error(f"Edit draft error: {e}")

@@ -5,10 +5,10 @@ import re
 from datetime import datetime
 import os
 
-from llm.tool_registry import TOOLS_SCHEMA
+
 from llm.mcp_dispatcher import dispatch_tool_call as execute_tool_call
 from llm.helpers import SentenceStreamer, log_to_hud
-from llm.constants import MAX_HISTORY, GLOBAL_LAST_RESULTS, USE_RAG, TOP_K_TOOLS, USE_MEMORY
+from llm.constants import MAX_HISTORY, GLOBAL_LAST_RESULTS, USE_RAG, TOP_K_TOOLS
 from llm.helpers import (
     _extract_json_tool_call,
     _parse_text_intent,
@@ -153,23 +153,11 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
             yield err
             return
 
-    is_file_injection = "[UI_FILE_INJECTION]" in prompt
-    if is_file_injection:
-        prompt = prompt.replace("[UI_FILE_INJECTION]", "").strip()
-        logger.info("File injection detected: passing to tool engine.")
-
     # ── Phase 1: Assemble full context
     relevant_tools, retrieved_names = _get_tools_for_query(prompt)
     logger.info(f"[Gemini RAG] Injecting {len(relevant_tools)} tools: {retrieved_names}")
 
-    memory_snippet = ""
-    if USE_MEMORY:
-        try:
-            from llm.memory_manager import search_memory
-            memory_snippet = search_memory(prompt)
-        except Exception as _me:
-            logger.warning(f"[Gemini Memory] Search failed (non-fatal): {_me}")
-    
+
     routing_hints = get_routing_hints(retrieved_names)
     persistent_memory = get_persistent_memory()
     personality = system_prompt if system_prompt else get_personality_prompt()
@@ -188,7 +176,6 @@ async def generate_response_stream(prompt: str, system_prompt: str = "", use_too
             personality=personality,
             datetime_ctx=datetime_ctx,
             routing_hints=routing_hints,
-            memory_snippet=memory_snippet,
             persistent_memory=persistent_memory,
             conversation_history=_conversation_history,
             tools=relevant_tools,

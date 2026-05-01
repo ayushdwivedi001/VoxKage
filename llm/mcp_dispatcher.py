@@ -56,6 +56,7 @@ TOOL_TO_SERVER = {
     "telegram_ask_save": "telegram_server.py",
     "telegram_send_file": "telegram_server.py",
     "telegram_get_status": "telegram_server.py",
+    "telegram_get_pending_messages": "telegram_server.py",
 
     "index_document": "rag_server.py",
     "check_and_index": "rag_server.py",

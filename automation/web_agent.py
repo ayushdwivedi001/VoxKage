@@ -2056,7 +2056,7 @@ def _pw_worker():
                                 f"Summarize these items for the user in a natural, conversational way. "
                                 f"For each item, mention the product name and price clearly. "
                                 f"Format like: 'I found [N] options. Option 1 is [Name] at [Price]...' "
-                                f"Do not mention documents or the dashboard."
+                                f"Keep it concise and focus only on the actual data."
                             )
                             # === PHASE 28e: PERSIST TO MEMORY ===
                             memory_items = [{"index": i+1, "text": item[:300], "url": final_url} for i, item in enumerate(top_items)]
@@ -2074,7 +2074,7 @@ def _pw_worker():
                                 f"Here is the content I found:\n{page_text[:3000]}\n\n"
                                 f"Carefully read this extracted webpage text and provide a helpful, "
                                 f"natural response to the user's original query based on it. "
-                                f"Do not mention documents or the dashboard."
+                                f"Keep it concise and focus only on the actual data."
                             )
                         
                         res_q.put(("ok", response))

@@ -227,7 +227,7 @@ def retrieve_tools(query: str, top_k: int = 8) -> list:
     """
     Retrieve the top_k most relevant tool schemas for the given query.
     Uses vector search (LanceDB) if an embedding model is available, else BM25 keyword matching.
-    Returns a list of Ollama-format tool schemas ready to pass to ollama.chat(tools=...).
+    Returns a list of tool schemas ready for LLM consumption.
     Falls back to full schema list if everything fails.
     """
     try:
@@ -272,8 +272,8 @@ def retrieve_tool_names(query: str, top_k: int = 8) -> list:
 
 def get_schema_by_name(tool_name: str) -> dict | None:
     """
-    Fetch the full Ollama schema for a specific tool by name.
-    Used as fallback when Qwen calls a tool that wasn't in the retrieved subset.
+    Fetch the full schema for a specific tool by name.
+    Used as fallback when the LLM calls a tool that wasn't in the retrieved subset.
     """
     from llm.tool_definitions import TOOL_DEFINITIONS_BY_NAME, get_schema
     tool_def = TOOL_DEFINITIONS_BY_NAME.get(tool_name)

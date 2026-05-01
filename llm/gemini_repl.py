@@ -14,7 +14,7 @@ Optimizations implemented:
 3. PARALLEL PIPELINE: For agentic multi-step tasks, fire N processes
    simultaneously via ask_parallel() — wall time = max not sum.
 4. AUTO-RETRY: If the process exits with 429 (rate limit), wait RETRY_DELAY
-   seconds and retry once before falling to Ollama.
+   seconds and retry once.
 """
 
 import asyncio

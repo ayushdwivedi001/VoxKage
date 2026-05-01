@@ -8,8 +8,6 @@ from any directory.
 
 Menu:
   ▶ Open VoxKage          → Opens PowerShell with `voxkage` in project dir
-  📴 Open VoxKage (Offline) → Opens CMD with Ollama fallback
-  ⚙ Settings              → Opens config.json in default editor
   ✕ Exit                  → Quit tray
 
 Also starts the Telegram inbound listener daemon on boot.
@@ -51,14 +49,6 @@ def open_voxkage(icon=None, item=None):
     subprocess.Popen(_GEMINI_CMD, shell=True, cwd=_ROOT)
 
 
-def open_settings(icon=None, item=None):
-    """Open config.json in the default editor."""
-    try:
-        os.startfile(_CONFIG)
-    except Exception as e:
-        print(f"Failed to open settings: {e}")
-
-
 def quit_app(tray_icon):
     """Stop the tray and all daemons."""
     tray_icon.hide()
@@ -93,12 +83,6 @@ def setup_tray():
     act_open = QAction("▶  Open VoxKage")
     act_open.triggered.connect(open_voxkage)
     menu.addAction(act_open)
-
-    menu.addSeparator()
-
-    act_settings = QAction("⚙  Settings (config.json)")
-    act_settings.triggered.connect(open_settings)
-    menu.addAction(act_settings)
 
     menu.addSeparator()
 

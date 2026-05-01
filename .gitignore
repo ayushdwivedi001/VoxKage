@@ -52,9 +52,6 @@ crash_log.txt
 models/tts/kokoro/kokoro-v1_0.pth
 models/tts/kokoro/voices/*.pt
 
-# Ollama models (user's local)
-*.gguf
-
 # Logs
 *.log
 

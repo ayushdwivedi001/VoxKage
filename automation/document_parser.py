@@ -145,8 +145,8 @@ def analyze_specific_file_sync(file_path: str, query: str) -> str:
     
     # Simple logic: If it's a short question ("summarize"), do the first chunk
     # Or, feed the first chunk containing relevant keywords.
-    # To keep it reliable for VoxKage offline constraint, we just use Chunk 1
-    # unless we do a multi-chunk summarize (which takes a long time offline).
+    # To keep response times low, we just use Chunk 1
+    # unless we do a multi-chunk summarize (which takes a long time).
     
     used_chunk = chunks[0]
     if len(chunks) > 1:

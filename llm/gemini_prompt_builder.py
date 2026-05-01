@@ -49,7 +49,7 @@ NEVER output both JSON and text. NEVER wrap JSON in markdown. NEVER output empty
 
 def _format_tools_for_gemini(tools: list[dict]) -> str:
     """
-    Convert Ollama-style tool schemas into a structured, param-aware description.
+    Convert project tool schemas into a structured, param-aware description.
     Gemini needs to see exact param names and types to map user intent → tool call.
     """
     if not tools:
@@ -83,7 +83,6 @@ def build_voxkage_gemini_prompt(
     conversation_history: list[dict],
     tools: list[dict] | None = None,
     routing_hints: str = "",
-    memory_snippet: str = "",
     persistent_memory: str = "",
     tool_result_history: list[str] | None = None,
     require_json: bool = False,
@@ -115,8 +114,6 @@ def build_voxkage_gemini_prompt(
         blocks.append("Tool results so far this turn:\n" + "\n".join(tool_result_history))
 
     # Memory
-    if memory_snippet:
-        blocks.append(f"User context: {memory_snippet}")
     if persistent_memory:
         blocks.append(f"Prior session: {persistent_memory}")
 

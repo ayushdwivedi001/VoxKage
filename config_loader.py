@@ -28,8 +28,6 @@ def get_config_path() -> Path:
 def default_config() -> dict:
     # Minimal safe default config for a fresh install
     return {
-        "wake_word": "voxkage",
-        "voice_password": "",
         "protected_commands": [],
         "custom_commands": {},
         "app_launch_commands": {
@@ -52,8 +50,6 @@ def default_config() -> dict:
             "chat gpt": "https://chat.openai.com"
         },
         "autostart": False,
-        "voice_replies": True,
-        "voice_mode": "voice_chat",  # "voice_chat" or "chat_only"
         "spotify_client_id": "12070174553e4b6e9a548df8430a6e55",
         "spotify_client_secret": "2e2838433d0a487aad9a5818420cadd5"
     }

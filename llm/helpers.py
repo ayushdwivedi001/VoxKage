@@ -1,7 +1,7 @@
 import json
 import re
 from datetime import datetime
-from llm.tool_registry import TOOLS_SCHEMA, execute_tool_call
+from llm.tool_registry import execute_tool_call
 import logging
 import os
 

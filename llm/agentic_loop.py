@@ -579,7 +579,7 @@ async def execute_agentic_loop(
         if result_state.get("final_response"):
             final_text = result_state["final_response"]
         elif result_state.get("step_count", 0) >= MAX_AGENT_STEPS:
-            final_text = "I've reached my iteration limit. Please check the dashboard for the information gathered so far."
+            final_text = "I've reached my iteration limit. Please review the output for the information gathered so far."
     except Exception as e:
         logger.error(f"[Phase5] LangGraph execution failed: {e}")
         final_text = f"Encountered a critical error: {str(e)}."
