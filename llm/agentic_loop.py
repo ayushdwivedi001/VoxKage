@@ -467,6 +467,20 @@ async def tool_node(state: AgentState):
 
         try:
             result = execute_tool_call(tool_name, arguments)
+            # --- FIX: MCP String Deserialization for Vision Dicts ---
+            # FastMCP casts dict returns to str. If it's a __vision__ payload, parse it back to dict
+            # so the multimodal vision handling picks it up and prevents 500k base64 text tokens.
+            if isinstance(result, str) and result.strip().startswith("{") and "__vision__" in result[:50]:
+                try:
+                    import json as _json
+                    result = _json.loads(result.strip())
+                except Exception:
+                    import ast
+                    try:
+                        result = ast.literal_eval(result.strip())
+                    except Exception:
+                        pass
+            # --------------------------------------------------------
         except Exception as exec_err:
             result = f"Error executing tool {tool_name}: {exec_err}"
 

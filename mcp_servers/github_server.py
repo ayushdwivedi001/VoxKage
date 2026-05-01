@@ -39,8 +39,14 @@ if not os.path.exists(VOXKAGE_CLONE_ROOT):
 # Track running projects
 _RUNNING_PROJECTS = {}  # repo_path -> {"process": Popen, "port": int}
 
-def _run_cmd(command, cwd=None, timeout=60):
+def _run_cmd(command, cwd=None, timeout=30):
     try:
+        # Prevent Git from invoking pagers (like less) which hang in headless subprocesses
+        env = os.environ.copy()
+        env["GIT_PAGER"] = "cat"
+        env["PAGER"] = "cat"
+        env["GIT_TERMINAL_PROMPT"] = "0"  # Prevent interactive credential prompts hanging
+        
         result = subprocess.run(
             command,
             cwd=cwd,
@@ -49,7 +55,8 @@ def _run_cmd(command, cwd=None, timeout=60):
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=timeout
+            timeout=timeout,
+            env=env
         )
         return {
             "success": result.returncode == 0,

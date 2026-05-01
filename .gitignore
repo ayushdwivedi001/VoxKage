@@ -109,7 +109,7 @@ VoxKage.spec
 .gemini/
 
 # VoxKage RAG and local AI data
-C:\VoxKage\
+C:/VoxKage/
 
 # Test/scratch files
 _pop_test.py
