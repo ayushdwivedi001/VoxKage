@@ -2,11 +2,11 @@
 Agentic Loop Implementation for VoxKage LLM Client
 Contains the Phase 5: LangGraph Agentic State Machine
 
-Brain: Gemini CLI (primary, 20s timeout, 1 attempt) → Ollama/Qwen (instant fallback)
+Brain: Gemini CLI (primary, 20s timeout, 1 attempt) → Gemini/Qwen (instant fallback)
 
 Key fixes in this version:
   - Gemini agentic calls use 20s timeout (short prompts respond in <10s) and fall
-    to Ollama immediately on first timeout (no 3×45s silence).
+    to Gemini immediately on first timeout (no 3×45s silence).
   - AgentState tracks current_url and last_error so the planner always knows where
     the browser is and what went wrong on the previous step.
   - agent_step args cheatsheet injected into every planning prompt so Gemini always
@@ -25,7 +25,7 @@ import operator
 
 from langgraph.graph import StateGraph, END, START
 from llm.mcp_dispatcher import dispatch_tool_call as execute_tool_call
-from voice.voice_manager import SentenceStreamer, manager, log_to_hud
+from llm.helpers import SentenceStreamer, log_to_hud
 import logging
 
 logger = logging.getLogger(__name__)
@@ -217,19 +217,14 @@ class AgentState(TypedDict):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Gemini-powered LLM node (primary brain, Ollama fallback)
+# Gemini-powered LLM node (primary brain, Gemini fallback)
 # ─────────────────────────────────────────────────────────────────────────────
 async def gemini_llm_node(state: AgentState):
     """
     Calls Gemini CLI (20s timeout, 1 attempt) to plan the next browser step.
-    Falls back to Ollama immediately on any failure — no 135s silence gaps.
+    Falls back to Gemini immediately on any failure — no 135s silence gaps.
     """
     logger.info(f"[Phase5/Gemini] Planning step {state['step_count']}/{MAX_AGENT_STEPS}")
-
-    if manager.was_interrupted:
-        logger.info("[Phase5] User interrupted task at loop start.")
-        log_to_hud("VoxKage", "⛔ Task interrupted by user.")
-        return {"final_response": "Got it — I've stopped the current task.", "goal_is_met": True}
 
     goal = state.get("goal", "Complete the requested task")
     tool_history = state.get("tool_history", [])
@@ -281,7 +276,7 @@ async def gemini_llm_node(state: AgentState):
         f"Otherwise output exactly ONE JSON tool call. No prose. No explanation."
     )
 
-    # ── Try Gemini CLI (45s timeout, 1 attempt only — fail fast to Ollama) ─
+    # ── Try Gemini CLI (45s timeout, 1 attempt only — fail fast to Gemini) ─
     # Uses gemini-3-flash (gemini-2.5-flash-preview-04-17) which is faster and
     # more instruction-following than 2.5-flash for multi-step planning prompts.
     gemini_response = None
@@ -292,7 +287,7 @@ async def gemini_llm_node(state: AgentState):
         )
         img_path = screenshot_path if (screenshot_path and os.path.isfile(screenshot_path)) else None
         # 45s timeout + max 1 attempt: if Gemini is slow/rate-limited, fall
-        # immediately to Ollama rather than burning 3×45s = 135s in silence.
+        # immediately to Gemini rather than burning 3×45s = 135s in silence.
         gemini_response = await ask_voxkage_brain(
             planning_prompt,
             image_path=img_path,
@@ -302,7 +297,7 @@ async def gemini_llm_node(state: AgentState):
         )
         logger.info(f"[Phase5/Gemini] Raw: {gemini_response[:200]!r}")
     except Exception as gem_err:
-        logger.warning(f"[Phase5/Gemini] Failed → Ollama: {gem_err}")
+        logger.warning(f"[Phase5/Gemini] Failed → Gemini: {gem_err}")
 
     # ── Parse Gemini response ──────────────────────────────────────────────
     if gemini_response:
@@ -349,79 +344,15 @@ async def gemini_llm_node(state: AgentState):
                 }
 
         if looks_like_json:
-            logger.info("[Phase5/Gemini] JSON parse failed → Ollama fallback.")
+            logger.warning(f"[Phase5/Gemini] JSON parse failed → No fallback available.")
 
-    # ── Ollama fallback ────────────────────────────────────────────────────
-    # CRITICAL FIX: Inject the same planning_prompt that Gemini received so
-    # Ollama has goal/browser-state/history context and doesn't repeat step 1.
-    logger.info("[Phase5/Ollama] Falling back to Ollama for this step.")
-    client = state["client"]
-
-    # Build Ollama-compatible message list: system role carries the full plan context
-    ollama_messages = [
-        {"role": "system", "content": planning_prompt},
-    ] + [
-        m for m in messages
-        if isinstance(m, dict) and m.get("role") in ("user", "assistant", "tool")
-    ]
-
-    try:
-        response = await _llm_chat_with_retry(client, ollama_messages, tools=tools)
-        message = response.message
-
-        if hasattr(message, "tool_calls") and message.tool_calls:
-            msg_dict = {
-                "role": "assistant",
-                "content": message.content or "",
-                "tool_calls": [
-                    {"function": {"name": t.function.name, "arguments": t.function.arguments}}
-                    for t in message.tool_calls
-                ],
-            }
-            return {"messages": [msg_dict], "step_count": state["step_count"] + 1, "last_error": ""}
-
-        content = message.content or ""
-
-        function_match = re.search(r'<function=([^>]+)>\s*(.*?)\s*</function>', content, re.DOTALL)
-        if function_match:
-            msg_dict = {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [{
-                    "function": {
-                        "name": function_match.group(1).strip(),
-                        "arguments": json.loads(function_match.group(2).strip() or "{}")
-                    }
-                }],
-            }
-            logger.info(f"[Phase5/Ollama] Rescued XML hallucination: {msg_dict['tool_calls'][0]['function']['name']}")
-            return {"messages": [msg_dict], "step_count": state["step_count"] + 1, "last_error": ""}
-
-        clean_content = _sanitize_response(content)
-        _preamble_noise = [
-            "standing by", "online and", "at your service", "ready when",
-            "voxkage online", "systems green", "synchronized", "what's the priority",
-            "what can i", "how can i", "shall i", "systems nominal"
-        ]
-        _is_preamble = any(p in clean_content.lower()[:100] for p in _preamble_noise)
-        if clean_content and len(clean_content) > 30 and not _is_preamble:
-            log_to_hud("VoxKage", f"💬 {clean_content[:200]}")
-
-        return {
-            "messages": [{"role": "assistant", "content": content}],
-            "final_response": content,
-            "goal_is_met": True,
-            "step_count": state["step_count"] + 1,
-            "last_error": "",
-        }
-
-    except Exception as e:
-        logger.error(f"[Phase5] Error in LLM node: {e}")
-        return {
-            "final_response": f"Encountered an error: {str(e)}. Please try a different approach.",
-            "goal_is_met": True,
-            "last_error": "",
-        }
+    # ── If all fails, return error ──────────────────────────────────────────
+    logger.error("[Phase5] Error in LLM node: Gemini failed to return valid JSON.")
+    return {
+        "final_response": "Encountered an error: Gemini failed to return a valid plan. Please try a different approach.",
+        "goal_is_met": True,
+        "last_error": "",
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -620,7 +551,7 @@ async def execute_agentic_loop(
 ) -> AsyncGenerator[str, None]:
     """
     Executes the Phase 5 LangGraph agentic state machine.
-    Gemini CLI is the primary brain (20s timeout, instant Ollama fallback).
+    Gemini CLI is the primary brain (20s timeout, instant Gemini fallback).
     Yields the final response string.
     """
     logger.info("[Phase5] Starting LangGraph Agentic Execution (Gemini brain, self-healing)")

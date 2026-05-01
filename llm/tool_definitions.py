@@ -1185,7 +1185,7 @@ TOOL_DEFINITIONS = [
 TOOL_DEFINITIONS_BY_NAME: dict = {t["name"]: t for t in TOOL_DEFINITIONS}
 
 
-def get_ollama_schema(tool_def: dict) -> dict:
+def get_schema(tool_def: dict) -> dict:
     """Convert a TOOL_DEFINITIONS entry to the Ollama tool_calls schema format."""
     return {
         "type": "function",
@@ -1197,6 +1197,6 @@ def get_ollama_schema(tool_def: dict) -> dict:
     }
 
 
-def get_all_ollama_schemas() -> list:
+def get_all_schemas() -> list:
     """Return all tool definitions in Ollama format. Used as fallback when RAG is disabled."""
-    return [get_ollama_schema(t) for t in TOOL_DEFINITIONS]
+    return [get_schema(t) for t in TOOL_DEFINITIONS]

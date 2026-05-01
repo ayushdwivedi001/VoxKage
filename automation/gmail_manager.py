@@ -131,7 +131,8 @@ def detect_email_intent(prompt: str) -> dict | None:
 # ═══════════════════════════════════════════════════════════════════
 def _generate_email_json(context: str, existing_subject: str = None, existing_body: str = None) -> dict:
     """Isolated LLM sub-agent for generating email JSON. No tools, no schemas — just JSON."""
-    from llm.constants import OLLAMA_HOST, MODEL_NAME
+    import asyncio
+    from llm.gemini_engine import ask_voxkage_brain, clean_cli_json
     
     if existing_subject and existing_body:
         sys_prompt = "You are an email assistant editing an existing draft. Output ONLY valid JSON."
@@ -148,21 +149,28 @@ def _generate_email_json(context: str, existing_subject: str = None, existing_bo
         )
 
     try:
-        response = httpx.post(
-            f"{OLLAMA_HOST}/api/chat", 
-            json={
-                "model": MODEL_NAME,
-                "messages": [
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": usr_prompt}
-                ],
-                "format": "json",
-                "stream": False
-            }, 
-            timeout=120.0
-        )
-        msg = response.json().get('message', {}).get('content', '{}')
-        return json.loads(msg)
+        full_prompt = f"{sys_prompt}\n\n{usr_prompt}"
+        
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import threading
+            result = [""]
+            def _thread_target():
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                result[0] = new_loop.run_until_complete(ask_voxkage_brain(full_prompt))
+                new_loop.close()
+            t = threading.Thread(target=_thread_target)
+            t.start()
+            t.join()
+            raw_response = result[0]
+        else:
+            raw_response = asyncio.run(ask_voxkage_brain(full_prompt))
+
+        parsed = clean_cli_json(raw_response)
+        if isinstance(parsed, dict) and "subject" in parsed and "body" in parsed:
+            return parsed
+        return {"subject": "VoxKage Draft", "body": f"(Sub-agent failed to parse JSON. Instructions: {context})"}
     except Exception as e:
         logger.error(f"Email Sub-Agent Error: {e}")
         return {"subject": "VoxKage Draft", "body": f"(Sub-agent failed. Instructions: {context})"}
@@ -206,7 +214,7 @@ def handle_compose(recipient: str, instructions: str) -> str:
         
         # Push to HUD (silent — not spoken)
         try:
-            from voice.voice_manager import log_to_hud
+            from llm.helpers import log_to_hud
             hud_msg = f"📝 DRAFT READY\nTo: {recipient}\nSubject: {subject}\n\n{body}"
             log_to_hud("VoxKage", hud_msg)
         except Exception:
@@ -252,7 +260,7 @@ def handle_edit(instructions: str) -> str:
         _email_session['draft_id'] = draft['id']
         
         try:
-            from voice.voice_manager import log_to_hud
+            from llm.helpers import log_to_hud
             hud_msg = f"📝 DRAFT UPDATED\nTo: {_email_session['recipient']}\nSubject: {new_subject}\n\n{new_body}"
             log_to_hud("VoxKage", hud_msg)
         except Exception:

@@ -2,10 +2,48 @@ import json
 import re
 from datetime import datetime
 from llm.tool_registry import TOOLS_SCHEMA, execute_tool_call
-from voice.voice_manager import SentenceStreamer, manager
 import logging
+import os
 
 logger = logging.getLogger(__name__)
+
+def log_to_hud(sender: str, text: str):
+    """Universal helper to append chat strings to Settings GUI HUD log."""
+    try:
+        log_path = os.path.join(os.path.abspath("."), ".hud_log")
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"sender": sender, "text": text, "timestamp": datetime.now().isoformat()}) + "\n")
+    except Exception as e:
+        logger.error(f"Failed to write to HUD log: {e}")
+
+class SentenceStreamer:
+    """
+    Utility class to buffer streaming LLM tokens into full sentences
+    and log them to the HUD in real-time.
+    """
+    def __init__(self):
+        self.buffer = ""
+        self.terminators = {'.', '!', '?'}
+
+    def add_token(self, token: str):
+        self.buffer += token
+        if self.buffer.strip().upper().startswith("IGNORE"):
+            return
+        if any(t in self.buffer for t in self.terminators):
+            match = re.search(r'([.!?])\s+', self.buffer)
+            if match:
+                split_idx = match.end()
+                sentence = self.buffer[:split_idx].strip()
+                self.buffer = self.buffer[split_idx:]
+                if sentence:
+                    log_to_hud("VoxKage", sentence)
+
+    def flush(self):
+        buf = self.buffer.strip()
+        if buf and not buf.upper().startswith("IGNORE"):
+            log_to_hud("VoxKage", buf)
+            self.buffer = ""
+
 
 def _extract_json_tool_call(text: str):
     """

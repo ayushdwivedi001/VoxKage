@@ -108,7 +108,7 @@ def _bm25_retrieve(query: str, top_k: int = 8) -> list:
     BM25-style keyword retrieval. Used when no embedding model is available.
     Scores each tool by term overlap between query and corpus_text.
     """
-    from llm.tool_definitions import TOOL_DEFINITIONS, get_ollama_schema
+    from llm.tool_definitions import TOOL_DEFINITIONS, get_schema
     query_tokens = set(query.lower().split())
     scored = []
     for tool in TOOL_DEFINITIONS:
@@ -121,7 +121,7 @@ def _bm25_retrieve(query: str, top_k: int = 8) -> list:
         tag_match = sum(3 for t in tool.get("tags", []) if t in query.lower())
         scored.append((overlap + name_match + tag_match, tool))
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [get_ollama_schema(t) for _, t in scored[:top_k]]
+    return [get_schema(t) for _, t in scored[:top_k]]
 
 
 def build_tool_index(force: bool = False) -> None:
@@ -141,7 +141,7 @@ def build_tool_index(force: bool = False) -> None:
         return
 
     logger.info("[ToolRAG] Building tool index...")
-    from llm.tool_definitions import TOOL_DEFINITIONS, get_ollama_schema
+    from llm.tool_definitions import TOOL_DEFINITIONS, get_schema
     import lancedb
     import pyarrow as pa
 
@@ -158,7 +158,7 @@ def build_tool_index(force: bool = False) -> None:
             "name": tool["name"],
             "description": tool["description"],
             "tags": json.dumps(tool.get("tags", [])),
-            "schema_json": json.dumps(get_ollama_schema(tool)),
+            "schema_json": json.dumps(get_schema(tool)),
             "corpus_text": full_text,
         })
 
@@ -260,8 +260,8 @@ def retrieve_tools(query: str, top_k: int = 8) -> list:
 
     except Exception as e:
         logger.error(f"[ToolRAG] Retrieval failed: {e}. Falling back to full schema.")
-        from llm.tool_definitions import get_all_ollama_schemas
-        return get_all_ollama_schemas()
+        from llm.tool_definitions import get_all_schemas
+        return get_all_schemas()
 
 
 def retrieve_tool_names(query: str, top_k: int = 8) -> list:
@@ -275,10 +275,10 @@ def get_schema_by_name(tool_name: str) -> dict | None:
     Fetch the full Ollama schema for a specific tool by name.
     Used as fallback when Qwen calls a tool that wasn't in the retrieved subset.
     """
-    from llm.tool_definitions import TOOL_DEFINITIONS_BY_NAME, get_ollama_schema
+    from llm.tool_definitions import TOOL_DEFINITIONS_BY_NAME, get_schema
     tool_def = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
     if tool_def:
-        return get_ollama_schema(tool_def)
+        return get_schema(tool_def)
     return None
 
 

@@ -1,7 +1,4 @@
 opencv-python
-pyttsx3
-SpeechRecognition
-pyaudio
 pyautogui
 keyboard
 pyjokes
@@ -11,8 +8,6 @@ requests
 pystray
 Pillow
 deepface
-kokoro>=0.9.4
-soundfile
 numpy
 torch
 langgraph
@@ -26,7 +21,6 @@ spotipy
 PySide6
 qt-material
 qtawesome
-faster-whisper
 PyMuPDF
 python-docx
 python-telegram-bot>=20.0

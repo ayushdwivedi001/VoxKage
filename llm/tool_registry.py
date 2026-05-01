@@ -976,7 +976,7 @@ def execute_tool_call(tool_name: str, arguments: dict):
                 if opts:
                     log_text = "Found Spotify Tracks:\n" + "\n".join([f"{r['number']}: {r['title']}" for r in opts])
                     try:
-                        from voice.voice_manager import log_to_hud
+                        from llm.helpers import log_to_hud
                         log_to_hud("VoxKage", log_text)
                     except:
                         pass
@@ -1196,7 +1196,7 @@ def execute_tool_call(tool_name: str, arguments: dict):
         elif tool_name == "agent_thinking":
             thought = arguments.get("thought", "")
             next_action = arguments.get("next_action", "")
-            from voice.voice_manager import log_to_hud
+            from llm.helpers import log_to_hud
 
             # Check for GOAL_MET sentinel — signals the loop to exit cleanly
             is_goal_met = thought.upper().startswith("GOAL MET")

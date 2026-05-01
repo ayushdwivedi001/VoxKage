@@ -38,29 +38,17 @@ _VENV_PYTHON = os.path.join(_ROOT, "venv", "Scripts", "python.exe")
 _PYTHON = _VENV_PYTHON if os.path.exists(_VENV_PYTHON) else sys.executable
 _CONFIG = os.path.join(_ROOT, "config.json")
 _ICON = os.path.join(_ROOT, "icons", "icon.png")
-_OLLAMA_SCRIPT = os.path.join(_ROOT, "scripts", "ollama_fallback.py")
 _TG_LISTENER = os.path.join(_ROOT, "tg_bridge", "inbound_listener.py")
 
 # VoxKage launch: open PowerShell in project root and run the global voxkage function
 # The `voxkage` function is defined in $PROFILE and handles all flags + config loading
 _GEMINI_CMD = (
-    f'start "VoxKage" powershell -NoExit -Command "cd \'\'{_ROOT}\'\'  ; voxkage"'
+    f'start "VoxKage" powershell -NoExit -Command "cd \'{_ROOT}\' ; voxkage"'
 )
-
-# Ollama fallback: open CMD with Python fallback script
-_OLLAMA_CMD = (
-    f'start "VoxKage Offline" cmd /k "cd /d {_ROOT} && {_PYTHON} scripts/ollama_fallback.py"'
-)
-
 
 def open_voxkage(icon=None, item=None):
     """Open CMD with Gemini CLI running in the project directory."""
     subprocess.Popen(_GEMINI_CMD, shell=True, cwd=_ROOT)
-
-
-def open_voxkage_offline(icon=None, item=None):
-    """Open CMD with Ollama fallback chat."""
-    subprocess.Popen(_OLLAMA_CMD, shell=True, cwd=_ROOT)
 
 
 def open_settings(icon=None, item=None):
@@ -105,10 +93,6 @@ def setup_tray():
     act_open = QAction("▶  Open VoxKage")
     act_open.triggered.connect(open_voxkage)
     menu.addAction(act_open)
-
-    act_offline = QAction("📴  Open VoxKage (Offline)")
-    act_offline.triggered.connect(open_voxkage_offline)
-    menu.addAction(act_offline)
 
     menu.addSeparator()
 
