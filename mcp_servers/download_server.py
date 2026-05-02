@@ -387,28 +387,54 @@ def download_images(
     safe_query = re.sub(r"[^a-z0-9_]", "_", query.lower())[:30]
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120",
-        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Accept": "image/jpeg,image/png,image/webp,image/*;q=0.8,*/*;q=0.5",
         "Referer": search_url,
     }
 
+    # Map content-type → extension (used to detect when server sends AVIF under a .jpg URL)
+    _CTYPE_EXT = {
+        "image/jpeg": ".jpg",
+        "image/jpg":  ".jpg",
+        "image/png":  ".png",
+        "image/webp": ".webp",
+        "image/avif": ".avif",
+        "image/gif":  ".gif",
+    }
+
     for i, img_url in enumerate(unique[:count]):
-        ext_m = re.search(r"\.(jpg|jpeg|png|webp|avif)", img_url.lower())
-        ext = "." + ext_m.group(1) if ext_m else ".jpg"
-        if ext == ".avif":
-            ext = ".jpg"
-        fname = f"{safe_query}_{i+1:02d}{ext}"
-        save_path = os.path.join(save_dir, fname)
+        # Force JPEG from CDN URLs that support format negotiation
+        fetch_url = img_url
+        if "images.unsplash.com" in img_url or "images.pexels.com" in img_url:
+            # Strip existing format params and request JPEG explicitly
+            base_url = img_url.split("?")[0]
+            fetch_url = base_url + "?auto=format&fm=jpg&fit=crop&q=85&w=1920"
+        elif "cdn.pixabay.com" in img_url:
+            fetch_url = img_url  # Pixabay CDN already serves proper JPEGs
 
         try:
-            r = requests.get(img_url, timeout=25, headers=headers, allow_redirects=True)
+            r = requests.get(fetch_url, timeout=25, headers=headers, allow_redirects=True)
             r.raise_for_status()
-            ctype = r.headers.get("Content-Type", "")
+            ctype = r.headers.get("Content-Type", "").lower().split(";")[0].strip()
             if "image" not in ctype and "octet" not in ctype:
                 errors.append(f"  \u2717 #{i+1}: not an image (content-type: {ctype})")
                 continue
             if len(r.content) < 10_000:
                 errors.append(f"  \u2717 #{i+1}: too small ({len(r.content)}B) \u2014 thumbnail, skipping")
                 continue
+
+            # Determine extension from ACTUAL content-type (not URL — URLs lie)
+            real_ext = _CTYPE_EXT.get(ctype, None)
+            if real_ext is None:
+                # Fall back to URL extension only when content-type is vague
+                ext_m = re.search(r"\.(jpg|jpeg|png|webp)", img_url.lower())
+                real_ext = "." + ext_m.group(1) if ext_m else ".jpg"
+            if real_ext == ".avif":
+                # AVIF not compatible with most viewers — skip and try next URL
+                errors.append(f"  \u2717 #{i+1}: skipped AVIF (not desktop-compatible, will try next source)")
+                continue
+
+            fname = f"{safe_query}_{i+1:02d}{real_ext}"
+            save_path = os.path.join(save_dir, fname)
             with open(save_path, "wb") as f:
                 f.write(r.content)
             downloaded.append(f"  \u2713 {fname} ({_fmt_size(len(r.content))}) \u2192 {save_path}")
