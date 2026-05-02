@@ -41,14 +41,51 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("voxkage-devserver")
 
 # -- Constants -----------------------------------------------------------------
-# Where voxkage-browser saves its browser state screenshots
-_VOXKAGE_BRAIN_DIR = r"C:\VoxKage\Brain"
+# Cross-platform screenshot directory (replaces hardcoded C:\VoxKage\Brain)
+_VOXKAGE_BRAIN_DIR = os.path.join(os.path.expanduser("~"), ".voxkage", "brain")
+os.makedirs(_VOXKAGE_BRAIN_DIR, exist_ok=True)
 _SCREENSHOT_FILENAME = "latest_browser_state.jpg"
 _SCREENSHOT_PATH = os.path.join(_VOXKAGE_BRAIN_DIR, _SCREENSHOT_FILENAME)
-_FALLBACK_SCREENSHOT = os.path.join(os.environ.get("TEMP", "C:\\Windows\\Temp"), "voxkage_browser_state.jpg")
+_FALLBACK_SCREENSHOT = os.path.join(os.environ.get("TEMP", os.path.join(os.path.expanduser("~"), "AppData", "Local", "Temp")), "voxkage_browser_state.jpg")
+
+# Persistence file for running servers — survives MCP server restarts
+_DEVSERVERS_JSON = os.path.join(os.path.expanduser("~"), ".voxkage", "devservers.json")
 
 # Track running servers: {port: {"pid": int, "command": str, "url": str, "proc": Popen}}
 _running_servers: dict = {}
+
+
+def _persist_servers():
+    """Write lightweight (no proc object) server info to disk for restart survival."""
+    try:
+        data = {
+            str(port): {
+                k: v for k, v in info.items() if k != "proc"  # proc is not serializable
+            }
+            for port, info in _running_servers.items()
+        }
+        with open(_DEVSERVERS_JSON, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+
+def _restore_servers_from_disk():
+    """Load previously tracked server info from disk into _running_servers.
+    Called by get_server_status when the in-memory dict is empty (after restart).
+    """
+    if not os.path.isfile(_DEVSERVERS_JSON):
+        return
+    try:
+        with open(_DEVSERVERS_JSON, encoding="utf-8") as f:
+            data = json.load(f)
+        for port_str, info in data.items():
+            port = int(port_str)
+            if port not in _running_servers and _is_port_in_use(port):
+                # Port is still in use — restore the record (no proc object)
+                _running_servers[port] = info
+    except Exception:
+        pass
 
 # -- Helpers -------------------------------------------------------------------
 
@@ -397,6 +434,8 @@ def start_dev_server(
             "proc": proc,
             "log": log_path,
         }
+        # Persist to disk so get_server_status survives MCP server restarts
+        _persist_servers()
 
         # Brief wait then verify it started
         time.sleep(2)
@@ -466,6 +505,9 @@ def get_server_status(port: int = 8080) -> str:
       port : Port to check (e.g. 3000, 8080, 5173)
     """
     in_use = _is_port_in_use(port)
+    # Restore from disk if in-memory is empty (happens after MCP server restart)
+    if not _running_servers:
+        _restore_servers_from_disk()
     tracked = _running_servers.get(port)
 
     if not in_use and not tracked:
@@ -517,13 +559,26 @@ def wait_for_server(
 
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(url, timeout=3) as resp:
-                if resp.status < 400:
-                    return (
-                        f"[DEVSERVER] Server READY at {url} (HTTP {resp.status})\n"
-                        f"  Waited: {attempts} attempts\n"
-                        f"  Next: Call open_url('{url}') then get_browser_state() for screenshot."
-                    )
+            # Use requests if available for redirect support; fall back to urllib.
+            # Next.js and many frameworks return HTTP 307 on first load while
+            # compiling. urlopen raises HTTPError on 307 (redirect not followed
+            # without a handler), causing TIMEOUT even when the server is running.
+            try:
+                import requests as _req
+                resp = _req.get(url, timeout=3, allow_redirects=True)
+                status = resp.status_code
+            except ImportError:
+                import urllib.request
+                with urllib.request.urlopen(url, timeout=3) as r:
+                    status = r.status
+            # Accept any 2xx or 3xx — these mean the server is alive.
+            # Only 5xx (server errors) or connection refused means not ready.
+            if status < 500:
+                return (
+                    f"[DEVSERVER] Server READY at {url} (HTTP {status})\n"
+                    f"  Waited: {attempts} attempts\n"
+                    f"  Next: Call open_url('{url}') then get_browser_state() for screenshot."
+                )
         except Exception as e:
             last_err = str(e)[:100]
         time.sleep(1)

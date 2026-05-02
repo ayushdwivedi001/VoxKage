@@ -63,14 +63,18 @@ def open_url(url: str) -> str:
         "intent": "",
     }, res_q))
     try:
-        status, result = res_q.get(timeout=30)
+        status, result = res_q.get(timeout=15)   # 30s → 15s: prevents double-block cascade
         if status == "ok":
             if isinstance(result, dict):
                 return f"Opened {url}\nNow at: {result.get('url_after', url)}"
             return f"Opened {url}"
         return f"Opened {url} (warning: {result})"
     except _queue.Empty:
-        return f"Opened {url} (browser may still be loading)"
+        return (
+            f"TIMEOUT: Browser is still loading {url}. "
+            f"Wait a moment, then call get_browser_state() to check. "
+            f"Do NOT call open_url again immediately."
+        )
 
 
 @mcp.tool()
@@ -131,19 +135,25 @@ def scroll_and_read(
       times     : how many scroll steps (1 step ≈ 600px, default 2)
     """
     import queue as _queue
+    import time as _time
     _, _, _, agent_step_sync, _ = _web_agent()
     results = []
+    _wall_start = _time.monotonic()
+    _WALL_LIMIT = 45  # seconds — hard cap prevents MCP server freeze on slow pages
     for i in range(max(1, min(times, 6))):
+        if _time.monotonic() - _wall_start > _WALL_LIMIT:
+            results.append(f"[scroll_and_read: {_WALL_LIMIT}s wall-clock limit hit after {i} scrolls]")
+            break
         r = agent_step_sync({"action": "scroll", "goal": f"Scroll {direction} to reveal more content", "direction": direction})
+        results.append(r.get("text", "") if isinstance(r, dict) else str(r))
+    # Final extract_text (only if time budget remains)
+    if _time.monotonic() - _wall_start <= _WALL_LIMIT:
+        r = agent_step_sync({"action": "extract_text", "goal": "Extract full visible page text after scrolling"})
         if isinstance(r, dict):
-            results.append(r.get("text", ""))
-        else:
-            results.append(str(r))
-    # Final extract_text
-    r = agent_step_sync({"action": "extract_text", "goal": "Extract full visible page text after scrolling"})
-    if isinstance(r, dict):
-        return r.get("text", "Could not extract text.")
-    return str(r)
+            return r.get("text", "Could not extract text.")
+        return str(r)
+    partial = " ".join(t for t in results if t)
+    return partial or "[scroll_and_read timed out — no text extracted]"
 
 
 @mcp.tool()
@@ -170,7 +180,11 @@ def agent_thinking(goal: str = "", plan: str = "", thought: str = "", next_actio
 
     is_done = effective_goal.upper().startswith("GOAL MET")
     if is_done:
-        return f"GOAL_MET: {effective_goal}"
+        return (
+            f"GOAL_MET: {effective_goal}\n\n"
+            f"━━━ TASK COMPLETE ━━━\n"
+            f"DO NOT call any more tools. Summarize the result in plain text for the user now."
+        )
 
     return (
         f"PLAN LOGGED:\nGoal: {effective_goal}\nSteps:\n{effective_plan}\n\n"
@@ -208,7 +222,6 @@ def agent_step(
     goal: always required — describe what you are trying to accomplish
     """
     _, _, _, agent_step_sync, _ = _web_agent()
-    # Coerce Optional params to their default values to prevent Pydantic validation errors
     args = {
         "action":    action,
         "goal":      goal,
@@ -217,12 +230,16 @@ def agent_step(
         "site":      site      or "",
         "intent":    intent    or "",
         "direction": direction or "down",
-        "ms":        ms        or 2000,
+        "ms":        ms if ms is not None else 2000,  # BUGFIX: preserve ms=2000 wait default
         "text":      text      or "",
         "selector":  selector  or "",
     }
-    # Strip empty strings and defaults so the underlying handler gets clean args
-    args = {k: v for k, v in args.items() if v != "" and v not in (0, 2000) or k in ("action", "goal")}
+    # Strip empties/zeros but NEVER strip ms=2000 (that is a valid wait duration)
+    args = {k: v for k, v in args.items() if (
+        k in ("action", "goal")       # always keep required fields
+        or (k == "ms" and v > 0)      # keep ms if it's a positive wait
+        or (k != "ms" and v not in ("", 0))  # other fields: drop empty/zero only
+    )}
     return agent_step_sync(args)
 
 
@@ -280,10 +297,15 @@ def find_download_url(
         "intent": f"{software_name} official site download",
     })
 
-    # Step 3: Screenshot to verify we're on the right page
+    # Step 3: Extract text from download page
+    # BUGFIX: agent_step_sync returns str OR dict depending on action; always guard.
     state = agent_step_sync({"action": "extract_text", "goal": f"Read {software_name} download page"})
-    page_text = state.get("text", "") if isinstance(state, dict) else str(state)
-    current_url = state.get("url", "") if isinstance(state, dict) else ""
+    if isinstance(state, dict):
+        page_text = state.get("text", "")
+        current_url = state.get("url", "")
+    else:
+        page_text = str(state)
+        current_url = ""
 
     # Step 4: Extract download links from page
     import re as _re

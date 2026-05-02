@@ -305,7 +305,12 @@ def _find_best_match(description: str, threshold: float = 0.5):
         if not os.path.exists(sm_dir):
             continue
         try:
+            import time as _t
+            _sm_start = _t.monotonic()
             for dirpath, _, filenames in os.walk(sm_dir):
+                # Soft 3s timeout: Stop Menu walks can be very large on some installs
+                if _t.monotonic() - _sm_start > 3.0:
+                    break
                 for fname in filenames:
                     if fname.lower().endswith(".lnk"):
                         lnk_name = fname[:-4]
@@ -489,13 +494,23 @@ def find_and_analyze_file(filename_keyword: str, query: str = "") -> str:
 def take_screenshot() -> str:
     """
     Takes a screenshot of what the user is currently seeing on screen.
-    Returns the file path where the screenshot was saved.
+    Returns the ABSOLUTE FILE PATH where the screenshot was saved.
+
     Use when user says: 'take a screenshot', 'screenshot this', 'capture the screen'.
+
+    VISION PIPELINE: After calling this, you MUST call:
+        analyze_specific_file(file_path=<returned_path>, query="<what to look for>")
+    to have Gemini visually inspect the screenshot. The file path alone is NOT
+    enough — Gemini cannot see images by path, only through analyze_specific_file.
     """
     do_screenshot = _screenshot()
     filepath = do_screenshot()
     if filepath:
-        return f"Screenshot saved to: {filepath}"
+        return (
+            f"Screenshot saved to: {filepath}\n"
+            f"To visually inspect it, call: "
+            f"analyze_specific_file(file_path='{filepath}', query='<your question about the screen>')"
+        )
     return "Failed to take screenshot."
 
 

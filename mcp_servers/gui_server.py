@@ -94,6 +94,31 @@ def _vision(label: str, text: str, hwnd: int = 0) -> dict:
     }
 
 
+def _vision_to_str(label: str, text: str, hwnd: int = 0) -> str:
+    """MCP-safe version of _vision().
+
+    MCP tool handlers that return str (not dict) need this variant.
+    Returns a plain string with the screenshot path embedded so the caller
+    can use analyze_specific_file(file_path=<path>, query=...) to have
+    Gemini visually inspect the screenshot.
+
+    The __vision__ dict pipeline is only available in the legacy tool_registry
+    path; for MCP-served tools use this helper instead.
+    """
+    path, _ = _screenshot(label, hwnd)
+    import json as _json
+    payload = {
+        "text": text,
+        "screenshot_path": path,
+        "vision_hint": (
+            f"Screenshot saved to: {path}. "
+            f"Call analyze_specific_file(file_path='{path}', query='<your question>') "
+            f"to visually inspect this screenshot."
+        ) if path else "Screenshot not available.",
+    }
+    return _json.dumps(payload)
+
+
 def _get_windows() -> list:
     if not _WIN32:
         return []
@@ -144,15 +169,46 @@ def _find_hwnd(app_name: str) -> int:
 
 
 def _focus(hwnd: int) -> bool:
+    """Bring a window to foreground reliably from a background MCP process.
+
+    Plain SetForegroundWindow() fails 100% of the time on Windows 10/11 when
+    the calling process is not already the foreground process. The fix is to
+    use AttachThreadInput to temporarily attach our thread to the foreground
+    thread, then call SetForegroundWindow, then detach.
+    """
     if not hwnd or not _WIN32:
         return False
     try:
+        import ctypes
+        import ctypes.wintypes
         if win32gui.IsIconic(hwnd):
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            time.sleep(0.2)
+        # Get thread IDs for AttachThreadInput
+        fg_hwnd  = win32gui.GetForegroundWindow()
+        fg_tid   = ctypes.windll.user32.GetWindowThreadProcessId(fg_hwnd, None)
+        our_tid  = ctypes.windll.kernel32.GetCurrentThreadId()
+        tgt_tid  = ctypes.windll.user32.GetWindowThreadProcessId(hwnd, None)
+        # AllowSetForegroundWindow tells Windows we're allowed to steal focus
+        ctypes.windll.user32.AllowSetForegroundWindow(ctypes.wintypes.DWORD(-1))
+        attached_fg = False
+        attached_tg = False
+        if fg_tid != our_tid:
+            ctypes.windll.user32.AttachThreadInput(our_tid, fg_tid, True)
+            attached_fg = True
+        if tgt_tid != our_tid and tgt_tid != fg_tid:
+            ctypes.windll.user32.AttachThreadInput(our_tid, tgt_tid, True)
+            attached_tg = True
         win32gui.SetForegroundWindow(hwnd)
+        win32gui.BringWindowToTop(hwnd)
         time.sleep(0.35)
+        if attached_fg:
+            ctypes.windll.user32.AttachThreadInput(our_tid, fg_tid, False)
+        if attached_tg:
+            ctypes.windll.user32.AttachThreadInput(our_tid, tgt_tid, False)
         return True
     except Exception:
+        # Last-resort fallback (may silently fail on locked desktops)
         try:
             win32gui.BringWindowToTop(hwnd)
             time.sleep(0.2)
@@ -245,11 +301,14 @@ def gui_thinking(goal: str, plan: str) -> str:
 
 
 @mcp.tool()
-def get_desktop_state() -> dict:
+def get_desktop_state() -> str:
     """
     GUI PILOT: Take a full desktop screenshot and list all open windows.
 
-    Returns a __vision__ dict so Gemini can SEE the current desktop.
+    Returns a JSON string containing the desktop text description and the
+    absolute path to the saved screenshot. Use analyze_specific_file() on the
+    screenshot path to let Gemini visually inspect the desktop.
+
     Use this:
     - At the start of any GUI task to understand current state
     - After completing a task to verify the result
@@ -274,7 +333,7 @@ def get_desktop_state() -> dict:
         f"Open windows ({len(windows)}):\n{win_list}\n\n"
         f"Screenshot attached — analyze it to understand current UI state."
     )
-    return _vision("desktop_state", text)
+    return _vision_to_str("desktop_state", text)
 
 
 @mcp.tool()
@@ -448,10 +507,14 @@ def gui_step(
             _focus(hwnd)
             return _vision("focus", f"Focused '{target}'. Verify the window is now in front.", hwnd)
         else:
-            # Try opening it
-            result = _open_file_in_app("", target)
-            time.sleep(1.5)
-            return f"Window '{target}' not found — attempted to launch. {result}"
+            # Window not found — do NOT call os.startfile("") which crashes silently
+            # with FileNotFoundError. Return a clear error so the agent can decide
+            # whether to launch the app first or choose a different window.
+            return (
+                f"Window '{target}' not found in open windows. "
+                f"Is the application running? If not, call gui_step(action='open_file', ...) "
+                f"or smart_open(description='{target}') to launch it first, then retry focus."
+            )
 
     # ── open_file ──────────────────────────────────────────────────────────────
     if action == "open_file":
@@ -491,12 +554,20 @@ def gui_step(
     if action == "type":
         if not text:
             return "type action requires 'text' parameter."
-        # Use clipboard for reliable unicode typing
-        old_clip = _read_clipboard()
-        _set_clipboard(text)
-        pyautogui.hotkey("ctrl", "v")
-        time.sleep(0.3)
-        _set_clipboard(old_clip)
+        # For short strings (<= 80 chars): use typewrite for character-by-character
+        # typing. This works in password fields and secure inputs where Ctrl+V is blocked.
+        # For long strings or unicode: clipboard paste is faster and more reliable.
+        if len(text) <= 80 and all(ord(c) < 128 for c in text):
+            pyautogui.typewrite(text, interval=0.03)
+        else:
+            # Clipboard method for long text / unicode characters
+            old_clip = _read_clipboard()
+            try:
+                _set_clipboard(text)
+                pyautogui.hotkey("ctrl", "v")
+                time.sleep(0.3)
+            finally:
+                _set_clipboard(old_clip)  # Always restore, even if paste fails
         return f"Typed: \"{text[:80]}{'...' if len(text)>80 else ''}\""
 
     # ── scroll ─────────────────────────────────────────────────────────────────
@@ -524,11 +595,26 @@ def gui_step(
         if hwnd:
             _focus(hwnd)
             time.sleep(0.2)
-        return _vision(
+        # Extract retry count from goal string (format: "[RETRY:N] original goal")
+        # This lets the agent pass state across calls without extra parameters.
+        import re as _re
+        retry_match = _re.match(r"\[RETRY:(\d+)\]", goal or "")
+        retry_count = int(retry_match.group(1)) if retry_match else 0
+        if retry_count >= 3:
+            return (
+                f"GIVE_UP: Cannot locate '{target}' after 3 vision-assisted attempts. "
+                f"The element may not be visible on screen. "
+                f"Try: scroll first (gui_step action='scroll'), then retry. "
+                f"Or describe the element differently. "
+                f"Or take a screenshot to manually inspect the current state."
+            )
+        next_retry_goal = f"[RETRY:{retry_count + 1}] {(goal or '').lstrip()}"
+        return _vision_to_str(
             "find_and_click",
-            f"FIND AND CLICK: Look at this screenshot and locate: \"{target}\"\n"
+            f"FIND AND CLICK (attempt {retry_count + 1}/3): Locate '{target}' in this screenshot.\n"
             f"Identify the EXACT pixel coordinates (x, y) of that element.\n"
             f"Then call: gui_step(action=\"click\", x=<x>, y=<y>, goal=\"{goal}\")\n"
+            f"If click lands wrong and you need to retry find_and_click, use goal=\"{next_retry_goal}\"\n"
             f"If the element is not visible, call gui_step(action=\"scroll\", direction=\"down\") and look again."
         )
 
@@ -605,15 +691,17 @@ def read_active_document() -> dict | str:
 
     if is_text_editor:
         old_clip = _read_clipboard()
-        pyautogui.hotkey("ctrl", "a")
-        time.sleep(0.3)
-        pyautogui.hotkey("ctrl", "c")
-        time.sleep(0.4)
-        content = _read_clipboard()
-        # Deselect
-        pyautogui.hotkey("ctrl", "Home")
-        # Restore clipboard
-        _set_clipboard(old_clip)
+        try:
+            pyautogui.hotkey("ctrl", "a")
+            time.sleep(0.3)
+            pyautogui.hotkey("ctrl", "c")
+            time.sleep(0.4)
+            content = _read_clipboard()
+            # Deselect
+            pyautogui.hotkey("ctrl", "Home")
+        finally:
+            # Always restore clipboard, even if Ctrl+C raised an exception
+            _set_clipboard(old_clip)
         if content:
             preview = content[:6000]
             return (

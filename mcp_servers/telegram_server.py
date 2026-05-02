@@ -3,13 +3,27 @@ MCP Server: Telegram Bridge
 Handles BOTH outbound (sending messages from VoxKage → Telegram)
 and inbound awareness (checking messages from the user's phone).
 
+Key design decisions:
+  - telegram_ask_save is NON-BLOCKING: sends question and returns QUESTION_SENT immediately.
+    Use telegram_check_reply() on subsequent turns to get the user's yes/no answer.
+  - telegram_get_pending_messages tracks a persistent offset so messages are never repeated.
+  - telegram_send_file auto-routes .jpg/.jpeg/.png/.webp to sendPhoto (inline) vs sendDocument.
+
 Standalone — run directly:
     python mcp_servers/telegram_server.py
 """
 
 import os
 import sys
+import json
 import logging
+from pathlib import Path
+
+# ── Persistent state dir (cross-platform, used for offset + pending reply) ─────
+_VOXKAGE_DIR = Path(os.path.expanduser("~")) / ".voxkage"
+_VOXKAGE_DIR.mkdir(parents=True, exist_ok=True)
+_OFFSET_FILE = _VOXKAGE_DIR / "telegram_offset.json"
+_PENDING_REPLY_FILE = _VOXKAGE_DIR / "telegram_pending_reply.json"
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -47,23 +61,54 @@ def _send(text: str) -> bool:
         return False
 
 
+# Image extensions that should be sent as photos (renders inline in Telegram chat)
+_PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+
 def _send_document(file_path: str, caption: str = "") -> bool:
-    """Low-level file send via Telegram Bot API."""
+    """Low-level file send via Telegram Bot API.
+    Automatically routes images to sendPhoto for inline display.
+    All other file types use sendDocument.
+    """
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         return False
+    ext = os.path.splitext(file_path)[1].lower()
+    endpoint = "sendPhoto" if ext in _PHOTO_EXTS else "sendDocument"
+    field_name = "photo" if endpoint == "sendPhoto" else "document"
     try:
         import requests
         with open(file_path, "rb") as f:
             resp = requests.post(
-                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument",
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/{endpoint}",
                 data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption},
-                files={"document": f},
+                files={field_name: f},
                 timeout=30,
             )
         return resp.status_code == 200
     except Exception as e:
         logger.error(f"[Telegram] File send error: {e}")
         return False
+
+
+def _read_offset() -> int:
+    """Read the last processed update_id from disk. Returns 0 if none stored."""
+    try:
+        if _OFFSET_FILE.exists():
+            data = json.loads(_OFFSET_FILE.read_text(encoding="utf-8"))
+            return int(data.get("last_update_id", 0))
+    except Exception:
+        pass
+    return 0
+
+
+def _write_offset(update_id: int):
+    """Persist the last processed update_id to disk."""
+    try:
+        _OFFSET_FILE.write_text(
+            json.dumps({"last_update_id": update_id}), encoding="utf-8"
+        )
+    except Exception as e:
+        logger.warning(f"[Telegram] Could not write offset: {e}")
 
 
 @mcp.tool()
@@ -116,43 +161,89 @@ def telegram_send_file(file_path: str, caption: str = "") -> str:
 def telegram_ask_save(content_description: str) -> str:
     """
     Asks the user via Telegram if they want to save the current information.
-    Sends a Yes/No question and waits up to 30 seconds for a reply.
-    Returns: 'YES_SAVE', 'NO_SKIP', or 'TIMEOUT'
+
+    *** NON-BLOCKING — returns immediately after sending the question. ***
+    Do NOT wait for a reply in this call. The MCP server would freeze for 30s
+    if this polled synchronously — all other tools would be unreachable.
+
+    Workflow:
+      1. Call telegram_ask_save(content_description) → sends question, returns QUESTION_SENT
+      2. On your NEXT turn, call telegram_check_reply() → returns YES_SAVE, NO_SKIP, or WAITING
+      3. If WAITING, call telegram_check_reply() again on subsequent turns.
+
     Use ONLY when you have generated a substantial result (>300 chars).
+    Returns: 'QUESTION_SENT', or 'NO_SKIP' if Telegram is not configured.
     """
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         return "NO_SKIP"
     question = (
         f"I just generated: *{content_description}*.\n\n"
-        f"Would you like me to send this to Telegram? Reply YES or NO."
+        f"Would you like me to send this to Telegram? Reply *YES* or *NO*."
     )
+    # Record current offset so check_reply only looks at messages AFTER this question
+    current_offset = _read_offset()
+    try:
+        _PENDING_REPLY_FILE.write_text(
+            json.dumps({"waiting": True, "baseline_offset": current_offset}),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
     _send(question)
-    # Poll for 30 seconds for a reply
-    import requests, time
-    deadline = time.time() + 30
-    last_update_id = None
-    while time.time() < deadline:
-        try:
-            params = {"timeout": 5}
-            if last_update_id:
-                params["offset"] = last_update_id + 1
-            resp = requests.get(
-                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
-                params=params,
-                timeout=10,
-            )
-            updates = resp.json().get("result", [])
-            for u in updates:
-                last_update_id = u["update_id"]
-                msg = u.get("message", {}).get("text", "").strip().upper()
-                if msg in ("YES", "Y"):
-                    return "YES_SAVE"
-                if msg in ("NO", "N"):
-                    return "NO_SKIP"
-        except Exception:
-            pass
-        time.sleep(2)
-    return "TIMEOUT"
+    return (
+        "QUESTION_SENT: Yes/No question sent to Telegram. "
+        "Call telegram_check_reply() on your next turn to get the user's answer."
+    )
+
+
+@mcp.tool()
+def telegram_check_reply() -> str:
+    """
+    Check if the user has replied to a previous telegram_ask_save() question.
+    Call this once per turn AFTER calling telegram_ask_save().
+
+    Returns:
+      'YES_SAVE'  — user replied yes, proceed to send content
+      'NO_SKIP'   — user replied no, skip sending
+      'WAITING'   — no reply yet, check again next turn
+      'NO_PENDING' — no question was sent (telegram_ask_save not called)
+    """
+    if not TELEGRAM_TOKEN:
+        return "NO_PENDING"
+    try:
+        if not _PENDING_REPLY_FILE.exists():
+            return "NO_PENDING"
+        state = json.loads(_PENDING_REPLY_FILE.read_text(encoding="utf-8"))
+        if not state.get("waiting"):
+            return "NO_PENDING"
+        baseline = state.get("baseline_offset", 0)
+    except Exception:
+        return "NO_PENDING"
+
+    try:
+        import requests
+        # Only fetch messages AFTER our question was sent
+        params = {"limit": 10, "timeout": 0, "offset": baseline + 1}
+        resp = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
+            params=params,
+            timeout=8,
+        )
+        updates = resp.json().get("result", [])
+        for u in updates:
+            uid = u["update_id"]
+            msg = u.get("message", {}).get("text", "").strip().upper()
+            if msg in ("YES", "Y"):
+                _PENDING_REPLY_FILE.write_text(json.dumps({"waiting": False}), encoding="utf-8")
+                _write_offset(uid)
+                return "YES_SAVE"
+            if msg in ("NO", "N"):
+                _PENDING_REPLY_FILE.write_text(json.dumps({"waiting": False}), encoding="utf-8")
+                _write_offset(uid)
+                return "NO_SKIP"
+        return "WAITING"
+    except Exception as e:
+        return f"ERROR: {e}"
 
 
 @mcp.tool()
@@ -171,23 +262,38 @@ def telegram_get_status() -> str:
 @mcp.tool()
 def telegram_get_pending_messages() -> str:
     """
-    Checks if the user has sent any new messages via Telegram.
-    Returns the latest unread message text, or 'NO_MESSAGES' if none.
-    Use this proactively if you want to check for new Telegram input.
+    Checks if the user has sent any NEW messages via Telegram since the last check.
+    Uses a persistent offset so old/already-seen messages are never returned again.
+
+    Returns:
+      'PENDING: <message text>' — a new message is waiting
+      'NO_MESSAGES'            — no new messages
+      'ERROR: ...'             — API call failed
+
+    VoxKage should call this proactively to sense if the user has sent something
+    from their phone without being asked in the terminal.
     """
     if not TELEGRAM_TOKEN:
         return "NO_MESSAGES"
     try:
         import requests
+        last_id = _read_offset()
+        # offset = last_id + 1 tells Telegram "give me only updates AFTER this one"
+        params = {"limit": 5, "timeout": 0}
+        if last_id > 0:
+            params["offset"] = last_id + 1
         resp = requests.get(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
-            params={"limit": 5, "timeout": 0},
+            params=params,
             timeout=10,
         )
         updates = resp.json().get("result", [])
         if not updates:
             return "NO_MESSAGES"
-        # Return latest message text
+        # Advance the offset to the latest update so we never return these again
+        max_id = max(u["update_id"] for u in updates)
+        _write_offset(max_id)
+        # Return the latest text message
         for u in reversed(updates):
             msg = u.get("message", {}).get("text", "").strip()
             if msg:

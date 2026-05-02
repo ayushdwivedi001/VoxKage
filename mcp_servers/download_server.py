@@ -143,45 +143,65 @@ def download_file(
             f"Agreed?"
         )
 
-    try:
-        with _dl_lock:
-            _active_downloads[filename] = {"progress": 0, "total": 0, "status": "downloading", "path": save_path}
+    # confirmed=True: start the actual download in a BACKGROUND THREAD.
+    # The MCP tool returns immediately so the server stays responsive.
+    # The user can call get_download_status() any time to check progress.
+    def _do_download():
+        try:
+            with _dl_lock:
+                _active_downloads[filename] = {
+                    "progress": 0, "total": 0,
+                    "status": "downloading", "path": save_path
+                }
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            with requests.get(url, stream=True, timeout=30, headers=headers, allow_redirects=True) as r:
+                r.raise_for_status()
+                total = int(r.headers.get("Content-Length", 0))
+                downloaded = 0
+                with open(save_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=65536):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            with _dl_lock:
+                                _active_downloads[filename]["progress"] = downloaded
+                                _active_downloads[filename]["total"] = total
+            with _dl_lock:
+                _active_downloads[filename]["status"] = "done"
+            # Fire Windows toast notification when download completes
+            try:
+                from mcp_servers.notify_server import _toast
+                ext = os.path.splitext(filename)[1].lower()
+                is_exec = ext in (".exe", ".msi", ".pkg", ".deb", ".rpm", ".appimage")
+                final_size = os.path.getsize(save_path)
+                hint = " Ready to install." if is_exec else ""
+                _toast(
+                    "VoxKage — Download Complete",
+                    f"{filename} ({_fmt_size(final_size)}) saved to {save_dir}.{hint}",
+                    duration="long",
+                )
+            except Exception:
+                pass  # Notification is a best-effort bonus
+        except Exception as e:
+            with _dl_lock:
+                _active_downloads[filename]["status"] = f"error: {e}"
 
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        with requests.get(url, stream=True, timeout=30, headers=headers, allow_redirects=True) as r:
-            r.raise_for_status()
-            total = int(r.headers.get("Content-Length", 0))
-            downloaded = 0
-            with open(save_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=65536):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        with _dl_lock:
-                            _active_downloads[filename]["progress"] = downloaded
-                            _active_downloads[filename]["total"] = total
+    t = threading.Thread(target=_do_download, name=f"dl_{filename}", daemon=True)
+    t.start()
 
-        with _dl_lock:
-            _active_downloads[filename]["status"] = "done"
-
-        final_size = os.path.getsize(save_path)
-        ext = os.path.splitext(filename)[1].lower()
-        is_executable = ext in (".exe", ".msi", ".pkg", ".deb", ".rpm", ".appimage")
-        install_hint = (
-            f"\nTo install this file, use run_installer(file_path='{save_path}')."
-            if is_executable else ""
-        )
-        return (
-            f"\u2713 Download complete!\n"
-            f"  File   : {filename}\n"
-            f"  Size   : {_fmt_size(final_size)}\n"
-            f"  Saved  : {save_path}"
-            f"{install_hint}"
-        )
-    except Exception as e:
-        with _dl_lock:
-            _active_downloads.pop(filename, None)
-        return f"Download failed: {e}\nURL: {url}"
+    ext = os.path.splitext(filename)[1].lower()
+    is_executable = ext in (".exe", ".msi", ".pkg", ".deb", ".rpm", ".appimage")
+    install_hint = (
+        f" When done, run: run_installer(file_path='{save_path}')."
+        if is_executable else ""
+    )
+    return (
+        f"DOWNLOADING: '{filename}' started in the background, sir.\n"
+        f"  Saving to : {save_path}\n"
+        f"  Source    : {domain}\n\n"
+        f"Call get_download_status() to monitor progress.{install_hint}\n"
+        f"You will receive a Windows notification when it completes."
+    )
 
 
 @mcp.tool()
@@ -282,25 +302,32 @@ def download_images(
         return not any(m in low for m in SKIP_MARKERS)
 
     def _scrape_source(source_name: str, url: str) -> list:
-        """Navigate browser, render JS, scroll for lazy-load, extract image URLs from live DOM."""
+        """Navigate browser, render JS, scroll for lazy-load, extract image URLs from live DOM.
+        Hard wall-clock cap of 30s prevents this from blocking the MCP server on slow pages.
+        """
+        import time as _t
+        _scrape_start = _t.monotonic()
+        _SCRAPE_LIMIT = 30  # seconds hard cap
+
+        def _step(args: dict):
+            """Run an agent_step only if wall-clock budget remains."""
+            if _t.monotonic() - _scrape_start > _SCRAPE_LIMIT:
+                return None
+            return agent_step_sync(args)
+
         # Step 1: Navigate
-        agent_step_sync({
-            "action": "goto",
-            "goal": f"Open {source_name} search page for '{query}'",
-            "url": url,
-        })
+        _step({"action": "goto", "goal": f"Open {source_name} search page for '{query}'", "url": url})
         # Step 2: Wait for JavaScript/React to render images
-        agent_step_sync({"action": "wait", "goal": "Wait for JS to render images", "ms": 3500})
+        _step({"action": "wait", "goal": "Wait for JS to render images", "ms": 3500})
         # Step 3: Scroll to trigger lazy-loading
-        agent_step_sync({"action": "scroll", "goal": "Scroll to load lazy images (batch 1)", "direction": "down"})
-        agent_step_sync({"action": "wait", "goal": "Wait after first scroll", "ms": 2000})
-        agent_step_sync({"action": "scroll", "goal": "Scroll to load lazy images (batch 2)", "direction": "down"})
-        agent_step_sync({"action": "wait", "goal": "Wait after second scroll", "ms": 1500})
+        _step({"action": "scroll", "goal": "Scroll to load lazy images (batch 1)", "direction": "down"})
+        _step({"action": "wait", "goal": "Wait after first scroll", "ms": 2000})
+        _step({"action": "scroll", "goal": "Scroll to load lazy images (batch 2)", "direction": "down"})
+        _step({"action": "wait", "goal": "Wait after second scroll", "ms": 1500})
         # Step 4: Extract all image URLs from live rendered DOM
-        result = agent_step_sync({
-            "action": "extract_image_urls",
-            "goal": f"Extract all image URLs from {source_name} live DOM for query: {query}",
-        })
+        result = _step({"action": "extract_image_urls", "goal": f"Extract all image URLs from {source_name} live DOM for query: {query}"})
+        if result is None:
+            return []  # Timed out before extraction
         # Parse: prefer structured field, fall back to text JSON block
         img_urls = []
         if isinstance(result, dict):

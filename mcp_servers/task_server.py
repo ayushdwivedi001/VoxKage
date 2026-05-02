@@ -87,7 +87,7 @@ _MODELS = {
 
 # Default choices per complexity tier
 _MODEL_HEAVY    = _MODELS["pro-latest"]    # gemini-3.1-pro-preview
-_MODEL_STANDARD = _MODELS["flash-stable"]  # gemini-2.5-flash
+_MODEL_STANDARD = _MODELS["flash-latest"]  # gemini-3-flash-preview  (matches user's default)
 
 # Aliases the user (or GEMINI.md) can pass as model_override
 _MODEL_ALIASES = {
@@ -176,36 +176,75 @@ def _save_task(task: dict):
         f.write(json.dumps(task, ensure_ascii=False) + "\n")
 
 
-def _update_task(task_id: str, updates: dict) -> bool:
-    tasks = _load_tasks()
-    found = False
-    for t in tasks:
-        if t.get("id") == task_id:
-            t.update(updates)
-            found = True
+# ── File lock helper for tasks.jsonl ──────────────────────────────────────────
+# On Windows, fcntl is unavailable. We use a .lock sentinel file approach:
+# acquire = create the lock file (fail if exists), release = delete it.
+# The lock protects _update_task and _append_step from simultaneous writes
+# by the main session and running sub-agents.
+import contextlib as _contextlib
+
+@_contextlib.contextmanager
+def _task_file_lock(timeout: float = 5.0):
+    """Acquire a .lock sentinel file around tasks.jsonl operations.
+    Retries for up to `timeout` seconds before giving up (returns without lock).
+    """
+    import time as _t
+    lock_path = _TASK_FILE + ".lock"
+    deadline = _t.monotonic() + timeout
+    acquired = False
+    while _t.monotonic() < deadline:
+        try:
+            # Exclusive create — fails if file already exists
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            acquired = True
             break
-    if not found:
-        return False
-    with open(_TASK_FILE, "w", encoding="utf-8") as f:
+        except FileExistsError:
+            _t.sleep(0.05)  # Retry every 50ms
+        except Exception:
+            break  # Unexpected error — proceed without lock
+    try:
+        yield
+    finally:
+        if acquired:
+            try:
+                os.unlink(lock_path)
+            except Exception:
+                pass
+
+
+def _update_task(task_id: str, updates: dict) -> bool:
+    with _task_file_lock():
+        tasks = _load_tasks()
+        found = False
         for t in tasks:
-            f.write(json.dumps(t, ensure_ascii=False) + "\n")
+            if t.get("id") == task_id:
+                t.update(updates)
+                found = True
+                break
+        if not found:
+            return False
+        with open(_TASK_FILE, "w", encoding="utf-8") as f:
+            for t in tasks:
+                f.write(json.dumps(t, ensure_ascii=False) + "\n")
     return True
 
 
 def _append_step(task_id: str, step: dict) -> bool:
     """Thread-safe: append a step entry to task['steps'] list."""
-    tasks = _load_tasks()
-    for t in tasks:
-        if t.get("id") == task_id:
-            steps = t.get("steps") or []   # coerce None -> [] for old records
-            steps.append(step)
-            t["steps"] = steps
-            t["current_step"] = step.get("action", "")
-            t["step_updated_at"] = step.get("timestamp", datetime.now().isoformat())
-            break
-    with open(_TASK_FILE, "w", encoding="utf-8") as f:
+    with _task_file_lock():
+        tasks = _load_tasks()
         for t in tasks:
-            f.write(json.dumps(t, ensure_ascii=False) + "\n")
+            if t.get("id") == task_id:
+                steps = t.get("steps") or []   # coerce None -> [] for old records
+                steps.append(step)
+                t["steps"] = steps
+                t["current_step"] = step.get("action", "")
+                t["step_updated_at"] = step.get("timestamp", datetime.now().isoformat())
+                break
+        with open(_TASK_FILE, "w", encoding="utf-8") as f:
+            for t in tasks:
+                f.write(json.dumps(t, ensure_ascii=False) + "\n")
     return True
 
 
@@ -334,6 +373,12 @@ def spawn_task(
     # shell=True is NOT used  --  it causes extra cmd.exe overhead and PID tracking issues.
     log_path = task["log_file"]
     try:
+        # Build env for sub-agent: inherit parent env + set VOXKAGE_SUBAGENT=1
+        # so file-ops MCP tools (create_file, edit_file, etc.) know they are
+        # running inside a sub-agent and can auto-confirm without blocking.
+        sub_env = os.environ.copy()
+        sub_env["VOXKAGE_SUBAGENT"] = "1"
+
         with open(log_path, "w", encoding="utf-8") as log_f:
             proc = subprocess.Popen(
                 [
@@ -343,6 +388,7 @@ def spawn_task(
                     "--prompt", prompt,
                 ],
                 cwd=_ROOT,
+                env=sub_env,
                 stdout=log_f,
                 stderr=subprocess.STDOUT,
                 creationflags=(
@@ -791,5 +837,343 @@ def clear_all_tasks() -> str:
     return f"[TASKS] Cleared all {count} task(s). Task list is now empty."
 
 
+
+
+# ── Checkpoint helpers ─────────────────────────────────────────────────────────
+
+import shutil as _shutil
+import zipfile as _zipfile
+import hashlib as _hashlib
+
+_CHECKPOINT_DIR = os.path.join(_MEM_DIR, "checkpoints")
+os.makedirs(_CHECKPOINT_DIR, exist_ok=True)
+
+
+def _project_hash(project_dir: str) -> str:
+    """Short stable hash of the project path for naming snapshots."""
+    return _hashlib.md5(project_dir.encode()).hexdigest()[:8]
+
+
+def _create_checkpoint(project_dir: str, label: str = "pre-evolution") -> dict:
+    """
+    Create a safe restore point for the given project directory.
+
+    Strategy:
+      1. If the directory contains a .git folder → use git commit.
+         Returns: {method: "git", checkpoint_id: "<sha>", rollback_cmd: "git reset --hard <sha>"}
+      2. Fallback → create a timestamped .zip snapshot in ~/.voxkage/checkpoints/.
+         Returns: {method: "zip", checkpoint_id: "<path>", rollback_cmd: "<path>"}
+
+    Raises RuntimeError if neither method succeeds.
+    """
+    project_dir = os.path.abspath(project_dir)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # ── Git checkpoint ─────────────────────────────────────────────────────────
+    git_dir = os.path.join(project_dir, ".git")
+    if os.path.isdir(git_dir):
+        try:
+            # Stage all changes
+            subprocess.run(
+                ["git", "add", "-A"],
+                cwd=project_dir, capture_output=True, timeout=30, check=True,
+            )
+            # Commit — ignore if nothing to commit
+            commit_msg = f"VoxKage Auto-Checkpoint: {label} [{ts}]"
+            result = subprocess.run(
+                ["git", "commit", "-m", commit_msg],
+                cwd=project_dir, capture_output=True, timeout=30, text=True,
+            )
+            if result.returncode not in (0, 1):  # 1 = nothing to commit
+                raise RuntimeError(result.stderr)
+
+            # Get HEAD SHA
+            sha_result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=project_dir, capture_output=True, timeout=10, text=True, check=True,
+            )
+            sha = sha_result.stdout.strip()
+            return {
+                "method":       "git",
+                "checkpoint_id": sha,
+                "project_dir":  project_dir,
+                "rollback_cmd": f"git reset --hard {sha}",
+                "created_at":   ts,
+            }
+        except Exception as e:
+            # Git failed — fall through to zip
+            print(f"[Checkpoint] Git checkpoint failed ({e}), falling back to zip.")
+
+    # ── Zip snapshot fallback ──────────────────────────────────────────────────
+    ph    = _project_hash(project_dir)
+    label_safe = label.replace(" ", "_").replace("/", "_")
+    zip_name   = f"{ph}_{label_safe}_{ts}"
+    zip_path   = os.path.join(_CHECKPOINT_DIR, zip_name)
+
+    _shutil.make_archive(zip_path, "zip", project_dir)
+    full_zip = zip_path + ".zip"
+    if not os.path.isfile(full_zip):
+        raise RuntimeError(f"Zip archive was not created at {full_zip}")
+
+    return {
+        "method":        "zip",
+        "checkpoint_id": full_zip,
+        "project_dir":   project_dir,
+        "rollback_cmd":  f"__ZIP_RESTORE__|{full_zip}|{project_dir}",
+        "created_at":    ts,
+    }
+
+
+def _rollback_checkpoint(checkpoint: dict) -> str:
+    """
+    Restore the project to a previously created checkpoint.
+    Works for both git and zip methods.
+    Returns a human-readable result string.
+    """
+    method      = checkpoint.get("method")
+    project_dir = checkpoint.get("project_dir", "")
+    rollback    = checkpoint.get("rollback_cmd", "")
+
+    if method == "git":
+        try:
+            subprocess.run(
+                rollback.split(),
+                cwd=project_dir, capture_output=True, timeout=30, check=True,
+            )
+            return f"[Rollback] ✓ Git reset to {checkpoint['checkpoint_id'][:12]} in {project_dir}"
+        except Exception as e:
+            return f"[Rollback] ✗ Git reset failed: {e}"
+
+    elif method == "zip":
+        try:
+            zip_path, target_dir = rollback.split("|")[1], rollback.split("|")[2]
+            # Wipe and restore
+            if os.path.isdir(target_dir):
+                _shutil.rmtree(target_dir)
+            os.makedirs(target_dir, exist_ok=True)
+            with _zipfile.ZipFile(zip_path, "r") as z:
+                z.extractall(target_dir)
+            return f"[Rollback] ✓ Zip snapshot restored to {target_dir}"
+        except Exception as e:
+            return f"[Rollback] ✗ Zip restore failed: {e}"
+
+    return "[Rollback] ✗ Unknown checkpoint method."
+
+
+def _build_evolution_prompt(task_id: str, description: str, project_dir: str,
+                             test_command: str, checkpoint: dict) -> str:
+    rollback = checkpoint["rollback_cmd"]
+    method   = checkpoint["method"]
+    ts       = checkpoint.get("created_at", "")
+
+    return f"""[EVOLUTION SUB-AGENT — TASK {task_id}]
+You are VoxKage Self-Healing Sub-Agent. You are running HEADLESSLY in the background.
+Do NOT open any visible windows or browser UI.
+
+PROJECT DIRECTORY: {project_dir}
+FEATURE TO BUILD: {description}
+
+=== SAFE RESTORE POINT ===
+Method : {method}
+Created: {ts}
+Rollback command: {rollback}
+
+If ANYTHING goes wrong or tests fail, you MUST execute this rollback command
+using the shell tool before calling complete_task(success=False).
+
+=== MANDATORY EXECUTION PROTOCOL ===
+
+STEP 1 — PLAN
+  log_step(task_id="{task_id}", step_num=1, action="Planning implementation", status="started", details="")
+  Think through the implementation. Write a test file first (test_<feature>.py or equivalent).
+  log_step(task_id="{task_id}", step_num=1, action="Planning implementation", status="done", details="<your plan>")
+
+STEP 2 — WRITE TEST FIRST
+  log_step(task_id="{task_id}", step_num=2, action="Writing test file", status="started", details="")
+  Create a test file: <project_dir>/test_evolution_{task_id}.py
+  The test should import the feature and assert correct behaviour.
+  log_step(task_id="{task_id}", step_num=2, action="Writing test file", status="done", details="")
+
+STEP 3 — IMPLEMENT THE FEATURE
+  log_step(task_id="{task_id}", step_num=3, action="Implementing feature", status="started", details="")
+  Edit the relevant files. Use confirmed=True for all file operations.
+  log_step(task_id="{task_id}", step_num=3, action="Implementing feature", status="done", details="")
+
+STEP 4 — RUN TESTS
+  log_step(task_id="{task_id}", step_num=4, action="Running tests", status="started", details="")
+  Run: {"python test_evolution_" + task_id + ".py" if not test_command else test_command}
+  Capture the output. Check for failures.
+  log_step(task_id="{task_id}", step_num=4, action="Running tests", status="<done|error>", details="<output>")
+
+STEP 5a — IF TESTS PASSED:
+  Delete the test file: test_evolution_{task_id}.py
+  log_step(task_id="{task_id}", step_num=5, action="Tests passed — deploying", status="done", details="")
+  complete_task(task_id="{task_id}", summary="Feature deployed successfully: {description[:80]}", success=True,
+                details="All tests passed. Feature is live.")
+  notify_task_done(task_id="{task_id}", title="✅ Evolution Complete",
+                   message="New feature deployed: {description[:60]}")
+
+STEP 5b — IF TESTS FAILED:
+  log_step(task_id="{task_id}", step_num=5, action="Tests failed — rolling back", status="error", details="<failure output>")
+  Execute rollback: {rollback}
+  Delete the test file: test_evolution_{task_id}.py
+  complete_task(task_id="{task_id}", summary="Feature FAILED tests — rolled back to checkpoint", success=False,
+                details="<what went wrong>")
+  notify_task_done(task_id="{task_id}", title="⚠️ Evolution Rolled Back",
+                   message="Tests failed. Code restored to checkpoint. Reason: <brief reason>")
+
+=== ABSOLUTE RULES ===
+- Do NOT call spawn_task — you are already a sub-agent.
+- Do NOT ask for user input — decide and act.
+- Do NOT skip the rollback on failure — this is critical to data integrity.
+- Do NOT leave test files in the project after completion.
+- complete_task() MUST be called exactly once before this process exits.
+
+BEGIN NOW. Start with STEP 1."""
+
+
+# ── spawn_evolution_task MCP tool ──────────────────────────────────────────────
+
+@mcp.tool()
+def spawn_evolution_task(
+    description: str,
+    project_dir: str,
+    test_command: str = "",
+    model_override: str = "",
+) -> str:
+    """
+    Spawn a protected background sub-agent to build a new feature or fix for a project.
+
+    This is the SAFE way to let VoxKage modify its own code or any project code.
+    Before touching any files, it automatically creates a restore checkpoint (Git commit
+    if the project has Git, or a zip snapshot if not). If the tests fail, the sub-agent
+    automatically rolls back to that checkpoint.
+
+    Workflow:
+      1. Create safe checkpoint (git commit OR zip snapshot)
+      2. Spawn background sub-agent
+      3. Sub-agent writes a test file → implements the feature → runs tests
+      4. Tests pass → feature deployed, test file deleted
+      5. Tests fail → checkpoint rolled back automatically
+
+    Parameters:
+      description  : Natural language description of the feature to build or bug to fix.
+      project_dir  : Absolute path to the project directory to modify.
+      test_command : Optional custom test command (e.g. "pytest tests/"). Defaults to
+                     running the auto-generated test file.
+      model_override: Optional model to use. Leave blank for auto-selection.
+
+    Returns a task ID. The main session will be notified automatically when the task completes.
+    """
+    project_dir = os.path.abspath(project_dir)
+    if not os.path.isdir(project_dir):
+        return f"[ERROR] Project directory does not exist: {project_dir}"
+
+    task_id = str(uuid.uuid4())[:8]
+
+    # ── Model selection ────────────────────────────────────────────────────────
+    # Check ~/.voxkage/config.json first, then fall back to auto-select
+    vk_config_path = os.path.join(_MEM_DIR, "config.json")
+    subagent_model = _MODEL_STANDARD
+    try:
+        if os.path.exists(vk_config_path):
+            cfg = json.loads(open(vk_config_path, encoding="utf-8").read())
+            subagent_model = cfg.get("subagent_model", _MODEL_STANDARD)
+    except Exception:
+        pass
+
+    override_key = (model_override or "").lower().strip()
+    if override_key:
+        model = _MODEL_ALIASES.get(override_key, model_override)
+        model_reason = f"Specified: {model_override}"
+    else:
+        model = subagent_model
+        model_reason = f"From settings: {model}"
+
+    # ── Create checkpoint BEFORE doing anything ────────────────────────────────
+    try:
+        checkpoint = _create_checkpoint(project_dir, label=f"pre-{task_id}")
+    except Exception as e:
+        return (
+            f"[ERROR] Could not create safety checkpoint for {project_dir}.\n"
+            f"Reason: {e}\n"
+            f"Aborting evolution task for safety — no files have been modified."
+        )
+
+    # ── Build task record ──────────────────────────────────────────────────────
+    task = {
+        "id":           task_id,
+        "type":         "evolution",
+        "status":       "spawning",
+        "description":  description,
+        "project_dir":  project_dir,
+        "checkpoint":   checkpoint,
+        "model":        model,
+        "model_reason": model_reason,
+        "created_at":   datetime.now().isoformat(),
+        "started_at":   None,
+        "completed_at": None,
+        "summary":      None,
+        "details":      None,
+        "success":      None,
+        "pid":          None,
+        "log_file":     os.path.join(_LOG_DIR, f"task_{task_id}.log"),
+        "steps":        [],
+        "current_step": "Checkpoint created — spawning sub-agent...",
+        "step_updated_at": None,
+    }
+    _save_task(task)
+
+    # ── Build and launch sub-agent ─────────────────────────────────────────────
+    prompt   = _build_evolution_prompt(task_id, description, project_dir, test_command, checkpoint)
+    log_path = task["log_file"]
+
+    try:
+        sub_env = os.environ.copy()
+        sub_env["VOXKAGE_SUBAGENT"] = "1"
+
+        with open(log_path, "w", encoding="utf-8") as log_f:
+            proc = subprocess.Popen(
+                [_GEMINI_EXE, "--model", model, "--approval-mode", "yolo", "--prompt", prompt],
+                cwd=project_dir,
+                env=sub_env,
+                stdout=log_f,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP,
+                close_fds=False,
+            )
+
+        _update_task(task_id, {
+            "status":     "running",
+            "started_at": datetime.now().isoformat(),
+            "pid":        proc.pid,
+        })
+
+        cp_method = checkpoint["method"]
+        cp_id     = checkpoint["checkpoint_id"]
+        cp_short  = cp_id[:12] if cp_method == "git" else os.path.basename(cp_id)
+
+        return (
+            f"[EVOLUTION TASK SPAWNED]\n"
+            f"Task ID     : {task_id}\n"
+            f"Model       : {model}\n"
+            f"Project     : {project_dir}\n"
+            f"Checkpoint  : {cp_method.upper()} — {cp_short}\n"
+            f"Status      : Running in background (PID {proc.pid})\n"
+            f"Goal        : {description[:120]}{'...' if len(description) > 120 else ''}\n\n"
+            f"The sub-agent will write tests, implement the feature, and deploy only if tests pass.\n"
+            f"If anything fails, the checkpoint will be automatically restored, sir.\n"
+            f"Call check_tasks() at any time to see progress."
+        )
+
+    except FileNotFoundError:
+        _update_task(task_id, {"status": "failed", "summary": "gemini CLI not found"})
+        return "[ERROR] 'gemini' command not found in PATH. Cannot spawn evolution sub-agent."
+    except Exception as e:
+        _update_task(task_id, {"status": "failed", "summary": str(e)})
+        return f"[ERROR] Failed to spawn evolution sub-agent: {e}"
+
+
 if __name__ == "__main__":
     mcp.run()
+
