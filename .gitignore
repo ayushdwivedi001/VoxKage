@@ -49,8 +49,10 @@ crash_log.txt
 .ui_command
 
 # Model files (large binaries - users should download themselves)
-models/tts/kokoro/kokoro-v1_0.pth
-models/tts/kokoro/voices/*.pt
+models/
+.cache/
+.hf_cache/
+transformers_cache/
 
 # Logs
 *.log
