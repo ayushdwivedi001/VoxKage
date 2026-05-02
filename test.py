@@ -24,8 +24,8 @@ def test_intent_detection():
     
     test_cases = [
         # Compose intents
-        ("send an email to ad860500@gmail.com with subject greeting", "compose"),
-        ("email ad860500@gmail.com saying hello", "compose"),
+        ("send an email to user@example.com with subject greeting", "compose"),
+        ("email user@example.com saying hello", "compose"),
         ("draft a mail to test@example.com about the project", "compose"),
         ("compose an email to user@domain.com with morning greetings", "compose"),
         # Check inbox intents
@@ -60,14 +60,14 @@ def test_full_compose_flow():
     """Simulate a real user conversation: compose → edit → send."""
     sep("PHASE 2: Full Compose → Edit → Send Flow")
     
-    # Step 1: User says "send an email to ad860500@gmail.com saying morning greetings and VoxKage runs smoothly"
-    user_prompt = "send an email to ad860500@gmail.com saying morning greetings from voxkage and tell them voxkage is running smoothly"
+    # Step 1: User says "send an email to user@example.com saying morning greetings and VoxKage runs smoothly"
+    user_prompt = "send an email to user@example.com saying morning greetings from voxkage and tell them voxkage is running smoothly"
     print(f"  USER: {user_prompt}")
     
     intent = detect_email_intent(user_prompt)
     assert intent is not None, "Intent detection failed!"
     assert intent["action"] == "compose", f"Expected compose, got {intent['action']}"
-    assert intent["recipient"] == "ad860500@gmail.com", f"Wrong recipient: {intent['recipient']}"
+    assert intent["recipient"] == "user@example.com", f"Wrong recipient: {intent['recipient']}"
     print(f"  → Intent: {intent['action']} to {intent['recipient']}")
     
     print(f"\n  VOXKAGE: Drafting now, sir...")

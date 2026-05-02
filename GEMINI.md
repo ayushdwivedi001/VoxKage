@@ -85,8 +85,8 @@ Input: "check my email"
 Input: "search for best gaming laptops under 60000"
 → `{"tool": "search_web", "args": {"query": "best gaming laptops under 60000 rupees 2025"}}`
 
-Input: "tell me the current temperature in Kovaya Gujarat"
-→ `{"tool": "agent_thinking", "args": {"goal": "Find current temperature in Kovaya Gujarat", "plan": "1. Search web for current Kovaya Gujarat temperature\n2. Open best weather result\n3. Extract and report the temperature"}}`
+Input: "tell me the current temperature in New York"
+→ `{"tool": "agent_thinking", "args": {"goal": "Find current temperature in New York", "plan": "1. Search web for current New York temperature\n2. Open best weather result\n3. Extract and report the temperature"}}`
 
 Input: "what's the weather like in Mumbai today"
 → `{"tool": "search_web", "args": {"query": "current weather Mumbai today temperature"}}`

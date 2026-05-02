@@ -50,8 +50,8 @@ def default_config() -> dict:
             "chat gpt": "https://chat.openai.com"
         },
         "autostart": False,
-        "spotify_client_id": "12070174553e4b6e9a548df8430a6e55",
-        "spotify_client_secret": "2e2838433d0a487aad9a5818420cadd5"
+        "spotify_client_id": os.getenv("SPOTIFY_CLIENT_ID", ""),
+        "spotify_client_secret": os.getenv("SPOTIFY_CLIENT_SECRET", "")
     }
 
 def load_config() -> dict:
