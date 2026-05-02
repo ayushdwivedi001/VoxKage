@@ -1,1 +1,0 @@
-# VoxKage Telegram Integration Package

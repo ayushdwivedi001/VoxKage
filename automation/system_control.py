@@ -195,6 +195,24 @@ def safe_close_target(target: str) -> str:
             pass
             
     if closed_count > 0:
+        # If the target is an application (e.g. "chrome", "spotify"), it may leave background processes running.
+        # We check if the target exactly matches an executable and kill the lingering processes.
+        target_proc = f"{target}.exe" if not target.endswith(".exe") else target
+        killed_bg = 0
+        
+        if target_proc != "explorer.exe":
+            time.sleep(0.5)  # Allow graceful window close first
+            for proc in psutil.process_iter(['name']):
+                try:
+                    pname = str(proc.info['name']).lower()
+                    if pname == target_proc:
+                        proc.kill()
+                        killed_bg += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+                    
+        if killed_bg > 0:
+            return f"Safely closed {closed_count} window(s) and terminated {killed_bg} background process(es) for '{target}'."
         return f"Safely closed {closed_count} window(s) matching '{target}'."
         
     # 2. If it looks like a folder path, try Shell.Application COM object

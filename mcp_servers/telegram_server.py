@@ -259,48 +259,7 @@ def telegram_get_status() -> str:
     return f"✅ Telegram active. Linked to chat ID: {TELEGRAM_CHAT_ID}."
 
 
-@mcp.tool()
-def telegram_get_pending_messages() -> str:
-    """
-    Checks if the user has sent any NEW messages via Telegram since the last check.
-    Uses a persistent offset so old/already-seen messages are never returned again.
 
-    Returns:
-      'PENDING: <message text>' — a new message is waiting
-      'NO_MESSAGES'            — no new messages
-      'ERROR: ...'             — API call failed
-
-    VoxKage should call this proactively to sense if the user has sent something
-    from their phone without being asked in the terminal.
-    """
-    if not TELEGRAM_TOKEN:
-        return "NO_MESSAGES"
-    try:
-        import requests
-        last_id = _read_offset()
-        # offset = last_id + 1 tells Telegram "give me only updates AFTER this one"
-        params = {"limit": 5, "timeout": 0}
-        if last_id > 0:
-            params["offset"] = last_id + 1
-        resp = requests.get(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
-            params=params,
-            timeout=10,
-        )
-        updates = resp.json().get("result", [])
-        if not updates:
-            return "NO_MESSAGES"
-        # Advance the offset to the latest update so we never return these again
-        max_id = max(u["update_id"] for u in updates)
-        _write_offset(max_id)
-        # Return the latest text message
-        for u in reversed(updates):
-            msg = u.get("message", {}).get("text", "").strip()
-            if msg:
-                return f"PENDING: {msg}"
-        return "NO_MESSAGES"
-    except Exception as e:
-        return f"ERROR: {e}"
 
 
 if __name__ == "__main__":

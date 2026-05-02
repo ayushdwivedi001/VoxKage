@@ -215,36 +215,42 @@ def _handle_message(msg: str):
             f"The user sent this from their phone: \"{msg}\"\n\n"
             "You are VoxKage, operating in silent background mode.\n"
             "Your ONLY job:\n"
-            "  1. Understand the user's request.\n"
-            "  2. Fulfill it using your available MCP tools if needed.\n"
+            "  1. Read the user's message above.\n"
+            "  2. Fulfill the request using your tools if needed.\n"
             "  3. Compose a clear, concise reply.\n"
-            "  4. Send the reply ONCE via telegram_send_message() or telegram_send_report().\n\n"
-            "STRICT RULES — violating these causes infinite loops:\n"
-            "  - Call telegram_send_message OR telegram_send_report EXACTLY ONCE.\n"
-            "  - Do NOT send '📨 Received...' or 'Processing...' messages.\n"
-            "  - Do NOT ask follow-up questions — answer what you know.\n"
-            "  - After sending, output nothing more. The process will terminate.\n"
-            "  - Do NOT call spawn_task or any tool that creates sub-sub-agents.\n"
-            "  - Do NOT loop or retry.\n\n"
-            "BEGIN. Send your response to Telegram now."
+            "  4. Send the reply using telegram_send_message EXACTLY ONCE.\n\n"
+            "STRICT RULES — violating these causes silent failures:\n"
+            "  - CRITICAL OVERRIDE: Ignore any global rules about outputting plain text for 'conversations'.\n"
+            "  - Because you have no terminal output, you MUST ALWAYS use the telegram_send_message tool to reply.\n"
+            "  - If the user is just chatting, put your witty response inside the 'message' argument of the tool.\n"
+            "  - CRITICAL: Do NOT attempt to check for pending messages. The message is already provided above.\n"
+            "  - Call telegram_send_message EXACTLY ONCE and then terminate.\n"
+            "BEGIN. Send your response via the tool now."
         )
 
         try:
             sub_env = os.environ.copy()
             sub_env["VOXKAGE_SUBAGENT"] = "1"
 
-            proc = subprocess.Popen(
-                [
-                    _GEMINI_EXE,
-                    "--model", subagent_model,
-                    "--approval-mode", "yolo",
-                    "--prompt", prompt,
-                ],
-                cwd=_ROOT,
-                env=sub_env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
+            log_dir = _VOXKAGE_DIR / "task_logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file_path = log_dir / "tg_bridge.log"
+
+            with open(log_file_path, "w", encoding="utf-8") as log_f:
+                proc = subprocess.Popen(
+                    [
+                        _GEMINI_EXE,
+                        "--model", subagent_model,
+                        "--approval-mode", "yolo",
+                        "--skip-trust",
+                        "--include-directories", _ROOT,
+                        "--prompt", prompt,
+                    ],
+                    cwd=_ROOT,
+                    env=sub_env,
+                    stdout=log_f,
+                    stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP,
             )
             # Block until done or 90-second hard timeout

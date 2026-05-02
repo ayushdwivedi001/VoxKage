@@ -167,8 +167,8 @@ def run_shell_command(command: str) -> str:
 
     try:
         result = _sp.run(
-            command,
-            shell=True,
+            ["powershell.exe", "-NoProfile", "-Command", command],
+            shell=False,
             capture_output=True,
             text=True,
             timeout=30,
