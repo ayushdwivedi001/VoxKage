@@ -230,20 +230,82 @@ def telegram_check_reply() -> str:
             timeout=8,
         )
         updates = resp.json().get("result", [])
+        last_id = baseline
+        found_reply = False
+        reply_result = "WAITING"
+
         for u in updates:
-            uid = u["update_id"]
+            last_id = max(last_id, u["update_id"])
             msg = u.get("message", {}).get("text", "").strip().upper()
-            if msg in ("YES", "Y"):
-                _PENDING_REPLY_FILE.write_text(json.dumps({"waiting": False}), encoding="utf-8")
-                _write_offset(uid)
-                return "YES_SAVE"
-            if msg in ("NO", "N"):
-                _PENDING_REPLY_FILE.write_text(json.dumps({"waiting": False}), encoding="utf-8")
-                _write_offset(uid)
-                return "NO_SKIP"
-        return "WAITING"
+            if not found_reply:
+                if msg in ("YES", "Y"):
+                    _PENDING_REPLY_FILE.write_text(json.dumps({"waiting": False}), encoding="utf-8")
+                    found_reply = True
+                    reply_result = "YES_SAVE"
+                elif msg in ("NO", "N"):
+                    _PENDING_REPLY_FILE.write_text(json.dumps({"waiting": False}), encoding="utf-8")
+                    found_reply = True
+                    reply_result = "NO_SKIP"
+        
+        # Always update the global offset if we saw messages, 
+        # and also update the baseline for next check_reply if we haven't found our answer yet.
+        if last_id > baseline:
+            _write_offset(last_id)
+            if not found_reply:
+                try:
+                    state["baseline_offset"] = last_id
+                    _PENDING_REPLY_FILE.write_text(json.dumps(state), encoding="utf-8")
+                except Exception:
+                    pass
+        
+        return reply_result
     except Exception as e:
         return f"ERROR: {e}"
+
+
+@mcp.tool()
+def telegram_get_pending_messages() -> str:
+    """
+    Fetches pending/unread messages from the connected Telegram user.
+    Use when the user asks: 'do I have any telegram messages?', 
+    'read my telegram messages', 'check telegram'.
+    """
+    if not TELEGRAM_TOKEN:
+        return "❌ Telegram not configured. No bot token found."
+    
+    current_offset = _read_offset()
+    try:
+        import requests
+        params = {"limit": 10, "timeout": 0, "offset": current_offset + 1}
+        resp = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
+            params=params,
+            timeout=8,
+        )
+        updates = resp.json().get("result", [])
+        if not updates:
+            return "No new messages."
+        
+        output = []
+        last_id = current_offset
+        for u in updates:
+            last_id = max(last_id, u["update_id"])
+            # Extract sender and text
+            msg_obj = u.get("message", {})
+            sender = msg_obj.get("from", {}).get("first_name", "Unknown")
+            text = msg_obj.get("text", "")
+            if text:
+                output.append(f"From {sender}: {text}")
+        
+        if last_id > current_offset:
+            _write_offset(last_id)
+            
+        if output:
+            return "📩 *New Telegram Messages:*\n\n" + "\n".join(output)
+        return "No new text messages (updates received but no text found)."
+    except Exception as e:
+        logger.error(f"[Telegram] Get updates error: {e}")
+        return f"❌ Failed to fetch messages: {e}"
 
 
 @mcp.tool()
