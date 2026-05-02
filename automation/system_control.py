@@ -189,7 +189,10 @@ def safe_close_target(target: str) -> str:
                 # Protect the main VoxKage terminal window from accidentally killing itself
                 if "voxkage" in title and target != "voxkage":
                     continue
-                win.close()
+                # Use PostMessage for a non-blocking asynchronous close. 
+                # win.close() uses SendMessage which blocks if the app shows a "Save changes?" dialog.
+                WM_CLOSE = 0x0010
+                ctypes.windll.user32.PostMessageW(win._hWnd, WM_CLOSE, 0, 0)
                 closed_count += 1
         except Exception:
             pass
