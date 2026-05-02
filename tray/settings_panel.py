@@ -367,7 +367,12 @@ class SettingsPanel(QWidget):
         _update_gemini_model(main_model)
 
         self.saved_lbl.setText("✓ Saved")
-        QTimer.singleShot(2000, lambda: self.saved_lbl.setText(""))
+        def clear_lbl():
+            try:
+                self.saved_lbl.setText("")
+            except RuntimeError:
+                pass
+        QTimer.singleShot(2000, clear_lbl)
 
     # ── Position above tray icon ───────────────────────────────────────────────
     def _position_above_tray(self):
