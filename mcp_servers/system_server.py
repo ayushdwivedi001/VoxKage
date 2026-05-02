@@ -166,13 +166,15 @@ def run_shell_command(command: str) -> str:
             return f"BLOCKED: '{blocked}' is a dangerous system command. VoxKage refuses to execute it."
 
     try:
+        pwsh_path = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
         result = _sp.run(
-            ["powershell.exe", "-NoProfile", "-Command", command],
+            [pwsh_path, "-NoProfile", "-Command", command],
             shell=False,
             capture_output=True,
             text=True,
             timeout=30,
             cwd=os.path.expanduser("~"),
+            env=os.environ.copy(),
         )
         output = result.stdout.strip()
         error = result.stderr.strip()
