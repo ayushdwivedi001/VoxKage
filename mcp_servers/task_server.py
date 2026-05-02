@@ -940,7 +940,11 @@ def _rollback_checkpoint(checkpoint: dict) -> str:
                 rollback.split(),
                 cwd=project_dir, capture_output=True, timeout=30, check=True,
             )
-            return f"[Rollback] ✓ Git reset to {checkpoint['checkpoint_id'][:12]} in {project_dir}"
+            subprocess.run(
+                ["git", "clean", "-fd"],
+                cwd=project_dir, capture_output=True, timeout=30, check=True,
+            )
+            return f"[Rollback] ✓ Git reset to {checkpoint['checkpoint_id'][:12]} and cleaned untracked files in {project_dir}"
         except Exception as e:
             return f"[Rollback] ✗ Git reset failed: {e}"
 
@@ -960,9 +964,28 @@ def _rollback_checkpoint(checkpoint: dict) -> str:
     return "[Rollback] ✗ Unknown checkpoint method."
 
 
+@mcp.tool()
+def restore_checkpoint(task_id: str) -> str:
+    """
+    Restore a project to its safety checkpoint if an evolution task fails.
+    
+    Parameters:
+      task_id : The task ID whose checkpoint should be restored.
+    """
+    tasks = _load_tasks()
+    task = next((t for t in tasks if t.get("id") == task_id), None)
+    if not task:
+        return f"[ERROR] Task '{task_id}' not found."
+    
+    checkpoint = task.get("checkpoint")
+    if not checkpoint:
+        return f"[ERROR] Task '{task_id}' has no safety checkpoint."
+        
+    return _rollback_checkpoint(checkpoint)
+
+
 def _build_evolution_prompt(task_id: str, description: str, project_dir: str,
                              test_command: str, checkpoint: dict) -> str:
-    rollback = checkpoint["rollback_cmd"]
     method   = checkpoint["method"]
     ts       = checkpoint.get("created_at", "")
 
@@ -976,10 +999,9 @@ FEATURE TO BUILD: {description}
 === SAFE RESTORE POINT ===
 Method : {method}
 Created: {ts}
-Rollback command: {rollback}
 
-If ANYTHING goes wrong or tests fail, you MUST execute this rollback command
-using the shell tool before calling complete_task(success=False).
+If ANYTHING goes wrong or tests fail, you MUST execute restore_checkpoint(task_id="{task_id}")
+before calling complete_task(success=False).
 
 === MANDATORY EXECUTION PROTOCOL ===
 
@@ -1015,8 +1037,7 @@ STEP 5a — IF TESTS PASSED:
 
 STEP 5b — IF TESTS FAILED:
   log_step(task_id="{task_id}", step_num=5, action="Tests failed — rolling back", status="error", details="<failure output>")
-  Execute rollback: {rollback}
-  Delete the test file: test_evolution_{task_id}.py
+  Call restore_checkpoint(task_id="{task_id}")
   complete_task(task_id="{task_id}", summary="Feature FAILED tests — rolled back to checkpoint", success=False,
                 details="<what went wrong>")
   notify_task_done(task_id="{task_id}", title="⚠️ Evolution Rolled Back",
@@ -1026,7 +1047,7 @@ STEP 5b — IF TESTS FAILED:
 - Do NOT call spawn_task — you are already a sub-agent.
 - Do NOT ask for user input — decide and act.
 - Do NOT skip the rollback on failure — this is critical to data integrity.
-- Do NOT leave test files in the project after completion.
+- The checkpoint restoration will automatically remove any newly created untracked test files.
 - complete_task() MUST be called exactly once before this process exits.
 
 BEGIN NOW. Start with STEP 1."""

@@ -517,6 +517,10 @@ def create_file(
                   "js", "ts", "css", "yaml", "markdown", "folder", or "auto"
       confirmed : False = preview only. True = execute creation.
     """
+    # Auto-confirm if running as a sub-agent
+    if os.environ.get("VOXKAGE_SUBAGENT") == "1":
+        confirmed = True
+
     # Folder creation
     if file_type.lower() in ("folder", "directory"):
         dir_path = _resolve_dir(directory) or (directory if __import__("os").path.isdir(directory) else None)
@@ -601,6 +605,10 @@ def edit_file(
 
     Works with: .docx, .txt, .csv, .py, .md, .log, .xlsx (appends new sheet row data)
     """
+    # Auto-confirm if running as a sub-agent
+    if os.environ.get("VOXKAGE_SUBAGENT") == "1":
+        confirmed = True
+
     # Resolve path if it's not absolute
     if not os.path.isfile(file_path):
         # Try to find the file using keyword
