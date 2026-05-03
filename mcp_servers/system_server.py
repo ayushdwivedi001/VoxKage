@@ -28,9 +28,9 @@ mcp = FastMCP("voxkage-system")
 def _get_system():
     from automation.system_control import (
         set_volume, set_brightness, toggle_wifi, toggle_bluetooth,
-        change_wallpaper_from_folder, close_app, switch_to_app,
+        change_wallpaper_from_folder, close_app, switch_to_app, toggle_hotspot, toggle_night_light, open_intel_dsa
     )
-    return set_volume, set_brightness, toggle_wifi, toggle_bluetooth, change_wallpaper_from_folder, close_app, switch_to_app
+    return set_volume, set_brightness, toggle_wifi, toggle_bluetooth, change_wallpaper_from_folder, close_app, switch_to_app, toggle_hotspot, toggle_night_light, open_intel_dsa
 
 def _get_launcher():
     from automation.app_launcher import execute_special_command, open_app
@@ -67,7 +67,7 @@ def system_control(action: str, level: int = None) -> str:
       wallpaper      — picks a random wallpaper from C:\\wallpapers
       shutdown / restart / sleep / hibernate / lock
     """
-    set_volume, set_brightness, toggle_wifi, toggle_bluetooth, change_wallpaper, close_app, switch_to_app = _get_system()
+    set_volume, set_brightness, toggle_wifi, toggle_bluetooth, change_wallpaper, close_app, switch_to_app, toggle_hotspot, toggle_night_light, open_intel_dsa = _get_system()
     execute_special_command, _ = _get_launcher()
 
     if action == "set_volume":
@@ -88,10 +88,20 @@ def system_control(action: str, level: int = None) -> str:
         return toggle_bluetooth(False)
     elif action == "wallpaper":
         return change_wallpaper()
+    elif action == "hotspot_on":
+        return toggle_hotspot(True)
+    elif action == "hotspot_off":
+        return toggle_hotspot(False)
+    elif action == "night_light_on":
+        return toggle_night_light(True)
+    elif action == "night_light_off":
+        return toggle_night_light(False)
+    elif action == "intel_dsa":
+        return open_intel_dsa()
     elif action in ("shutdown", "restart", "sleep", "hibernate", "lock"):
         return execute_special_command(action)
     else:
-        return f"Unknown action: {action!r}. Valid: set_volume, set_brightness, wifi_on, wifi_off, bluetooth_on, bluetooth_off, wallpaper, shutdown, restart, sleep, hibernate, lock"
+        return f"Unknown action: {action!r}. Valid: set_volume, set_brightness, wifi_on, wifi_off, bluetooth_on, bluetooth_off, hotspot_on, hotspot_off, night_light_on, night_light_off, intel_dsa, wallpaper, shutdown, restart, sleep, hibernate, lock"
 
 
 @mcp.tool()
@@ -99,11 +109,9 @@ def open_application(app_name: str) -> str:
     """
     Launches an application or folder on the user's PC.
 
-    Known apps: chrome, vs code, japanese book, my files, background images,
-                my screenshots, games folder, spline, notepad, calculator,
-                paint, excel, ms word, powerpoint, music, cmd.
-
-    Also supports website shortcuts: google, youtube, github, gmail, openai, chat gpt, fit.
+    Launches an application, folder, or website on the user's PC dynamically.
+    No hardcoded configurations are needed. Provide the exact executable name,
+    a valid Windows shortcut name, an absolute file path, or a website URL.
     """
     _, open_app = _get_launcher()
     return open_app(app_name)
@@ -132,7 +140,7 @@ def switch_to_application(window_name: str) -> str:
     Uses fuzzy matching on the window title.
     Example: switch_to_application("chrome"), switch_to_application("vs code")
     """
-    set_volume, set_brightness, toggle_wifi, toggle_bluetooth, change_wallpaper, close_app, switch_to_app = _get_system()
+    set_volume, set_brightness, toggle_wifi, toggle_bluetooth, change_wallpaper, close_app, switch_to_app, toggle_hotspot, toggle_night_light, open_intel_dsa = _get_system()
     return switch_to_app(window_name)
 
 

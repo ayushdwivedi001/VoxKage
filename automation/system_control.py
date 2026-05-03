@@ -1,4 +1,4 @@
-import os
+﻿import os
 import time
 import difflib
 import ctypes
@@ -118,7 +118,7 @@ def set_volume(level_percent):
     """
     # First mute then raise
     pyautogui.press("volumemute")
-    # approximate 50 presses to go 0→100
+    # approximate 50 presses to go 0â†’100
     steps = int(level_percent / 2)
     for _ in range(steps):
         pyautogui.press("volumeup")
@@ -250,3 +250,33 @@ def safe_close_target(target: str) -> str:
         return f"Forcefully killed {killed_count} background process(es) matching '{target}'."
         
     return f"Could not find any open window, file tab, or safe process matching '{target}' to close."
+
+def toggle_hotspot(turn_on: bool):
+    state = "Start" if turn_on else "Stop"
+    script = f'''
+    [Windows.Networking.NetworkOperators.Tethering.NetworkOperatorTetheringManager,Windows.Networking.NetworkOperators,ContentType=WindowsRuntime] | Out-Null
+    [Windows.Networking.Connectivity.NetworkInformation,Windows.Networking.Connectivity,ContentType=WindowsRuntime] | Out-Null
+    $connectionProfile = [Windows.Networking.Connectivity.NetworkInformation]::GetInternetConnectionProfile()
+    $tetheringManager = [Windows.Networking.NetworkOperators.Tethering.NetworkOperatorTetheringManager]::CreateFromConnectionProfile($connectionProfile)
+    $tetheringManager.{state}TetheringAsync()
+    Start-Sleep -Seconds 1
+    '''
+    try:
+        subprocess.run(["powershell", "-Command", script], capture_output=True)
+        return f"Mobile Hotspot turned {'on' if turn_on else 'off'}."
+    except Exception as e:
+        return f"Failed to toggle Mobile Hotspot: {e}"
+
+def toggle_night_light(turn_on: bool):
+    try:
+        os.system("start ms-settings:nightlight")
+        return "Opened Night Light settings. You can toggle it manually from the settings window."
+    except Exception as e:
+        return f"Failed to open Night Light settings: {e}"
+
+def open_intel_dsa():
+    try:
+        os.system("start https://www.intel.com/content/www/us/en/support/intel-driver-support-assistant.html")
+        return "Opened Intel Driver & Support Assistant website."
+    except Exception as e:
+        return f"Failed to open Intel DSA: {e}"
