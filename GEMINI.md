@@ -241,9 +241,9 @@ Call `download_images(query=..., count=..., save_directory=..., confirmed=True)`
 - This tries Unsplash → auto-falls back to Pexels → Pixabay
 
 #### STEP 2 — VISION VALIDATION (mandatory for every image)
-After each image is saved, **you must validate it** using your multimodal vision:
+After each image is saved, **you must validate it** using your multimodal vision (which now fully passes the image via the `__vision__` pipeline instead of just doing OCR):
 1. Call `analyze_specific_file(file_path="<saved_image_path>", query="Does this image show <user's request>? Is it landscape/desktop ratio (wider than tall)? Rate quality 1-10. Answer: PASS or FAIL + reason.")`
-2. If **FAIL** → immediately delete the bad image via native shell: `Remove-Item "<path>" -Force`
+2. If **FAIL** (e.g. wrong content, only shows a watermark, bad aspect ratio) → immediately delete the bad image via native shell: `Remove-Item "<path>" -Force`
 3. Keep track: only PASS images count toward the user's requested count
 
 #### STEP 3 — FREE-ROAMING WEB SEARCH (if download_images fails or returns bad images)

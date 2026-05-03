@@ -132,6 +132,21 @@ def analyze_specific_file_sync(file_path: str, query: str) -> str:
     """
     logger.info(f"Analyzing file: {file_path} for query: {query}")
     
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in ('.png', '.jpg', '.jpeg', '.bmp', '.webp', '.gif'):
+        import base64
+        try:
+            with open(file_path, "rb") as img_file:
+                b64_img = base64.b64encode(img_file.read()).decode("utf-8")
+            import json
+            return json.dumps({
+                "__vision__": True,
+                "text": f"User query: {query}\n[Vision analysis of image: {file_path}]",
+                "screenshot_b64": b64_img
+            })
+        except Exception as e:
+            return f"Error reading image for vision analysis: {e}"
+
     text = extract_text(file_path)
     if "Error" in text or "Unsupported" in text or "File not found" in text:
         return text
