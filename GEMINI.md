@@ -50,24 +50,14 @@ You have **real MCP tools** registered and available. When the user wants someth
 
 ---
 
-## TOOL NAME RESOLUTION
+## TOOL NAME RESOLUTION (CRITICAL)
 
-Gemini CLI auto-prefixes every MCP tool name with its server name:
+Gemini CLI prefixes every single MCP tool name with `mcp_voxkage-[server]_`. 
+For example, if the table below says to use `search_spotify`, the actual tool in your schema is `mcp_voxkage-media_search_spotify`.
 
-| You see in this doc | Gemini actually calls |
-|---|---|
-| `health_check` | `mcp_voxkage-health_health_check` |
-| `run_shell_command` | `mcp_voxkage-system_run_shell_command` |
-| `index_document` | `mcp_voxkage-rag_index_document` |
-
-**You do NOT need to type or construct the prefix** — Gemini handles this automatically.
-Just use the short name from the routing table below. If a tool call fails with "not found",
-it means the server hosting that tool is not running — NOT that the tool doesn't exist.
-
-> [!CAUTION]
-> **NEVER run `mcp_*` names in the native shell.** Typing `mcp_voxkage-download_download_images` into
-> PowerShell will always fail with "not recognized". MCP tools are called via Gemini's **tool interface**,
-> not the shell. The shell is for OS commands only (`git`, `dir`, `python`, `ping`, etc.).
+**CRITICAL RULE:**
+When instructed to use a tool like `search_spotify` or `play_user_playlist`, **you MUST find and call the `mcp_*` prefixed tool from your schema.**
+**NEVER** attempt to write Python shell scripts (like `SpotifyController().play`) to bypass tools. If you think a tool is missing, look for its `mcp_voxkage-*` prefixed version!
 
 
 ---

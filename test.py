@@ -70,7 +70,7 @@ def test_full_compose_flow():
     assert intent["recipient"] == "user@example.com", f"Wrong recipient: {intent['recipient']}"
     print(f"  → Intent: {intent['action']} to {intent['recipient']}")
     
-    print(f"\n  VOXKAGE: Drafting now, sir...")
+    print(f"\n  VOXKAGE: Drafting now...")
     start = time.time()
     result = handle_compose(intent["recipient"], intent["instructions"])
     dur = time.time() - start
@@ -89,7 +89,7 @@ def test_full_compose_flow():
     assert edit_intent is not None, "Edit intent detection failed!"
     assert edit_intent["action"] == "edit", f"Expected edit, got {edit_intent['action']}"
     
-    print(f"  VOXKAGE: Updating draft now, sir...")
+    print(f"  VOXKAGE: Updating draft now...")
     start = time.time()
     result = handle_edit(edit_intent["instructions"])
     dur = time.time() - start

@@ -1,0 +1,107 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voxkage"
+version = "1.0.0"
+description = "OS-level agentic AI assistant — autonomous, persistent, aware."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [{name = "Ayush Dwivedi"}]
+keywords = ["ai", "assistant", "agentic", "os", "automation", "mcp"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# ── Core dependencies (Windows + macOS) ──────────────────────────────────────
+dependencies = [
+    # Core & Architecture
+    "mcp",
+    "langgraph",
+    "httpx",
+    "requests",
+    "python-dotenv",
+
+    # UI & System Tray
+    "PySide6",
+    "psutil",
+    "pyautogui",
+    "pygetwindow",
+    "Pillow",
+
+    # Browser Automation (core — NOT a plugin)
+    "playwright",
+    "selenium",
+
+    # Data, Documents & Vision
+    "numpy",
+    "pyarrow",
+    "opencv-python",
+    "PyMuPDF",
+    "python-docx",
+    "docx2pdf",
+    "pdf2docx",
+    "openpyxl",
+    "python-pptx",
+    "rapidocr-onnxruntime",
+
+    # Memory & RAG
+    "chromadb",
+    "sentence-transformers",
+    "fastembed",
+    "lancedb",
+
+    # Plugin API packages (always installed — activate when tokens are provided)
+    "google-auth",
+    "google-auth-oauthlib",
+    "google-api-python-client",
+    "PyGithub",
+    "spotipy",
+    "python-telegram-bot>=20.0",
+]
+
+[project.optional-dependencies]
+# Windows-only deps (auto-installed by voxkage init on Windows)
+windows = [
+    "pywin32",
+    "winshell",
+    "winotify",
+    "pywinauto",
+]
+# macOS alternatives (auto-installed by voxkage init on macOS)
+macos = [
+    "mac-notifications",
+    "pyobjc-framework-Cocoa",
+]
+
+[project.urls]
+Homepage = "https://github.com/ayushdwivedi001/VoxKage"
+Repository = "https://github.com/ayushdwivedi001/VoxKage"
+
+[project.scripts]
+voxkage = "voxkage.cli:main"
+
+[project.entry-points."voxkage.plugins"]
+telegram = "voxkage.plugins.telegram:TelegramPlugin"
+gmail    = "voxkage.plugins.gmail:GmailPlugin"
+spotify  = "voxkage.plugins.spotify:SpotifyPlugin"
+github   = "voxkage.plugins.github:GitHubPlugin"
+
+[tool.setuptools.packages.find]
+include = ["voxkage*"]
+
+[tool.setuptools.package-data]
+voxkage = ["icons/*", "templates/*"]

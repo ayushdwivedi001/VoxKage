@@ -1,0 +1,103 @@
+"""
+voxkage/plugins/registry.py — Plugin discovery, listing, and configuration.
+"""
+
+import os
+import sys
+
+# Ensure Windows console can output Unicode
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        os.system("chcp 65001 >nul 2>&1")
+
+from voxkage.paths import env_path, package_dir, voxkage_dir
+
+
+def _c(r: int, g: int, b: int) -> str:
+    return f"\033[38;2;{r};{g};{b}m"
+
+RST = "\033[0m"
+GREEN = _c(34, 197, 94)
+RED = _c(255, 80, 80)
+BLUE = _c(56, 189, 248)
+DIM = _c(100, 116, 139)
+META = _c(71, 85, 105)
+
+
+def _load_all_plugins():
+    """Load all registered plugins."""
+    from voxkage.plugins.telegram import TelegramPlugin
+    from voxkage.plugins.gmail import GmailPlugin
+    from voxkage.plugins.spotify import SpotifyPlugin
+    from voxkage.plugins.github import GitHubPlugin
+
+    return [TelegramPlugin(), GmailPlugin(), SpotifyPlugin(), GitHubPlugin()]
+
+
+def list_plugins():
+    """Print all plugins and their configuration status."""
+    plugins = _load_all_plugins()
+
+    print()
+    print(f"  {BLUE}VoxKage Plugins{RST}")
+    print(f"  {META}─────────────────────────────────────────────{RST}")
+    print()
+
+    for p in plugins:
+        status = f"{GREEN}✓ Configured{RST}" if p.is_configured() else f"{RED}✗ Not configured{RST}"
+        print(f"  {BLUE}{p.display_name}{RST}  {DIM}({p.name}){RST}")
+        print(f"    {p.description}")
+        print(f"    Status: {status}")
+        if not p.is_configured():
+            needs = ", ".join(p.required_env_vars)
+            print(f"    Needs:  {DIM}{needs}{RST}")
+            print(f"    Setup:  {BLUE}voxkage plugins add {p.name}{RST}")
+        print()
+
+    print(f"  {META}─────────────────────────────────────────────{RST}")
+    print(f"  {DIM}Browser automation (Playwright) is a core feature — always active.{RST}")
+    print()
+
+
+def add_plugin(name: str):
+    """Run interactive setup for a specific plugin."""
+    plugins = _load_all_plugins()
+    plugin = next((p for p in plugins if p.name == name), None)
+
+    if not plugin:
+        print(f"\n  {RED}✗  Unknown plugin: {name}{RST}")
+        print(f"  Available: {', '.join(p.name for p in plugins)}\n")
+        return
+
+    if plugin.is_configured():
+        print(f"\n  {GREEN}✓  {plugin.display_name} is already configured.{RST}")
+        reconfigure = input("  Reconfigure? (y/N): ").strip().lower()
+        if reconfigure != "y":
+            return
+
+    print(f"\n  {BLUE}Setting up {plugin.display_name}...{RST}\n")
+    success = plugin.setup_interactive()
+
+    if success:
+        print(f"\n  {GREEN}✓  {plugin.display_name} configured!{RST}")
+        print(f"  {DIM}Restart VoxKage to activate this plugin.{RST}\n")
+        # Regenerate settings.json to include the new server
+        try:
+            from voxkage.cli import _generate_settings_json
+            _generate_settings_json()
+        except Exception:
+            pass
+    else:
+        print(f"\n  {RED}✗  Setup cancelled or failed.{RST}\n")
+
+
+def get_configured_plugin_servers() -> dict:
+    """Return MCP server entries for all configured plugins."""
+    servers = {}
+    for plugin in _load_all_plugins():
+        cfg = plugin.get_mcp_server_config()
+        if cfg:
+            servers.update(cfg)
+    return servers
