@@ -47,7 +47,6 @@ def _supports_color() -> bool:
     if os.environ.get("NO_COLOR"):
         return False
     if is_windows():
-        # Windows Terminal, new PowerShell, and cmd with VT support
         return os.environ.get("WT_SESSION") or os.environ.get("TERM_PROGRAM") or True
     return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 
@@ -62,6 +61,250 @@ def _c(r: int, g: int, b: int) -> str:
 RST = "\033[0m" if _supports_color() else ""
 
 
+# ── Theme palettes ────────────────────────────────────────────────────────────
+# Each palette is keyed to the exact string Gemini CLI stores in settings.json.
+# logo: 6 colors — rows 1-5 of the ASCII art + the dim bottom row.
+# All colors sampled directly from each theme's actual syntax palette.
+
+THEME_PALETTES = {
+    # ── Default Dark — VoxKage signature sky-blue gradient ────────────────
+    "Default Dark": dict(
+        logo=[
+            _c(14, 165, 233),   # row 1  — sky-500
+            _c(34, 211, 238),   # row 2  — cyan-400
+            _c(103, 232, 249),  # row 3  — cyan-300
+            _c(147, 197, 253),  # row 4  — blue-200
+            _c(186, 230, 253),  # row 5  — sky-200
+            _c(30, 58, 138),    # row 6 dim — blue-900
+        ],
+        tag=_c(2, 132, 199),
+        val=_c(56, 189, 248),
+        meta=_c(51, 65, 85),
+        prompt=_c(3, 105, 161),
+        green=_c(34, 197, 94),
+        notice=_c(71, 85, 105),
+    ),
+
+    # ── ANSI Dark — pure terminal palette, electric cyan to blue ──────────
+    "ANSI Dark": dict(
+        logo=[
+            _c(0, 229, 255),    # row 1  — bright cyan
+            _c(0, 207, 207),    # row 2  — teal
+            _c(0, 180, 255),    # row 3  — sky blue
+            _c(0, 144, 255),    # row 4  — bright blue
+            _c(0, 110, 255),    # row 5  — blue
+            _c(0, 51, 128),     # row 6 dim
+        ],
+        tag=_c(0, 207, 207),
+        val=_c(0, 229, 255),
+        meta=_c(68, 68, 68),
+        prompt=_c(0, 144, 255),
+        green=_c(0, 230, 118),
+        notice=_c(136, 136, 136),
+    ),
+
+    # ── Atom One Dark — purple » blue » cyan » green » orange ─────────────
+    "Atom One Dark": dict(
+        logo=[
+            _c(97, 175, 239),   # row 1  — blue (functions)
+            _c(86, 182, 194),   # row 2  — cyan (types)
+            _c(198, 120, 221),  # row 3  — purple (keywords)
+            _c(224, 108, 117),  # row 4  — red (errors → accent)
+            _c(229, 192, 123),  # row 5  — yellow (strings)
+            _c(75, 82, 99),     # row 6 dim
+        ],
+        tag=_c(198, 120, 221),
+        val=_c(97, 175, 239),
+        meta=_c(75, 82, 99),
+        prompt=_c(229, 192, 123),
+        green=_c(152, 195, 121),
+        notice=_c(99, 109, 131),
+    ),
+
+    # ── Ayu Dark — amber » sky gradient with teal accents ─────────────────
+    "Ayu Dark": dict(
+        logo=[
+            _c(57, 186, 230),   # row 1  — tag blue
+            _c(89, 194, 255),   # row 2  — function blue
+            _c(115, 208, 255),  # row 3  — sky
+            _c(255, 180, 84),   # row 4  — keyword amber
+            _c(255, 213, 128),  # row 5  — string gold
+            _c(45, 54, 64),     # row 6 dim
+        ],
+        tag=_c(255, 180, 84),
+        val=_c(89, 194, 255),
+        meta=_c(61, 79, 94),
+        prompt=_c(57, 186, 230),
+        green=_c(170, 217, 76),
+        notice=_c(92, 103, 115),
+    ),
+
+    # ── Dracula Dark — iconic pink » purple » cyan » green ────────────────
+    "Dracula Dark": dict(
+        logo=[
+            _c(255, 121, 198),  # row 1  — pink (keywords)
+            _c(189, 147, 249),  # row 2  — purple (functions)
+            _c(139, 233, 253),  # row 3  — cyan (types)
+            _c(80, 250, 123),   # row 4  — green (strings)
+            _c(241, 250, 140),  # row 5  — yellow (escape chars)
+            _c(98, 114, 164),   # row 6 dim — comment
+        ],
+        tag=_c(139, 233, 253),
+        val=_c(189, 147, 249),
+        meta=_c(68, 71, 90),
+        prompt=_c(255, 184, 108),
+        green=_c(80, 250, 123),
+        notice=_c(98, 114, 164),
+    ),
+
+    # ── GitHub Dark — blue monochrome with gold accents ───────────────────
+    "GitHub Dark": dict(
+        logo=[
+            _c(121, 192, 255),  # row 1  — keyword blue
+            _c(88, 166, 255),   # row 2  — function blue
+            _c(56, 139, 253),   # row 3  — blue-dark
+            _c(31, 111, 235),   # row 4  — blue-darker
+            _c(56, 139, 253),   # row 5  — cycle back up
+            _c(28, 42, 58),     # row 6 dim
+        ],
+        tag=_c(210, 153, 34),
+        val=_c(121, 192, 255),
+        meta=_c(48, 54, 61),
+        prompt=_c(210, 153, 34),
+        green=_c(63, 185, 80),
+        notice=_c(110, 118, 129),
+    ),
+
+    # ── GitHub Dark Colorblind — blue + amber, no green dependency ────────
+    "GitHub Dark Colorblind Dark": dict(
+        logo=[
+            _c(121, 192, 255),  # row 1
+            _c(88, 166, 255),   # row 2
+            _c(227, 179, 65),   # row 3  — amber (colorblind-safe accent)
+            _c(255, 166, 87),   # row 4  — orange
+            _c(210, 168, 255),  # row 5  — lavender
+            _c(28, 42, 58),     # row 6 dim
+        ],
+        tag=_c(227, 179, 65),
+        val=_c(121, 192, 255),
+        meta=_c(48, 54, 61),
+        prompt=_c(255, 166, 87),
+        green=_c(227, 179, 65),
+        notice=_c(110, 118, 129),
+    ),
+
+    # ── Holiday Dark — festive red » orange » gold » green ────────────────
+    "Holiday Dark": dict(
+        logo=[
+            _c(255, 77, 77),    # row 1  — red
+            _c(255, 140, 0),    # row 2  — orange
+            _c(255, 215, 0),    # row 3  — gold
+            _c(127, 255, 0),    # row 4  — chartreuse
+            _c(0, 250, 154),    # row 5  — spring green
+            _c(26, 26, 58),     # row 6 dim
+        ],
+        tag=_c(255, 215, 0),
+        val=_c(127, 255, 0),
+        meta=_c(42, 42, 74),
+        prompt=_c(255, 140, 0),
+        green=_c(0, 250, 154),
+        notice=_c(106, 106, 138),
+    ),
+
+    # ── Shades Of Purple Dark — gold » pink » mint » cyan » lavender ──────
+    "Shades Of Purple Dark": dict(
+        logo=[
+            _c(250, 208, 0),    # row 1  — gold (keywords)
+            _c(255, 98, 140),   # row 2  — hot pink (operators)
+            _c(165, 255, 144),  # row 3  — mint (strings)
+            _c(158, 255, 255),  # row 4  — ice cyan (types)
+            _c(251, 148, 255),  # row 5  — lavender (functions)
+            _c(61, 59, 110),    # row 6 dim
+        ],
+        tag=_c(250, 208, 0),
+        val=_c(165, 255, 144),
+        meta=_c(61, 59, 110),
+        prompt=_c(255, 98, 140),
+        green=_c(57, 217, 0),
+        notice=_c(123, 120, 197),
+    ),
+
+    # ── Solarized Dark — blue » cyan » green » yellow » orange ───────────
+    "Solarized Dark": dict(
+        logo=[
+            _c(38, 139, 210),   # row 1  — blue
+            _c(42, 161, 152),   # row 2  — cyan
+            _c(133, 153, 0),    # row 3  — green
+            _c(181, 137, 0),    # row 4  — yellow
+            _c(203, 75, 22),    # row 5  — orange
+            _c(7, 54, 66),      # row 6 dim — base03
+        ],
+        tag=_c(42, 161, 152),
+        val=_c(38, 139, 210),
+        meta=_c(88, 110, 117),
+        prompt=_c(181, 137, 0),
+        green=_c(133, 153, 0),
+        notice=_c(101, 123, 131),
+    ),
+
+    # ── Tokyo Night Dark — soft blue » purple » green » gold » red ────────
+    "Tokyo Night Dark": dict(
+        logo=[
+            _c(122, 162, 247),  # row 1  — blue (functions)
+            _c(187, 154, 247),  # row 2  — purple (keywords)
+            _c(158, 206, 106),  # row 3  — green (strings)
+            _c(224, 175, 104),  # row 4  — gold (constants)
+            _c(247, 118, 142),  # row 5  — red (errors → accent)
+            _c(59, 66, 97),     # row 6 dim — comment
+        ],
+        tag=_c(187, 154, 247),
+        val=_c(122, 162, 247),
+        meta=_c(59, 66, 97),
+        prompt=_c(224, 175, 104),
+        green=_c(158, 206, 106),
+        notice=_c(86, 95, 137),
+    ),
+}
+
+# Light themes share one palette — dark ink on implied white/light bg
+_LIGHT_PALETTE = dict(
+    logo=[
+        _c(9, 105, 218),    # row 1  — GitHub blue
+        _c(5, 80, 174),     # row 2  — darker blue
+        _c(26, 127, 55),    # row 3  — green
+        _c(130, 80, 223),   # row 4  — purple
+        _c(207, 34, 46),    # row 5  — red
+        _c(192, 200, 210),  # row 6 dim
+    ],
+    tag=_c(9, 105, 218),
+    val=_c(5, 80, 174),
+    meta=_c(140, 149, 159),
+    prompt=_c(9, 105, 218),
+    green=_c(26, 127, 55),
+    notice=_c(87, 96, 106),
+)
+
+# Light theme name substrings → use _LIGHT_PALETTE
+_LIGHT_KEYWORDS = ("light", "xcode", "google code")
+
+
+def _get_palette(theme: str) -> dict:
+    """Return the best-matching palette for a given Gemini CLI theme name."""
+    # Exact match first
+    if theme in THEME_PALETTES:
+        return THEME_PALETTES[theme]
+    # Light theme fallback
+    tl = theme.lower()
+    if any(k in tl for k in _LIGHT_KEYWORDS):
+        return _LIGHT_PALETTE
+    # Fuzzy match on known dark themes
+    for key in THEME_PALETTES:
+        if key.lower().replace(" dark", "") in tl or tl in key.lower():
+            return THEME_PALETTES[key]
+    # Default
+    return THEME_PALETTES["Default Dark"]
+
+
 # ── ASCII Banner ──────────────────────────────────────────────────────────────
 
 def print_banner():
@@ -69,7 +312,6 @@ def print_banner():
     # Enable ANSI on Windows
     if is_windows():
         os.system("chcp 65001 >nul 2>&1")
-        # Enable VT processing
         try:
             import ctypes
             kernel32 = ctypes.windll.kernel32
@@ -77,28 +319,19 @@ def print_banner():
         except Exception:
             pass
 
-    C1 = _c(14, 165, 233)
-    C2 = _c(34, 211, 238)
-    C3 = _c(103, 232, 249)
-    C4 = _c(165, 243, 252)
-    C5 = _c(186, 230, 253)
-    DIM = _c(30, 58, 138)
-    META = _c(71, 85, 105)
-    TAG = _c(14, 116, 144)
-    VAL = _c(56, 189, 248)
-    PROMPT = _c(2, 132, 199)
-    GREEN = _c(34, 197, 94)
-    NOTICE = _c(100, 116, 139)
-
-    # Try to load user theme from gemini settings
-    gemini_settings = Path.home() / ".gemini" / "settings.json"
+    # Read theme from ~/.gemini/settings.json
     theme = "Default Dark"
     try:
+        gemini_settings = Path.home() / ".gemini" / "settings.json"
         if gemini_settings.exists():
             data = json.loads(gemini_settings.read_text(encoding="utf-8"))
-            theme = data.get("theme", theme)
+            # Gemini CLI stores theme at top-level "theme" key
+            theme = data.get("theme", data.get("ui", {}).get("theme", theme))
     except Exception:
         pass
+
+    p = _get_palette(theme)
+    L = p["logo"]
 
     # Load model from VoxKage config
     model = "gemini-2.5-flash"
@@ -112,33 +345,36 @@ def print_banner():
 
     cwd = os.getcwd()
 
-    art = f"""
- {C1} ██╗   ██╗ ██████╗ ██╗  ██╗██╗  ██╗ █████╗  ██████╗ ███████╗{RST}
- {C2} ██║   ██║██╔═══██╗╚██╗██╔╝██║ ██╔╝██╔══██╗██╔════╝ ██╔════╝{RST}
- {C3} ██║   ██║██║   ██║ ╚███╔╝ █████╔╝ ███████║██║  ███╗█████╗  {RST}
- {C4} ╚██╗ ██╔╝██║   ██║ ██╔██╗ ██╔═██╗ ██╔══██║██║   ██║██╔══╝  {RST}
- {C5}  ╚████╔╝ ╚██████╔╝██╔╝ ██╗██║  ██╗██║  ██║╚██████╔╝███████╗{RST}
- {DIM}   ╚═══╝   ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝{RST}
+    art = (
+        f"\n"
+        f" {L[0]} ██╗   ██╗ ██████╗ ██╗  ██╗██╗  ██╗ █████╗  ██████╗ ███████╗{RST}\n"
+        f" {L[1]} ██║   ██║██╔═══██╗╚██╗██╔╝██║ ██╔╝██╔══██╗██╔════╝ ██╔════╝{RST}\n"
+        f" {L[2]} ██║   ██║██║   ██║ ╚███╔╝ █████╔╝ ███████║██║  ███╗█████╗  {RST}\n"
+        f" {L[3]} ╚██╗ ██╔╝██║   ██║ ██╔██╗ ██╔═██╗ ██╔══██║██║   ██║██╔══╝  {RST}\n"
+        f" {L[4]}  ╚████╔╝ ╚██████╔╝██╔╝ ██╗██║  ██╗██║  ██║╚██████╔╝███████╗{RST}\n"
+        f" {L[5]}   ╚═══╝   ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝{RST}\n"
+        f"\n"
+        f" {p['meta']} ──────────────────────────────────────────────────────────────{RST}\n"
+        f"  {p['tag']}◈{RST}  {p['val']}OS Agentic AI{RST}    {p['meta']}│{RST}    {p['tag']}◈{RST}  {p['val']}Autonomous  ·  Persistent  ·  Aware{RST}\n"
+        f" {p['meta']} ──────────────────────────────────────────────────────────────{RST}\n"
+        f"\n"
+        f" {p['meta']} session  {p['prompt']}›{RST}  {p['val']}{cwd}{RST}\n"
+        f" {p['meta']} theme    {p['prompt']}›{RST}  {p['val']}{theme}{RST}\n"
+        f" {p['meta']} engine   {p['prompt']}›{RST}  {p['val']}{model}{RST}\n"
+        f" {p['meta']} status   {p['prompt']}›{RST}  {p['green']}● ready{RST}\n"
+        f"\n"
+        f" {p['meta']} ──────────────────────────────────────────────────────────────{RST}\n"
+        f" {p['notice']}  VoxKage uses Gemini CLI as its inference backend. All intelligence,{RST}\n"
+        f" {p['notice']}  memory, and agentic behavior is orchestrated by VoxKage core.{RST}\n"
+        f" {p['meta']} ──────────────────────────────────────────────────────────────{RST}\n"
+        f"\n"
+    )
 
- {META} ──────────────────────────────────────────────────────────────{RST}
-  {TAG}◈{RST}  {VAL}OS Agentic AI{RST}    {META}│{RST}    {TAG}◈{RST}  {VAL}Autonomous  ·  Persistent  ·  Aware{RST}
- {META} ──────────────────────────────────────────────────────────────{RST}
-
- {META} session  {PROMPT}›{RST}  {VAL}{cwd}{RST}
- {META} theme    {PROMPT}›{RST}  {VAL}{theme}{RST}
- {META} engine   {PROMPT}›{RST}  {VAL}{model}{RST}
- {META} status   {PROMPT}›{RST}  {GREEN}● ready{RST}
-
- {META} ──────────────────────────────────────────────────────────────{RST}
- {NOTICE}  VoxKage uses Gemini CLI as its inference backend. All intelligence,{RST}
- {NOTICE}  memory, and agentic behavior is orchestrated by VoxKage core.{RST}
- {META} ──────────────────────────────────────────────────────────────{RST}
-"""
     try:
-        sys.stdout.buffer.write(art.encode('utf-8') + b'\n')
+        sys.stdout.buffer.write(art.encode("utf-8") + b"\n")
         sys.stdout.flush()
     except AttributeError:
-        print(art.encode('utf-8', 'replace').decode('utf-8'), flush=True)
+        print(art.encode("utf-8", "replace").decode("utf-8"), flush=True)
 
 
 # ── Init Command ──────────────────────────────────────────────────────────────
@@ -150,7 +386,6 @@ def cmd_init():
     print(f"  {_c(71,85,105)}─────────────────────────────────────{RST}")
     print()
 
-    # 1. Platform check
     if not is_supported_platform():
         print(f"  {_c(255,80,80)}✗  VoxKage currently supports Windows and macOS only.{RST}")
         sys.exit(1)
@@ -158,14 +393,12 @@ def cmd_init():
     plat = "Windows" if is_windows() else "macOS"
     print(f"  {_c(34,197,94)}✓{RST}  Platform: {plat}")
 
-    # 2. Create ~/.voxkage/ structure
     voxkage_dir()
     data_dir()
     task_logs_dir()
     gemini_dir()
     print(f"  {_c(34,197,94)}✓{RST}  Data directory: {voxkage_dir()}")
 
-    # 3. Create .env if missing
     if not env_path().exists():
         tpl = template_path(".env.example")
         if tpl.exists():
@@ -185,7 +418,6 @@ def cmd_init():
     else:
         print(f"  {_c(34,197,94)}✓{RST}  .env already exists")
 
-    # 4. Create default config.json if missing
     if not config_path().exists():
         default_cfg = {
             "main_model": "gemini-2.5-flash",
@@ -198,7 +430,6 @@ def cmd_init():
     else:
         print(f"  {_c(34,197,94)}✓{RST}  Config already exists")
 
-    # 5. Check Node.js / npm
     npm = find_npm()
     if not npm:
         print()
@@ -209,7 +440,6 @@ def cmd_init():
         return
     print(f"  {_c(34,197,94)}✓{RST}  npm found: {npm}")
 
-    # 6. Check / install Gemini CLI
     gemini = find_gemini_cli()
     gemini_works = False
     try:
@@ -237,7 +467,6 @@ def cmd_init():
             print(f"  {_c(255,80,80)}✗{RST}  Failed to install Gemini CLI: {e}")
             print(f"     Try manually: {_c(56,189,248)}npm install -g @google/gemini-cli{RST}")
 
-    # 7. Install Playwright Chromium
     print(f"  {_c(56,189,248)}↓{RST}  Setting up VoxKage browser (Playwright Chromium)...")
     try:
         subprocess.run(
@@ -249,15 +478,12 @@ def cmd_init():
         print(f"  {_c(255,180,84)}⚠{RST}  Playwright setup issue: {e}")
         print(f"     Try manually: {_c(56,189,248)}python -m playwright install chromium{RST}")
 
-    # 8. Generate settings.json
     _generate_settings_json()
     print(f"  {_c(34,197,94)}✓{RST}  Generated MCP settings")
 
-    # 9. Generate GEMINI.md
     _generate_gemini_md()
     print(f"  {_c(34,197,94)}✓{RST}  Generated agent instructions")
 
-    # 10. Install platform-specific deps
     _install_platform_deps()
 
     print()
@@ -272,7 +498,6 @@ def cmd_init():
 
 
 def _install_platform_deps():
-    """Install platform-specific optional dependencies."""
     extras = "windows" if is_windows() else "macos" if is_mac() else None
     if not extras:
         return
@@ -288,14 +513,6 @@ def _install_platform_deps():
 
 
 def _sanitize_settings(settings: dict) -> dict:
-    """Remove any settings that would prevent MCP tools from working.
-
-    The critical one is tools.core — if set to a whitelist like
-    ["run_shell_command"], Gemini CLI only exposes that core tool
-    and silently hides all MCP tools from the model's function-calling
-    schema.  The model then falls back to running MCP tool names as
-    shell commands, which obviously fails.
-    """
     tools = settings.get("tools", {})
     if isinstance(tools, dict) and "core" in tools:
         del tools["core"]
@@ -303,19 +520,9 @@ def _sanitize_settings(settings: dict) -> dict:
 
 
 def _generate_settings_json():
-    """Generate MCP server settings and write to all locations Gemini CLI reads.
-
-    Gemini CLI merges settings from two places (local overrides global):
-      1. Global:  ~/.gemini/settings.json
-      2. Local:   <cwd>/.gemini/settings.json
-
-    We update BOTH so that the MCP servers are always available regardless
-    of which directory the user launches VoxKage from.
-    """
     py = python_exe()
     pkg = str(package_dir())
 
-    # Core MCP servers (always included)
     core_servers = [
         ("voxkage-system",    "mcp_servers/system_server.py"),
         ("voxkage-browser",   "mcp_servers/browser_server.py"),
@@ -343,7 +550,6 @@ def _generate_settings_json():
             "trust": True,
         }
 
-    # Plugin MCP servers (only if configured)
     try:
         from voxkage.plugins.registry import get_configured_plugin_servers
         plugin_servers = get_configured_plugin_servers()
@@ -351,7 +557,6 @@ def _generate_settings_json():
     except Exception:
         pass
 
-    # ── Write to global settings (~/.gemini/settings.json) ────────────────
     global_gemini = Path.home() / ".gemini" / "settings.json"
     global_gemini.parent.mkdir(parents=True, exist_ok=True)
 
@@ -372,17 +577,12 @@ def _generate_settings_json():
         encoding="utf-8",
     )
 
-    # ── Also patch any LOCAL .gemini/settings.json at the current CWD ─────
-    # This prevents a stale local config from overriding our global settings
-    # with a tools.core whitelist that blocks MCP tool exposure.
     _patch_local_settings(servers)
 
 
 def _generate_gemini_md():
-    """Generate GEMINI.md from the template, replacing placeholders."""
     tpl_path = template_path("GEMINI.md.template")
     if not tpl_path.exists():
-        # Dev mode: copy the existing GEMINI.md from repo root
         repo_gemini = package_dir().parent / "GEMINI.md"
         if repo_gemini.exists():
             content = repo_gemini.read_text(encoding="utf-8")
@@ -391,7 +591,6 @@ def _generate_gemini_md():
     else:
         content = tpl_path.read_text(encoding="utf-8")
 
-    # Replace placeholders
     content = content.replace("{{VOXKAGE_HOME}}", str(voxkage_dir()))
     content = content.replace("{{USER_HOME}}", str(Path.home()))
     content = content.replace("{{PLATFORM}}", "windows" if is_windows() else "darwin")
@@ -403,10 +602,8 @@ def _generate_gemini_md():
 # ── Tray Command ──────────────────────────────────────────────────────────────
 
 def cmd_tray():
-    """Launch the system tray icon in the background."""
     tray_module = "voxkage.tray.tray_app"
     if is_windows():
-        # Use pythonw to avoid console window
         pythonw = sys.executable.replace("python.exe", "pythonw.exe")
         if not os.path.exists(pythonw):
             pythonw = sys.executable
@@ -415,7 +612,6 @@ def cmd_tray():
             creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
         )
     else:
-        # macOS: launch as background process
         subprocess.Popen(
             [sys.executable, "-m", tray_module],
             stdout=subprocess.DEVNULL,
@@ -428,9 +624,7 @@ def cmd_tray():
 # ── Plugins Command ───────────────────────────────────────────────────────────
 
 def cmd_plugins(args):
-    """List or configure plugins."""
     from voxkage.plugins.registry import list_plugins, add_plugin
-
     if args.plugin_action == "add" and args.plugin_name:
         add_plugin(args.plugin_name)
     else:
@@ -440,12 +634,6 @@ def cmd_plugins(args):
 # ── Launch Command (default) ─────────────────────────────────────────────────
 
 def _patch_local_settings(servers: dict | None = None):
-    """Patch any local .gemini/settings.json at CWD to fix MCP config.
-
-    Ensures:
-      1. tools.core whitelist is removed (it blocks MCP tool exposure)
-      2. MCP server entries are up-to-date with VOXKAGE_HOME env
-    """
     local_gemini = Path(os.getcwd()) / ".gemini" / "settings.json"
     if not local_gemini.exists():
         return
@@ -457,7 +645,6 @@ def _patch_local_settings(servers: dict | None = None):
 
     changed = False
 
-    # Remove tools.core restriction
     tools = local_settings.get("tools", {})
     if isinstance(tools, dict) and "core" in tools:
         del tools["core"]
@@ -465,14 +652,12 @@ def _patch_local_settings(servers: dict | None = None):
             tools["disableLLMCorrection"] = False
         changed = True
 
-    # Update MCP servers if provided
     if servers:
         if "mcpServers" not in local_settings:
             local_settings["mcpServers"] = {}
         local_settings["mcpServers"].update(servers)
         changed = True
 
-    # Ensure all existing MCP server entries have VOXKAGE_HOME env
     for name, cfg in local_settings.get("mcpServers", {}).items():
         if name.startswith("voxkage-"):
             env = cfg.get("env", {})
@@ -488,27 +673,20 @@ def _patch_local_settings(servers: dict | None = None):
 
 
 def cmd_launch(extra_args: list[str] | None = None):
-    """Print banner and launch Gemini CLI session."""
-    # Auto-init if first run
     if not config_path().exists():
         print(f"  {_c(56,189,248)}First run detected — running setup...{RST}")
         print()
         cmd_init()
 
-    # ── Ensure MCP settings are fresh and sanitized ──────────────────────
-    # This is the critical step: regenerate settings.json on every launch
-    # to ensure MCP servers are registered and tools.core is never set.
     try:
         _generate_settings_json()
     except Exception:
-        pass  # Non-fatal — settings may already be correct
+        pass
 
-    # Auto-start tray in background (if not already running)
     _ensure_tray_running()
 
     print_banner()
 
-    # Load model from config
     model = "gemini-2.5-flash"
     try:
         cfg = json.loads(config_path().read_text(encoding="utf-8"))
@@ -541,26 +719,22 @@ def cmd_launch(extra_args: list[str] | None = None):
 
 
 def _ensure_tray_running():
-    """Start the tray if not already running (singleton check via port)."""
     import socket
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(0.1)
         s.connect(("127.0.0.1", 49998))
         s.close()
-        # Port is bound — tray is running
     except (ConnectionRefusedError, OSError, socket.timeout):
-        # Tray not running — start it silently
         try:
             cmd_tray()
         except Exception:
-            pass  # Non-critical
+            pass
 
 
 # ── Main Entry Point ─────────────────────────────────────────────────────────
 
 def main():
-    """CLI entry point — registered as console_scripts in pyproject.toml."""
     if not is_supported_platform():
         print("\n  VoxKage currently supports Windows and macOS only.\n")
         sys.exit(1)
@@ -576,14 +750,9 @@ def main():
     )
 
     subparsers = parser.add_subparsers(dest="command")
-
-    # voxkage init
     subparsers.add_parser("init", help="Run first-time setup wizard")
-
-    # voxkage tray
     subparsers.add_parser("tray", help="Launch/restore system tray icon")
 
-    # voxkage plugins [add <name>]
     plugins_parser = subparsers.add_parser("plugins", help="List or configure plugins")
     plugins_parser.add_argument("plugin_action", nargs="?", default=None, help="Action: 'add'")
     plugins_parser.add_argument("plugin_name", nargs="?", default=None, help="Plugin name")
@@ -597,7 +766,6 @@ def main():
     elif args.command == "plugins":
         cmd_plugins(args)
     else:
-        # Default: launch VoxKage session
         cmd_launch(remaining if remaining else None)
 
 
