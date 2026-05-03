@@ -151,17 +151,7 @@ def toggle_bluetooth(turn_on: bool):
     else:
         os.system(f"net stop {svc}")
         return "Bluetooth turned off"
-def change_wallpaper_from_folder(folder_path="C:\\wallpapers"):
-    if not os.path.exists(folder_path):
-        return "Wallpaper folder not found."
 
-    wallpapers = [f for f in os.listdir(folder_path) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-    if not wallpapers:
-        return "No wallpapers found in the folder."
-
-    selected = os.path.join(folder_path, random.choice(wallpapers))
-    ctypes.windll.user32.SystemParametersInfoW(20, 0, selected, 3)
-    return f"Wallpaper changed to {os.path.basename(selected)}."
 
 def bring_console_to_front():
     import ctypes
@@ -280,3 +270,4 @@ def open_intel_dsa():
         return "Opened Intel Driver & Support Assistant website."
     except Exception as e:
         return f"Failed to open Intel DSA: {e}"
+
