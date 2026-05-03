@@ -1,26 +1,46 @@
-opencv-python
-pyautogui
-keyboard
-pyjokes
-pywhatkit
-datetime
-requests
-pystray
-Pillow
-deepface
-numpy
-torch
-langgraph
+﻿# Core & Architecture
 mcp
+langgraph
+httpx
+requests
+python-dotenv
+
+# System & OS Integration
+psutil
+pywin32
+winshell
+winotify
+
+# UI & Automation
+PySide6
+pyautogui
+pywinauto
+pygetwindow
+selenium
+playwright
+
+# Data, Documents & Vision
+numpy
+pyarrow
+Pillow
+opencv-python
+PyMuPDF
+python-docx
+docx2pdf
+pdf2docx
+openpyxl
+python-pptx
+rapidocr-onnxruntime
+
+# Memory & RAG
+chromadb
+sentence-transformers
+fastembed
+lancedb
+
+# External APIs & Services
 google-auth
 google-auth-oauthlib
 google-api-python-client
-httpx
-playwright
+PyGithub
 spotipy
-PySide6
-qt-material
-qtawesome
-PyMuPDF
-python-docx
-python-telegram-bot>=20.0
