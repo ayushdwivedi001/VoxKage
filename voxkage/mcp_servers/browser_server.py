@@ -217,6 +217,8 @@ def agent_step(
       scroll         — scroll direction (up/down)
       wait           — pause for ms milliseconds
       extract_text   — extract visible page text
+      extract_image_urls — extract image URLs from live DOM
+      extract_download_urls — extract executable/installer URLs from live DOM
       type           — type text into element matching intent/selector
 
     goal: always required — describe what you are trying to accomplish
@@ -240,7 +242,12 @@ def agent_step(
         or (k == "ms" and v > 0)      # keep ms if it's a positive wait
         or (k != "ms" and v not in ("", 0))  # other fields: drop empty/zero only
     )}
-    return agent_step_sync(args)
+    result = agent_step_sync(args)
+    if isinstance(result, dict):
+        if result.get("__vision__"):
+            return result.get("text", str(result))
+        return str(result)
+    return str(result)
 
 
 @mcp.tool()
@@ -252,7 +259,10 @@ def execute_browser_workflow(goal: str, steps: list) -> str:
     _, _, execute_workflow, *_ = _web_agent()
     if not steps:
         return "Error: No steps provided."
-    return execute_workflow(goal, steps)
+    result = execute_workflow(goal, steps)
+    if isinstance(result, dict):
+        return result.get("text", str(result))
+    return str(result)
 
 
 
@@ -297,26 +307,27 @@ def find_download_url(
         "intent": f"{software_name} official site download",
     })
 
-    # Step 3: Extract text from download page
-    # BUGFIX: agent_step_sync returns str OR dict depending on action; always guard.
-    state = agent_step_sync({"action": "extract_text", "goal": f"Read {software_name} download page"})
+    # Step 3: Extract download URLs from page
+    state = agent_step_sync({"action": "extract_download_urls", "goal": f"Find download links for {software_name}"})
+    
+    download_links = []
+    current_url = ""
+    page_text = ""
     if isinstance(state, dict):
-        page_text = state.get("text", "")
+        download_links = state.get("download_urls", [])
         current_url = state.get("url", "")
-    else:
-        page_text = str(state)
-        current_url = ""
-
-    # Step 4: Extract download links from page
-    import re as _re
-    # Look for .exe, .msi, .dmg, .deb, .AppImage links
-    ext_pattern = r"https?://[^\s\"'<>]+\.(?:exe|msi|dmg|deb|AppImage|tar\.gz|zip)[^\s\"'<>]*"
-    download_links = _re.findall(ext_pattern, page_text, _re.IGNORECASE)
+        page_text = state.get("text", "")
 
     # Filter for platform
     if platform.lower() == "windows":
         win_links = [l for l in download_links if any(k in l.lower() for k in ("win", "x64", "amd64", "setup", "install", ".exe", ".msi"))]
         download_links = win_links or download_links
+    elif platform.lower() == "mac":
+        mac_links = [l for l in download_links if any(k in l.lower() for k in ("mac", "darwin", "osx", ".dmg", ".pkg"))]
+        download_links = mac_links or download_links
+    elif platform.lower() == "linux":
+        linux_links = [l for l in download_links if any(k in l.lower() for k in ("linux", "ubuntu", "debian", ".deb", ".rpm", ".appimage", ".tar.gz"))]
+        download_links = linux_links or download_links
 
     if not download_links:
         # Return what we found so the agent can manually look
@@ -325,10 +336,11 @@ def find_download_url(
             f"Could not automatically extract a direct download link for {software_name} ({platform}).\n\n"
             f"Page excerpt (look for download button or link):\n{page_text[:1000]}\n\n"
             f"Next step: Use agent_step(action='click', intent='download button {platform}') "
-            f"to click the download button, then take_screenshot() to verify."
+            f"to click the download button, or use gui_step to visually find and click it."
         )
 
     best_link = download_links[0]
+    import os
     fname = os.path.basename(best_link.split("?")[0]) or f"{software_name}_installer"
 
     return (

@@ -279,12 +279,16 @@ After collecting all validated images:
 
 For ANY download request (zip, exe, msi, torrent, pdf, dataset, etc.):
 
-#### Software/Installers
-1. `find_download_url(software_name="<name>", platform="windows")` → get official URL
-2. `download_file(url=..., save_directory=..., confirmed=False)` → show preview to user
-3. Wait for user "yes" → `download_file(confirmed=True)`
-4. Monitor with `get_download_status()`
-5. When done → `run_installer(file_path=..., confirmed=False)` → ask user before running
+#### Software/Installers (Agent-Driven Browser Workflow)
+DO NOT use the deprecated `find_download_url` tool. Instead, use the non-blocking browser toolkit turn-by-turn:
+1. `search_web(query="<software> official download")`
+2. `open_url("<official_url>")`
+3. `get_browser_state()` (takes a screenshot to visually find the download button)
+4. `agent_step(action="click", description="<Download button description>")`
+5. Once the direct download URL is found or triggered, call `download_file(url=..., confirmed=False)`
+6. Wait for user "yes" → `download_file(confirmed=True)`
+7. Monitor with `get_download_status()`
+8. When done → `run_installer(file_path=..., confirmed=False)` → ask user before running
 
 #### Any Direct File (zip, pdf, video, etc.)
 1. If you have the URL → `download_file(url=..., confirmed=False)` → preview → confirm
@@ -318,6 +322,10 @@ NEVER mix them up.
 ```
 - GUI automation sequence: `get_desktop_state` (see state) → `gui_step(focus)` → `gui_step(find_and_click)` → verify
 - After 3 failed `find_and_click` attempts (`GIVE_UP:` returned), change approach
+- **TURN-BY-TURN EXECUTION (MANDATORY):** NEVER execute multiple tools sequentially (concurrently in a single response/turn) when the user asks for a list or sequence of tasks (e.g., "open notepad, then close it, then open chrome"). Calling multiple MCP tools at once causes timeouts, blocking, and race conditions.
+  - **Plan First:** When given a list of tasks, use a thinking tool (like `agent_thinking` or `gui_thinking`) to create a plan outlining the steps.
+  - **Execute One by One:** Execute exactly ONE tool per conversational turn. Wait for the result, verify it succeeded (if it didn't, retry or wait), and then proceed to the next step in your next turn. This guarantees perfect execution and allows you to catch issues immediately.
+  - **VERIFICATION CHECK:** Before proceeding to the next step in a sequence, explicitly verify the previous tool call worked with the proper output. If it is still loading or returned an error due to speed, handle it gracefully and retry or wait in the subsequent turn.
 
 ### Telegram Yes/No Flow
 - Call `telegram_ask_save` → non-blocking

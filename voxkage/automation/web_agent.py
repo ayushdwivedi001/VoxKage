@@ -496,7 +496,9 @@ def _pw_worker():
                             f"VERIFICATION: Confirm the URL above matches the target domain. "
                             f"If content looks like a login wall or CAPTCHA, try search_web instead."
                         )
-                        res_q.put(("ok", {"__vision__": True, "text": text_out, "screenshot_b64": screenshot_b64}))
+                        if screenshot_b64:
+                            text_out += f"\n[SCREENSHOT SAVED TO: {screenshot_b64}] (Use analyze_specific_file to view)\n"
+                        res_q.put(("ok", text_out))
 
                 elif action == "search_youtube":
                     query = kwargs.get('query')
@@ -880,9 +882,7 @@ def _pw_worker():
                                 except Exception:
                                     # Fallback: full-page at low quality
                                     page.screenshot(path=ss_path, type="jpeg", quality=40)
-                                with open(ss_path, "rb") as f:
-                                    b64 = base64.b64encode(f.read()).decode("utf-8")
-                                return b64
+                                return ss_path
                             except Exception:
                                 return ""
 
@@ -1278,6 +1278,69 @@ def _pw_worker():
                                     "image_urls_json": "[]",
                                 }
 
+                        elif sub_action == "extract_download_urls":
+                            try:
+                                js_result = page.evaluate("""() => {
+                                    const seen = new Set();
+                                    const urls = [];
+                                    const exts = ['.exe', '.msi', '.dmg', '.pkg', '.deb', '.appimage', '.zip', '.tar.gz', '.iso'];
+                                    
+                                    function checkAndAdd(u) {
+                                        if (!u || typeof u !== 'string') return;
+                                        const low = u.toLowerCase();
+                                        if (exts.some(ext => low.includes(ext))) {
+                                            if (!seen.has(u)) {
+                                                seen.add(u);
+                                                urls.push(u);
+                                            }
+                                        }
+                                    }
+                                    
+                                    // 1. All anchor tags
+                                    document.querySelectorAll('a[href]').forEach(a => checkAndAdd(a.href));
+                                    // 2. Buttons with data-url or similar
+                                    document.querySelectorAll('button[data-url], a[data-url], [data-download-url]').forEach(el => {
+                                        checkAndAdd(el.dataset.url);
+                                        checkAndAdd(el.dataset.downloadUrl);
+                                    });
+                                    // 3. Any element with an onclick that looks like a redirect
+                                    document.querySelectorAll('[onclick]').forEach(el => {
+                                        const oc = el.getAttribute('onclick');
+                                        if (oc) {
+                                            const m = oc.match(/(?:window\\.location\\.href|location\\.href|window\\.open)\\s*=\\s*['"]([^'"]+)['"]/);
+                                            if (m) checkAndAdd(m[1]);
+                                        }
+                                    });
+                                    // Filter: keep only http/https URLs
+                                    return urls.filter(u => u && (u.startsWith('http://') || u.startsWith('https://') || u.startsWith('/')));
+                                }""")
+                                import json as _json
+                                
+                                # Resolve relative URLs to absolute URLs
+                                resolved_urls = []
+                                for u in (js_result if isinstance(js_result, list) else []):
+                                    if u.startswith('/'):
+                                        resolved_urls.append(urllib.parse.urljoin(page.url, u))
+                                    else:
+                                        resolved_urls.append(u)
+                                
+                                dl_urls_json = _json.dumps(resolved_urls)
+                                action_result = {
+                                    "success": True,
+                                    "message": f"Extracted {len(resolved_urls)} download URLs from DOM",
+                                    "url_after": page.url,
+                                    "download_urls": resolved_urls,
+                                    "download_urls_json": dl_urls_json,
+                                }
+                            except Exception as js_e:
+                                action_result = {
+                                    "success": False,
+                                    "message": f"JS evaluation failed: {js_e}",
+                                    "url_after": page.url,
+                                    "download_urls": [],
+                                    "download_urls_json": "[]",
+                                }
+
                         elif sub_action == "trigger_download":
                             # Click a download button and capture the download event to get the real file URL.
                             # Use this when a site hides the direct URL behind a button click.
@@ -1390,6 +1453,13 @@ def _pw_worker():
                                 f"--- END IMAGE URLS ---\n"
                                 f"TOTAL FOUND: {len(action_result.get('image_urls', []))} image URLs\n"
                             )
+                        elif sub_action == "extract_download_urls" and action_result.get("download_urls_json"):
+                            extra_lines = (
+                                f"\n--- DOWNLOAD URLS (JSON) ---\n"
+                                f"{action_result['download_urls_json']}\n"
+                                f"--- END DOWNLOAD URLS ---\n"
+                                f"TOTAL FOUND: {len(action_result.get('download_urls', []))} download URLs\n"
+                            )
                         elif sub_action == "trigger_download":
                             dl_url = action_result.get("download_url", "")
                             dl_name = action_result.get("suggested_filename", "")
@@ -1402,7 +1472,6 @@ def _pw_worker():
                                 )
 
                         res_q.put(("ok", {
-                            "__vision__": True,
                             "text": (
                                 f"=== AGENT STEP RESULT ===\n"
                                 f"ACTION: {sub_action}\n"
@@ -1414,9 +1483,9 @@ def _pw_worker():
                                 f"--- END CONTENT ---\n"
                                 f"STATUS: {status_msg}\n"
                                 f"{extra_lines}"
-                                f"VERIFICATION: Check that CURRENT URL contains the expected domain. If yes, this step succeeded."
+                                f"VERIFICATION: Check that CURRENT URL contains the expected domain. If yes, this step succeeded.\n"
+                                f"[SCREENSHOT SAVED TO: {screenshot_b64}] (Use analyze_specific_file to view)\n"
                             ),
-                            "screenshot_b64": screenshot_b64,
                             # Pass structured data through for programmatic consumers (download_server.py)
                             "image_urls": action_result.get("image_urls", []),
                             "download_url": action_result.get("download_url", ""),
@@ -1655,9 +1724,8 @@ def _pw_worker():
                                     ss_dir = tempfile.gettempdir()
                                 ss_path = os.path.join(ss_dir, f"step_{step_num[0]}_{label}.jpg")
                                 page.screenshot(path=ss_path, type="jpeg", quality=65)
-                                b64 = _encode_screenshot(ss_path)
-                                logger.info(f"[P2] Checkpoint screenshot: {ss_path} ({len(b64)} b64 chars)")
-                                return b64
+                                logger.info(f"[P2] Checkpoint screenshot: {ss_path}")
+                                return ss_path
                             except Exception as ce:
                                 logger.warning(f"[P2] Checkpoint screenshot failed: {ce}")
                                 return ""
@@ -2194,9 +2262,9 @@ def get_browser_state():
         f"use execute_browser_workflow to navigate deeper. NEVER go silent after receiving this."
     )
 
-    # Return a special marker dict that llm_client.py uses to inject the image into the vision pipeline.
-    # String casting (str()) of this dict will be caught and handled in llm_client.
-    return {"__vision__": True, "text": text_result, "screenshot_b64": screenshot_b64}
+    if screenshot_b64:
+        text_result += f"\n[SCREENSHOT SAVED TO: {screenshot_b64}] (Use analyze_specific_file to view)\n"
+    return text_result
 
 
 def browse_and_extract(url: str, query: str):
@@ -2299,11 +2367,10 @@ def agent_step_sync(arguments: dict):
                 return _dispatch_task("agent_step", arguments)
             except Exception as retry_err:
                 logger.error(f"[agent_step] Browser re-launch failed: {retry_err}")
-                return {
-                    "__vision__": True,
-                    "text": f"Browser crashed during {action} and re-launch also failed: {str(retry_err)[:300]}. The browser will auto-recover on the next attempt.",
-                    "screenshot_b64": ""
-                }
+                return (
+                    f"Browser crashed during {action} and re-launch also failed: {str(retry_err)[:300]}. "
+                    f"The browser will auto-recover on the next attempt."
+                )
         # Non-crash error — return normal failure
         logger.error(f"Error in agent_step: {e}")
-        return {"__vision__": True, "text": f"agent_step failed: {str(e)}", "screenshot_b64": ""}
+        return f"agent_step failed: {str(e)}"

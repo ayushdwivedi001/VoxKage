@@ -1,13 +1,13 @@
 """
-MCP Server: Telegram Bridge
-Handles BOTH outbound (sending messages from VoxKage → Telegram)
-and inbound awareness (checking messages from the user's phone).
+MCP Server: Telegram Bridge (voxkage-telegram)
+Handles outbound (VoxKage → Telegram) and inbox awareness.
 
-Key design decisions:
-  - telegram_ask_save is NON-BLOCKING: sends question and returns QUESTION_SENT immediately.
-    Use telegram_check_reply() on subsequent turns to get the user's yes/no answer.
-  - telegram_get_pending_messages tracks a persistent offset so messages are never repeated.
-  - telegram_send_file auto-routes .jpg/.jpeg/.png/.webp to sendPhoto (inline) vs sendDocument.
+The inbound path is now handled by telegram_watcher.py which runs as a
+persistent background process and injects messages directly into Gemini CLI.
+This MCP server handles:
+  - Sending messages/files/reports outbound
+  - Reading the inbox file (fallback when watcher injection fails)
+  - ask/check reply flow for confirmation prompts
 
 Standalone — run directly:
     python mcp_servers/telegram_server.py
@@ -17,203 +17,258 @@ import os
 import sys
 import json
 import logging
+import time
 from pathlib import Path
 
-# ── Persistent state dir (cross-platform, used for offset + pending reply) ─────
-_VOXKAGE_DIR = Path(os.path.expanduser("~")) / ".voxkage"
+# ── Persistent state ──────────────────────────────────────────────────────────
+_VOXKAGE_DIR         = Path(os.path.expanduser("~")) / ".voxkage"
+_OFFSET_FILE         = _VOXKAGE_DIR / "telegram_offset.json"
+_PENDING_REPLY_FILE  = _VOXKAGE_DIR / "telegram_pending_reply.json"
+_INBOX_FILE          = _VOXKAGE_DIR / "telegram_inbox.jsonl"
+_DOWNLOAD_DIR        = _VOXKAGE_DIR / "telegram_downloads"
 _VOXKAGE_DIR.mkdir(parents=True, exist_ok=True)
-_OFFSET_FILE = _VOXKAGE_DIR / "telegram_offset.json"
-_PENDING_REPLY_FILE = _VOXKAGE_DIR / "telegram_pending_reply.json"
+_DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-# ── Load environment variables ────────────────────────────────────────────────
 from _env import load_voxkage_env
 load_voxkage_env()
 
-# ── MCP server ────────────────────────────────────────────────────────────────
 from mcp.server.fastmcp import FastMCP
-
 mcp = FastMCP("voxkage-telegram")
 logger = logging.getLogger(__name__)
 
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+TOKEN   = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+API_BASE = f"https://api.telegram.org/bot{TOKEN}"
 
-
-def _send(text: str) -> bool:
-    """Low-level send via Telegram Bot API."""
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        return False
-    try:
-        import requests
-        resp = requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
-            timeout=15,
-        )
-        return resp.status_code == 200
-    except Exception as e:
-        logger.error(f"[Telegram] Send error: {e}")
-        return False
-
-
-# Image extensions that should be sent as photos (renders inline in Telegram chat)
 _PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
-def _send_document(file_path: str, caption: str = "") -> bool:
-    """Low-level file send via Telegram Bot API.
-    Automatically routes images to sendPhoto for inline display.
-    All other file types use sendDocument.
-    """
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+# ── Low-level API ─────────────────────────────────────────────────────────────
+
+def _post(method: str, **kwargs) -> bool:
+    if not TOKEN or not CHAT_ID:
         return False
-    ext = os.path.splitext(file_path)[1].lower()
+    try:
+        import requests
+        r = requests.post(f"{API_BASE}/{method}", json={"chat_id": CHAT_ID, **kwargs}, timeout=15)
+        return r.status_code == 200
+    except Exception as e:
+        logger.error(f"[Telegram] {method} error: {e}")
+        return False
+
+
+def _get(method: str, **kwargs) -> dict:
+    try:
+        import requests
+        r = requests.get(f"{API_BASE}/{method}", params=kwargs, timeout=10)
+        if r.status_code == 200:
+            return r.json()
+    except Exception as e:
+        logger.error(f"[Telegram] GET {method} error: {e}")
+    return {}
+
+
+def _send(text: str) -> bool:
+    return _post("sendMessage", text=text, parse_mode="Markdown")
+
+
+def _send_document(file_path: str, caption: str = "") -> bool:
+    if not TOKEN or not CHAT_ID:
+        return False
+    ext      = os.path.splitext(file_path)[1].lower()
     endpoint = "sendPhoto" if ext in _PHOTO_EXTS else "sendDocument"
-    field_name = "photo" if endpoint == "sendPhoto" else "document"
+    field    = "photo" if endpoint == "sendPhoto" else "document"
     try:
         import requests
         with open(file_path, "rb") as f:
-            resp = requests.post(
-                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/{endpoint}",
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption},
-                files={field_name: f},
+            r = requests.post(
+                f"{API_BASE}/{endpoint}",
+                data={"chat_id": CHAT_ID, "caption": caption},
+                files={field: f},
                 timeout=30,
             )
-        return resp.status_code == 200
+        return r.status_code == 200
     except Exception as e:
         logger.error(f"[Telegram] File send error: {e}")
         return False
 
 
 def _read_offset() -> int:
-    """Read the last processed update_id from disk. Returns 0 if none stored."""
     try:
         if _OFFSET_FILE.exists():
-            data = json.loads(_OFFSET_FILE.read_text(encoding="utf-8"))
-            return int(data.get("last_update_id", 0))
+            return int(json.loads(_OFFSET_FILE.read_text())["last_update_id"])
     except Exception:
         pass
     return 0
 
 
-def _write_offset(update_id: int):
-    """Persist the last processed update_id to disk."""
+def _save_offset(uid: int):
     try:
-        _OFFSET_FILE.write_text(
-            json.dumps({"last_update_id": update_id}), encoding="utf-8"
-        )
-    except Exception as e:
-        logger.warning(f"[Telegram] Could not write offset: {e}")
+        _OFFSET_FILE.write_text(json.dumps({"last_update_id": uid}))
+    except Exception:
+        pass
 
+
+# ── Inbox file reader (watcher fallback) ──────────────────────────────────────
+
+def _read_inbox(mark_read: bool = True) -> list[dict]:
+    """
+    Read messages from the inbox file that telegram_watcher.py wrote.
+    Used as fallback when live injection failed (Gemini CLI window not found).
+    """
+    if not _INBOX_FILE.exists():
+        return []
+    try:
+        lines = _INBOX_FILE.read_text(encoding="utf-8").strip().splitlines()
+        messages = []
+        unread = []
+        for line in lines:
+            try:
+                obj = json.loads(line)
+                if not obj.get("read"):
+                    unread.append(obj)
+                messages.append(obj)
+            except Exception:
+                pass
+        if mark_read and unread:
+            # Mark all as read
+            marked = []
+            for obj in messages:
+                obj["read"] = True
+                marked.append(json.dumps(obj, ensure_ascii=False))
+            _INBOX_FILE.write_text("\n".join(marked) + "\n", encoding="utf-8")
+        return unread
+    except Exception as e:
+        logger.error(f"Inbox read error: {e}")
+        return []
+
+
+# ── MCP Tools ─────────────────────────────────────────────────────────────────
 
 @mcp.tool()
 def telegram_send_message(message: str) -> str:
     """
-    Sends a plain text message to the user's Telegram phone.
-    Use for: quick notifications, reminders, short facts, confirmations, answers.
+    Send a plain text message to the user's Telegram phone.
+    Use for: notifications, reminders, short facts, confirmations, answers.
     """
-    if not TELEGRAM_TOKEN:
-        return "❌ Telegram not configured. No bot token found."
-    if not TELEGRAM_CHAT_ID:
-        return "⚠️ Telegram: no chat ID yet. Ask user to send any message to the bot first."
-    ok = _send(message)
-    return "✅ Message sent to Telegram." if ok else "❌ Failed to send Telegram message."
+    if not TOKEN:
+        return "❌ Telegram not configured — no bot token."
+    if not CHAT_ID:
+        return "⚠️ Telegram: no chat ID. Ask user to send any message to the bot first."
+    return "✅ Message sent." if _send(message) else "❌ Failed to send Telegram message."
 
 
 @mcp.tool()
 def telegram_send_report(title: str, content: str) -> str:
     """
-    Sends a formatted report to Telegram with a header.
-    Use for: research results, file summaries, long analyses, daily briefings.
-    Telegram has a 4096 character limit — content is truncated if needed.
+    Send a formatted report to Telegram with a bold header.
+    Use for: research results, summaries, analyses, daily briefings.
+    Content is truncated at 4000 characters (Telegram limit).
     """
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+    if not TOKEN or not CHAT_ID:
         return "❌ Telegram not configured."
-    formatted = f"📋 *{title}*\n\n{content}"
-    if len(formatted) > 4000:
-        formatted = formatted[:3990] + "\n\n_…[truncated]_"
-    ok = _send(formatted)
-    return "✅ Report sent to Telegram." if ok else "❌ Failed to send report."
+    body = f"📋 *{title}*\n\n{content}"
+    if len(body) > 4000:
+        body = body[:3990] + "\n\n_…[truncated]_"
+    return "✅ Report sent." if _send(body) else "❌ Failed to send report."
 
 
 @mcp.tool()
 def telegram_send_file(file_path: str, caption: str = "") -> str:
     """
-    Sends a local file (PDF, image, text, CSV, etc.) to the user's Telegram.
-    file_path must be an absolute path to a file that exists on this PC.
-    Use when user says: 'send this file to telegram', 'forward this PDF to my phone'.
+    Send a local file (PDF, image, text, CSV, etc.) to the user's Telegram.
+    file_path must be an absolute path to an existing file on this PC.
+    Images (.jpg/.png/.webp) are sent inline; all others as document attachments.
     """
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+    if not TOKEN or not CHAT_ID:
         return "❌ Telegram not configured."
     if not os.path.isfile(file_path):
         return f"❌ File not found: {file_path}"
-    caption = caption or f"📎 {os.path.basename(file_path)}"
-    ok = _send_document(file_path, caption)
-    return f"✅ '{os.path.basename(file_path)}' sent to Telegram." if ok else "❌ File send failed."
+    cap = caption or f"📎 {os.path.basename(file_path)}"
+    name = os.path.basename(file_path)
+    return f"✅ '{name}' sent." if _send_document(file_path, cap) else "❌ File send failed."
+
+
+@mcp.tool()
+def telegram_check_inbox() -> str:
+    """
+    Check for Telegram messages that arrived while the watcher could not inject
+    them live into Gemini CLI (e.g. the terminal window was not found).
+
+    Returns unread messages from the inbox file and marks them as read.
+    Use when user says 'check telegram inbox' or after being notified that
+    a message could not be injected.
+
+    NOTE: Under normal operation, the telegram_watcher.py process injects
+    messages directly into Gemini CLI — you will see them appear automatically
+    without needing to call this tool. This tool is the manual fallback.
+    """
+    messages = _read_inbox(mark_read=True)
+    if not messages:
+        return "📭 No unread messages in inbox."
+
+    parts = [f"📬 {len(messages)} unread message(s) from Telegram:\n"]
+    for i, m in enumerate(messages, 1):
+        ts = time.strftime("%H:%M:%S", time.localtime(m.get("timestamp", 0)))
+        parts.append(f"[{i}] {ts}\n{m.get('prompt', '(empty)')}")
+    return "\n\n".join(parts)
 
 
 @mcp.tool()
 def telegram_ask_save(content_description: str) -> str:
     """
-    Asks the user via Telegram if they want to save the current information.
+    Ask the user via Telegram if they want to save/receive the current result.
 
-    *** NON-BLOCKING — returns immediately after sending the question. ***
-    Do NOT wait for a reply in this call. The MCP server would freeze for 30s
-    if this polled synchronously — all other tools would be unreachable.
+    NON-BLOCKING — sends the question and returns immediately.
+    Follow up with telegram_check_reply() on the next turn.
 
     Workflow:
-      1. Call telegram_ask_save(content_description) → sends question, returns QUESTION_SENT
-      2. On your NEXT turn, call telegram_check_reply() → returns YES_SAVE, NO_SKIP, or WAITING
-      3. If WAITING, call telegram_check_reply() again on subsequent turns.
-
-    Use ONLY when you have generated a substantial result (>300 chars).
-    Returns: 'QUESTION_SENT', or 'NO_SKIP' if Telegram is not configured.
+      1. telegram_ask_save("weather report for Mumbai")  → QUESTION_SENT
+      2. Next turn: telegram_check_reply()               → YES_SAVE / NO_SKIP / WAITING
+      3. If YES_SAVE: send the content with telegram_send_report() or telegram_send_file()
     """
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+    if not TOKEN or not CHAT_ID:
         return "NO_SKIP"
+    baseline = _read_offset()
+    try:
+        _PENDING_REPLY_FILE.write_text(
+            json.dumps({"waiting": True, "baseline_offset": baseline})
+        )
+    except Exception:
+        pass
     question = (
         f"I just generated: *{content_description}*.\n\n"
         f"Would you like me to send this to Telegram? Reply *YES* or *NO*."
     )
-    # Record current offset so check_reply only looks at messages AFTER this question
-    current_offset = _read_offset()
-    try:
-        _PENDING_REPLY_FILE.write_text(
-            json.dumps({"waiting": True, "baseline_offset": current_offset}),
-            encoding="utf-8",
-        )
-    except Exception:
-        pass
     _send(question)
     return (
-        "QUESTION_SENT: Yes/No question sent to Telegram. "
-        "Call telegram_check_reply() on your next turn to get the user's answer."
+        "QUESTION_SENT: Question sent to Telegram. "
+        "Call telegram_check_reply() next turn to get the answer."
     )
 
 
 @mcp.tool()
 def telegram_check_reply() -> str:
     """
-    Check if the user has replied to a previous telegram_ask_save() question.
-    Call this once per turn AFTER calling telegram_ask_save().
+    Check if the user has replied YES or NO to a telegram_ask_save() question.
 
     Returns:
-      'YES_SAVE'  — user replied yes, proceed to send content
-      'NO_SKIP'   — user replied no, skip sending
-      'WAITING'   — no reply yet, check again next turn
-      'NO_PENDING' — no question was sent (telegram_ask_save not called)
+      YES_SAVE   — user replied yes, proceed to send content
+      NO_SKIP    — user replied no, skip sending
+      WAITING    — no reply yet, call again next turn
+      NO_PENDING — no question is pending
     """
-    if not TELEGRAM_TOKEN:
+    if not TOKEN:
         return "NO_PENDING"
     try:
         if not _PENDING_REPLY_FILE.exists():
             return "NO_PENDING"
-        state = json.loads(_PENDING_REPLY_FILE.read_text(encoding="utf-8"))
+        state = json.loads(_PENDING_REPLY_FILE.read_text())
         if not state.get("waiting"):
             return "NO_PENDING"
         baseline = state.get("baseline_offset", 0)
@@ -222,43 +277,33 @@ def telegram_check_reply() -> str:
 
     try:
         import requests
-        # Only fetch messages AFTER our question was sent
-        params = {"limit": 10, "timeout": 0, "offset": baseline + 1}
         resp = requests.get(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
-            params=params,
+            f"{API_BASE}/getUpdates",
+            params={"limit": 10, "timeout": 0, "offset": baseline + 1},
             timeout=8,
         )
         updates = resp.json().get("result", [])
         last_id = baseline
-        found_reply = False
-        reply_result = "WAITING"
 
         for u in updates:
             last_id = max(last_id, u["update_id"])
-            msg = u.get("message", {}).get("text", "").strip().upper()
-            if not found_reply:
-                if msg in ("YES", "Y"):
-                    _PENDING_REPLY_FILE.write_text(json.dumps({"waiting": False}), encoding="utf-8")
-                    found_reply = True
-                    reply_result = "YES_SAVE"
-                elif msg in ("NO", "N"):
-                    _PENDING_REPLY_FILE.write_text(json.dumps({"waiting": False}), encoding="utf-8")
-                    found_reply = True
-                    reply_result = "NO_SKIP"
-        
-        # Always update the global offset if we saw messages, 
-        # and also update the baseline for next check_reply if we haven't found our answer yet.
+            text = u.get("message", {}).get("text", "").strip().upper()
+            if text in ("YES", "Y"):
+                _PENDING_REPLY_FILE.write_text(json.dumps({"waiting": False}))
+                _save_offset(last_id)
+                return "YES_SAVE"
+            elif text in ("NO", "N"):
+                _PENDING_REPLY_FILE.write_text(json.dumps({"waiting": False}))
+                _save_offset(last_id)
+                return "NO_SKIP"
+
+        # Advance baseline so next check doesn't re-read same messages
         if last_id > baseline:
-            _write_offset(last_id)
-            if not found_reply:
-                try:
-                    state["baseline_offset"] = last_id
-                    _PENDING_REPLY_FILE.write_text(json.dumps(state), encoding="utf-8")
-                except Exception:
-                    pass
-        
-        return reply_result
+            state["baseline_offset"] = last_id
+            _PENDING_REPLY_FILE.write_text(json.dumps(state))
+            _save_offset(last_id)
+
+        return "WAITING"
     except Exception as e:
         return f"ERROR: {e}"
 
@@ -266,62 +311,87 @@ def telegram_check_reply() -> str:
 @mcp.tool()
 def telegram_get_pending_messages() -> str:
     """
-    Fetches pending/unread messages from the connected Telegram user.
-    Use when the user asks: 'do I have any telegram messages?', 
-    'read my telegram messages', 'check telegram'.
+    Manually fetch any new Telegram messages via the Bot API.
+
+    Under normal operation, telegram_watcher.py injects messages automatically.
+    Use this only if the watcher is not running or as an explicit check.
+
+    Also checks the inbox file for messages the watcher could not inject live.
     """
-    if not TELEGRAM_TOKEN:
-        return "❌ Telegram not configured. No bot token found."
-    
-    current_offset = _read_offset()
+    if not TOKEN:
+        return "❌ Telegram not configured."
+
+    output = []
+
+    # 1. Check inbox file (watcher fallback messages)
+    inbox = _read_inbox(mark_read=True)
+    if inbox:
+        output.append(f"📬 {len(inbox)} message(s) from inbox file (watcher fallback):")
+        for m in inbox:
+            output.append(m.get("prompt", "(empty)"))
+
+    # 2. Live poll from Telegram API
+    offset = _read_offset()
     try:
         import requests
-        params = {"limit": 10, "timeout": 0, "offset": current_offset + 1}
         resp = requests.get(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
-            params=params,
+            f"{API_BASE}/getUpdates",
+            params={"limit": 10, "timeout": 0, "offset": offset + 1},
             timeout=8,
         )
         updates = resp.json().get("result", [])
-        if not updates:
-            return "No new messages."
-        
-        output = []
-        last_id = current_offset
+        last_id = offset
         for u in updates:
             last_id = max(last_id, u["update_id"])
-            # Extract sender and text
-            msg_obj = u.get("message", {})
-            sender = msg_obj.get("from", {}).get("first_name", "Unknown")
-            text = msg_obj.get("text", "")
+            msg = u.get("message", {})
+            sender = msg.get("from", {}).get("first_name", "Unknown")
+            text = msg.get("text") or msg.get("caption") or ""
             if text:
                 output.append(f"From {sender}: {text}")
-        
-        if last_id > current_offset:
-            _write_offset(last_id)
-            
-        if output:
-            return "📩 *New Telegram Messages:*\n\n" + "\n".join(output)
-        return "No new text messages (updates received but no text found)."
+        if last_id > offset:
+            _save_offset(last_id)
     except Exception as e:
-        logger.error(f"[Telegram] Get updates error: {e}")
-        return f"❌ Failed to fetch messages: {e}"
+        output.append(f"API poll error: {e}")
+
+    if not output:
+        return "📭 No new messages."
+    return "📩 *Telegram Messages:*\n\n" + "\n\n".join(output)
 
 
 @mcp.tool()
 def telegram_get_status() -> str:
     """
-    Returns the current status of the Telegram integration.
-    Use when user asks: 'Is Telegram connected?', 'telegram status'.
+    Return the current Telegram integration status.
+    Shows whether the watcher process is running and the connection is alive.
     """
-    if not TELEGRAM_TOKEN:
-        return "❌ Telegram not configured. No bot token in .env."
-    if not TELEGRAM_CHAT_ID:
-        return "⚠️ Token found but no chat ID. Send any message to the bot to link your account."
-    return f"✅ Telegram active. Linked to chat ID: {TELEGRAM_CHAT_ID}."
+    if not TOKEN:
+        return "❌ Not configured — no TELEGRAM_BOT_TOKEN in .env"
+    if not CHAT_ID:
+        return "⚠️ Token found but no TELEGRAM_CHAT_ID. Send any message to the bot to link."
 
+    # Check if watcher is running
+    watcher_status = "unknown"
+    try:
+        lock_file = _VOXKAGE_DIR / "telegram_watcher.lock"
+        if lock_file.exists():
+            pid = int(lock_file.read_text().strip())
+            try:
+                os.kill(pid, 0)
+                watcher_status = f"✅ running (PID {pid})"
+            except OSError:
+                watcher_status = "⚠️ lock file exists but process is dead (stale lock)"
+        else:
+            watcher_status = "❌ not running — start with: python telegram_watcher.py"
+    except Exception:
+        watcher_status = "unknown"
 
-
+    inbox_count = len(_read_inbox(mark_read=False))
+    return (
+        f"✅ Telegram connected\n"
+        f"  Chat ID  : {CHAT_ID}\n"
+        f"  Watcher  : {watcher_status}\n"
+        f"  Inbox    : {inbox_count} unread message(s) in fallback file"
+    )
 
 
 if __name__ == "__main__":

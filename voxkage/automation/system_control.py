@@ -1,4 +1,4 @@
-﻿import os
+import os
 import time
 import difflib
 import ctypes
@@ -326,7 +326,8 @@ def toggle_focus_mode(turn_on: bool):
     try:
         val = 0 if turn_on else 1
         os.system(f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings" /v NOC_GLOBAL_SETTING_TOASTS_ENABLED /t REG_DWORD /d  {val} /f >nul 2>&1')
-        return d"Focus mode {'enabled (notifications silenced)' if turn_on else 'disabled'}."
+        state = 'enabled (notifications silenced)' if turn_on else 'disabled'
+        return f"Focus mode {state}."
     except Exception as e:
         return f"Failed to toggle Focus mode: {e}"
 
@@ -343,7 +344,7 @@ def check_network_vitality():
 def boost_process(process_name: str):
     import subprocess
     try:
-        script = f"Get-Process -Name '{process_name}' -ErrorAction SilentlyContinue | ForEach-Object { $app_obj = $_; $app_obj.PriorityClass = 'High' }"
+        script = f"Get-Process -Name '{process_name}' -ErrorAction SilentlyContinue | ForEach-Object {{ $app_obj = $_; $app_obj.PriorityClass = 'High' }}"
         subprocess.run(["powershell", "-Command", script], check=True)
         return f"Boosted process '{process_name}' to High priority."
     except Exception as e:
@@ -372,7 +373,7 @@ def clear_temp_files():
                 count += 1
             except Exception:
                 pass
-    return d"Cleared {count} temporary files/folders."
+    return f"Cleared {count} temporary files/folders."
 
 
 def toggle_hidden_files(show: bool):
@@ -392,6 +393,8 @@ def toggle_dark_mode(dark: bool):
 
 
 def mute_microphone(mute: bool):
+    mute_str = "true" if mute else "false"
+    state_str = "muted" if mute else "unmuted"
     script = f"""
     if (-not (Get-Module -ListAvailable -Name AudioDeviceCmdlets)) {{
 
@@ -402,8 +405,8 @@ def mute_microphone(mute: bool):
         $devices = Get-AudioDevice -List | Where-Object {{ $_.Type -eq 'Recording' }}
         if ($devices) {{
             Set-AudioDevice -Index $devices[0].Index | Out-Null
-            Set-AudioDevice -RecordingMute ${{"true" if mute else "false"}} | Out-Null
-            Write-Output "Microphone {{'muted' if mute else 'unmuted'}}."
+            Set-AudioDevice -RecordingMute ${mute_str} | Out-Null
+            Write-Output "Microphone {state_str}."
         }} else {{
             Write-Output "No recording device found."
         }}
@@ -414,7 +417,7 @@ def mute_microphone(mute: bool):
     import subprocess
     try:
         res = subprocess.run(["powershell", "-Command", script], capture_output=True, text=True)
-        return res.stdout.strip() if res.stdout.strip() else f"Microphone {'muted' if mute else 'unmuted'}."
+        return res.stdout.strip() if res.stdout.strip() else f"Microphone {state_str}."
     except Exception as e:
         return f"Failed to toggle microphone: {e}"
 

@@ -672,6 +672,62 @@ def _patch_local_settings(servers: dict | None = None):
         )
 
 
+def _ensure_telegram_watcher_running():
+    """
+    Start the Telegram Watcher background process if not already running.
+    Singleton — checks the lock file before starting.
+    Only starts if TELEGRAM_BOT_TOKEN is configured.
+    """
+    import os
+    from pathlib import Path
+
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    if not token:
+        return  # Telegram not configured — skip silently
+
+    voxkage_dir_path = Path(os.path.expanduser("~")) / ".voxkage"
+    lock_file = voxkage_dir_path / "telegram_watcher.lock"
+
+    # Check if already running
+    if lock_file.exists():
+        try:
+            pid = int(lock_file.read_text().strip())
+            os.kill(pid, 0)   # Signal 0 = "does this process exist?"
+            return             # Already alive
+        except (OSError, ValueError, SystemError):
+            pass  # Stale lock — proceed to start
+
+    watcher_script = Path(__file__).parent / "telegram_watcher.py"
+    if not watcher_script.exists():
+        # Try package-relative path
+        watcher_script = package_dir() / "telegram_watcher.py"
+    if not watcher_script.exists():
+        return  # Watcher not installed
+
+    try:
+        if is_windows():
+            pythonw = sys.executable.replace("python.exe", "pythonw.exe")
+            if not os.path.exists(pythonw):
+                pythonw = sys.executable
+            import subprocess
+            subprocess.Popen(
+                [pythonw, str(watcher_script)],
+                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            import subprocess
+            subprocess.Popen(
+                [sys.executable, str(watcher_script)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+    except Exception as e:
+        pass  # Non-critical — VoxKage still works, just no auto-injection
+
+
 def cmd_launch(extra_args: list[str] | None = None):
     if not config_path().exists():
         print(f"  {_c(56,189,248)}First run detected — running setup...{RST}")
@@ -684,6 +740,7 @@ def cmd_launch(extra_args: list[str] | None = None):
         pass
 
     _ensure_tray_running()
+    _ensure_telegram_watcher_running()
 
     print_banner()
 
