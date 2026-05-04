@@ -331,6 +331,9 @@ NEVER mix them up.
 - Call `telegram_ask_save` → non-blocking
 - On **next turn**, call `telegram_check_reply()` to get YES_SAVE / NO_SKIP / WAITING
 
+### Telegram Character Limits
+- **CRITICAL**: Telegram messages and reports have a hard limit of 4096 characters. ALWAYS keep messages concise and strictly under this limit to avoid `ConnectionResetError` and API timeouts.
+
 ---
 
 ## STOP RULE — GOAL_MET SENTINEL
@@ -368,3 +371,5 @@ If any tool returns "Path not in workspace" or "Access Denied" when saving:
 - Immediately redirect to `C:\Users\AYUSH\Desktop\Vision-Assistant\output\`
 - Create the `output/` folder if needed
 - Tell the user where the file was saved
+
+- **Telegram character limit**: Always ensure messages sent to Telegram are under 4096 characters to avoid errors. Truncate or split long reports if necessary.

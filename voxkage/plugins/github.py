@@ -7,7 +7,7 @@ class GitHubPlugin(VoxKagePlugin):
     name = "github"
     display_name = "GitHub"
     description = "Clone repos, manage PRs, check Actions, and automate Git workflows."
-    required_env_vars = ["GITHUB_TOKEN"]
+    required_env_vars = ["GITHUB_PAT"]
     mcp_server_name = "voxkage-github"
     mcp_server_script = "mcp_servers/github_server.py"
 
@@ -25,5 +25,5 @@ class GitHubPlugin(VoxKagePlugin):
         if not token:
             return False
 
-        self._write_env_var("GITHUB_TOKEN", token)
+        self._write_env_var("GITHUB_PAT", token)
         return True

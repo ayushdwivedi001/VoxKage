@@ -369,21 +369,17 @@ def telegram_get_status() -> str:
     if not CHAT_ID:
         return "⚠️ Token found but no TELEGRAM_CHAT_ID. Send any message to the bot to link."
 
-    # Check if watcher is running
+    # Check if unified tray (watcher) is running
     watcher_status = "unknown"
+    import socket
     try:
-        lock_file = _VOXKAGE_DIR / "telegram_watcher.lock"
-        if lock_file.exists():
-            pid = int(lock_file.read_text().strip())
-            try:
-                os.kill(pid, 0)
-                watcher_status = f"✅ running (PID {pid})"
-            except OSError:
-                watcher_status = "⚠️ lock file exists but process is dead (stale lock)"
-        else:
-            watcher_status = "❌ not running — start with: python telegram_watcher.py"
-    except Exception:
-        watcher_status = "unknown"
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.1)
+        s.connect(("127.0.0.1", 49998))
+        s.close()
+        watcher_status = "✅ running (System Tray / V3 Watcher)"
+    except (ConnectionRefusedError, OSError, socket.timeout):
+        watcher_status = "❌ not running — launch voxkage tray"
 
     inbox_count = len(_read_inbox(mark_read=False))
     return (

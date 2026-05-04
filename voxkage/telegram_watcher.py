@@ -134,7 +134,7 @@ def _inject_via_pyautogui(prompt: str) -> bool:
             win32clipboard.EmptyClipboard()
             win32clipboard.SetClipboardText(prompt, win32clipboard.CF_UNICODETEXT)
             win32clipboard.CloseClipboard()
-            pyautogui.hotkey("shift", "insert")
+            pyautogui.hotkey("ctrl", "v")
         except Exception:
             # Fallback: typewrite (ASCII only)
             safe = prompt.encode("ascii", "replace").decode("ascii")
@@ -314,11 +314,18 @@ def _acquire_lock() -> bool:
             pid = int(_LOCK_FILE.read_text().strip())
             # Check if that process is still alive
             try:
-                os.kill(pid, 0)
-                log.info(f"Watcher already running (PID {pid})")
-                return False
-            except OSError:
-                pass  # Process gone — stale lock, proceed
+                import psutil
+                if psutil.pid_exists(pid):
+                    log.info(f"Watcher already running (PID {pid})")
+                    return False
+            except Exception:
+                # Fallback if psutil fails/missing
+                try:
+                    os.kill(pid, 0)
+                    log.info(f"Watcher already running (PID {pid})")
+                    return False
+                except OSError:
+                    pass  # Process gone — stale lock, proceed
         _LOCK_FILE.write_text(str(os.getpid()))
         return True
     except Exception:

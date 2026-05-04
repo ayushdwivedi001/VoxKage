@@ -109,6 +109,20 @@ _seen_ids: set[int] = set()
 # ── Processing lock — only ONE message handled at a time ─────────────────────
 _tg_lock = threading.Lock()
 
+def _send_telegram(text: str):
+    """Send a message back to the user's Telegram."""
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    try:
+        import requests
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
+            timeout=10,
+        )
+    except Exception as e:
+        print(f"[Tray] _send_telegram error: {e}")
+
 # ── Telegram watcher thread ───────────────────────────────────────────────────
 def _telegram_poll_loop():
     """
@@ -126,6 +140,7 @@ def _telegram_poll_loop():
     import requests
 
     print("[Tray] Telegram watcher started.")
+    _send_telegram("🟢 VoxKage System Tray is online and listening.")
 
     while True:
         try:

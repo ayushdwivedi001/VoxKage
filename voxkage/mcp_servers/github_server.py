@@ -317,6 +317,11 @@ def check_project_health(kwargs):
 # ====== GITHUB API OPERATIONS (PyGithub) ======
 
 def get_github_client():
+    global GITHUB_PAT
+    if not GITHUB_PAT:
+        load_voxkage_env()
+        GITHUB_PAT = os.environ.get("GITHUB_PAT", "")
+
     if not HAS_PYGITHUB:
         raise Exception("PyGithub is not installed. Please pip install PyGithub")
     if not GITHUB_PAT:
@@ -372,9 +377,10 @@ def list_my_repos(kwargs):
 
 def create_repo_local(kwargs):
     name = kwargs.get("name")
+    path = kwargs.get("path")
     description = kwargs.get("description", "")
     private = kwargs.get("private", True)
-    init_readme = kwargs.get("init_readme", True)
+    push = kwargs.get("push", True)
     
     if not name:
         return {"error": "name required"}
@@ -388,27 +394,50 @@ def create_repo_local(kwargs):
             name,
             description=description,
             private=private,
-            auto_init=init_readme
+            auto_init=not path # Only auto-init if we aren't pushing local files
         )
         
         remote_url = repo.clone_url
         
-        # 2. Clone locally
-        clone_res = git_clone({"url": remote_url, "dest_name": name})
-        
-        if "error" in clone_res:
+        # 2. Handle local setup
+        if path and os.path.exists(path):
+            # Local to Remote flow
+            _run_cmd("git init", cwd=path)
+            _run_cmd(f"git remote add origin {remote_url}", cwd=path)
+            if push:
+                _run_cmd("git add .", cwd=path)
+                _run_cmd('git commit -m "Initial commit"', cwd=path)
+                _run_cmd("git branch -M main", cwd=path)
+                push_res = _run_cmd("git push -u origin main", cwd=path)
+                return {
+                    "status": "Success",
+                    "remote_url": remote_url,
+                    "local_path": path,
+                    "push_output": push_res["stderr"] or push_res["stdout"]
+                }
             return {
-                "status": "Created remote, but local clone failed",
+                "status": "Initialized local and created remote",
                 "remote_url": remote_url,
-                "clone_error": clone_res["error"]
+                "local_path": path,
+                "next_step": "Run git push to upload files."
             }
+        else:
+            # Remote to Local flow (standard clone)
+            clone_res = git_clone({"url": remote_url, "dest_name": name})
             
-        return {
-            "status": "Success",
-            "remote_url": remote_url,
-            "local_path": clone_res.get("path"),
-            "message": "Repository created remotely and cloned locally. Ready for work."
-        }
+            if "error" in clone_res:
+                return {
+                    "status": "Created remote, but local clone failed",
+                    "remote_url": remote_url,
+                    "clone_error": clone_res["error"]
+                }
+                
+            return {
+                "status": "Success",
+                "remote_url": remote_url,
+                "local_path": clone_res.get("path"),
+                "message": "Repository created remotely and cloned locally."
+            }
     except Exception as e:
         return {"error": str(e)}
 
@@ -530,9 +559,9 @@ def github_detect_and_install_deps(repo_path: str) -> str:
     return json.dumps(detect_and_install_deps({"repo_path": repo_path}), indent=2)
 
 @mcp.tool()
-def github_run_project(repo_path: str, command: str = "") -> str:
+def github_run_project(repo_path: str, command: str = "", port: int = 0) -> str:
     """Run a project in the background (starts dev servers, etc)"""
-    return json.dumps(run_project({"repo_path": repo_path, "command": command}), indent=2)
+    return json.dumps(run_project({"repo_path": repo_path, "command": command, "port": port}), indent=2)
 
 @mcp.tool()
 def github_kill_project(repo_path: str) -> str:
@@ -540,9 +569,9 @@ def github_kill_project(repo_path: str) -> str:
     return json.dumps(kill_project({"repo_path": repo_path}), indent=2)
 
 @mcp.tool()
-def github_check_project_health(repo_path: str) -> str:
+def github_check_project_health(repo_path: str, port: int) -> str:
     """Check if a background project is still running"""
-    return json.dumps(check_project_health({"repo_path": repo_path}), indent=2)
+    return json.dumps(check_project_health({"repo_path": repo_path, "port": port}), indent=2)
 
 @mcp.tool()
 def github_get_profile() -> str:
