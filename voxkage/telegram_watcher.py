@@ -80,7 +80,7 @@ API_BASE = f"https://api.telegram.org/bot{TOKEN}"
 # We try the pipe first, fall back to pyautogui keyboard injection.
 
 _GEMINI_WINDOW_TITLES = [
-    "gemini", "voxkage", "vision-assistant", "windowsterminal", "cmd", "powershell"
+    "gemini", "voxkage", "vision-assistant"
 ]
 
 
@@ -134,7 +134,7 @@ def _inject_via_pyautogui(prompt: str) -> bool:
             win32clipboard.EmptyClipboard()
             win32clipboard.SetClipboardText(prompt, win32clipboard.CF_UNICODETEXT)
             win32clipboard.CloseClipboard()
-            pyautogui.hotkey("ctrl", "v")
+            pyautogui.hotkey("shift", "insert")
         except Exception:
             # Fallback: typewrite (ASCII only)
             safe = prompt.encode("ascii", "replace").decode("ascii")
@@ -300,7 +300,9 @@ def _format_prompt(update: dict, downloaded_path: str | None = None) -> str | No
     if len(parts) == 1 and not text:
         return None
 
-    return "\n".join(parts)
+    # Flatten prompt to a single line to prevent premature console execution on paste
+    prompt_str = " | ".join(parts)
+    return prompt_str.replace("\n", " ").replace("\r", "")
 
 
 # ── Singleton lock ────────────────────────────────────────────────────────────
