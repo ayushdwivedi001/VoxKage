@@ -3,10 +3,19 @@ import time
 import difflib
 import ctypes
 import random
-import pygetwindow as gw
-import pyautogui
-from pywinauto import Desktop
 import subprocess
+
+try:
+    import pygetwindow as gw
+except ImportError:
+    gw = None
+
+import pyautogui
+
+try:
+    from pywinauto import Desktop
+except ImportError:
+    Desktop = None
 
 def close_app(process_name):
     try:

@@ -5,19 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "voxkage"
 version = "1.0.0"
-description = "OS-level agentic AI assistant — autonomous, persistent, aware."
+description = "VoxKage — OS-level Agentic AI Assistant. Autonomous · Persistent · Aware."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [{name = "Ayush Dwivedi"}]
-keywords = ["ai", "assistant", "agentic", "os", "automation", "mcp"]
+keywords = ["ai", "assistant", "agentic", "os", "automation", "mcp", "gemini"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: Microsoft :: Windows",
-    "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -26,65 +25,89 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-# ── Core dependencies (Windows + macOS) ──────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# CORE — always installed (~80 MB download).
+# This is what makes VoxKage an OS-living agentic AI from the first run.
+# Deliberately more complete than a bare CLI to deliver an instant WOW factor.
+# ─────────────────────────────────────────────────────────────────────────────
 dependencies = [
-    # Core & Architecture
-    "mcp",
-    "langgraph",
-    "httpx",
-    "requests",
-    "python-dotenv",
+    # Runtime & wiring
+    "mcp>=1.0",
+    "httpx>=0.27",
+    "requests>=2.31",
+    "python-dotenv>=1.0",
 
-    # UI & System Tray
-    "PySide6",
-    "psutil",
-    "pyautogui",
-    "pygetwindow",
-    "Pillow",
+    # OS integration (Windows)
+    "psutil>=5.9",
+    "pywin32>=306; sys_platform=='win32'",
+    "winshell>=0.6; sys_platform=='win32'",
+    "winotify>=1.1; sys_platform=='win32'",
+    "pyautogui>=0.9",              # Screen automation core — small (~3 MB)
+    "pywinauto>=0.6; sys_platform=='win32'",  # Window/app control
+    "pygetwindow>=0.0.9",          # Window focus management
 
-    # Browser Automation (core — NOT a plugin)
-    "playwright",
-    "selenium",
+    # Office document read/write (lightweight — ships in core, ~15 MB total)
+    # These are small enough to justify being in core — users expect an OS AI
+    # to be able to open a Word doc or edit a spreadsheet without extra installs.
+    "python-docx>=1.1",
+    "openpyxl>=3.1",
+    "python-pptx>=0.6",
+    "Pillow>=10.0",                # Image handling — used across many servers
 
-    # Data, Documents & Vision
-    "numpy",
-    "pyarrow",
-    "opencv-python",
-    "PyMuPDF",
-    "python-docx",
-    "docx2pdf",
-    "pdf2docx",
-    "openpyxl",
-    "python-pptx",
-    "rapidocr-onnxruntime",
-
-    # Memory & RAG
-    "chromadb",
-    "sentence-transformers",
-    "fastembed",
-    "lancedb",
-
-    # Plugin API packages (always installed — activate when tokens are provided)
-    "google-auth",
-    "google-auth-oauthlib",
-    "google-api-python-client",
-    "PyGithub",
-    "spotipy",
+    # Plugin API credentials (tiny — ship in core so plugins work immediately)
+    "spotipy>=2.23",
+    "PyGithub>=2.1",
+    "google-auth>=2.22",
+    "google-auth-oauthlib>=1.1",
+    "google-api-python-client>=2.100",
     "python-telegram-bot>=20.0",
 ]
 
+# ─────────────────────────────────────────────────────────────────────────────
+# OPTIONAL CAPABILITY PACKS — installed on-demand via `voxkage install <pack>`
+# These are intentionally separated because they are large and not needed
+# by every user on every machine.
+# ─────────────────────────────────────────────────────────────────────────────
 [project.optional-dependencies]
-# Windows-only deps (auto-installed by voxkage init on Windows)
-windows = [
-    "pywin32",
-    "winshell",
-    "winotify",
-    "pywinauto",
+rag = [
+    # Semantic search, codebase indexing, cross-session memory
+    "chromadb>=1.5",
+    "sentence-transformers>=3.0",
+    "fastembed>=0.8",
+    "lancedb>=0.10",
+    "numpy>=1.24",
+    "pyarrow>=14.0",
+    # Total: ~450 MB download
 ]
-# macOS alternatives (auto-installed by voxkage init on macOS)
-macos = [
-    "mac-notifications",
-    "pyobjc-framework-Cocoa",
+vision = [
+    # Image/screenshot analysis, OCR
+    "opencv-python>=4.8",
+    "rapidocr-onnxruntime>=1.3",
+    # Total: ~250 MB download
+]
+browser = [
+    # Full web automation + Chromium browser download
+    "playwright>=1.40",
+    "selenium>=4.15",
+    # Note: playwright requires `playwright install chromium` post-install
+    # Total: ~500 MB download (mostly the Chromium binary)
+]
+docs_plus = [
+    # Heavy document conversion libs (PDF reading, docx↔pdf, etc.)
+    # Lightweight read/write (python-docx, openpyxl) already ship in core.
+    "PyMuPDF>=1.23",      # PDF reading/extraction
+    "docx2pdf>=0.1",      # Word → PDF conversion
+    "pdf2docx>=0.5",      # PDF → Word conversion
+    # Total: ~80 MB download
+]
+tray = [
+    # System tray icon + background daemon UI
+    "PySide6>=6.6",
+    # Total: ~200 MB download
+]
+full = [
+    "voxkage[rag,vision,browser,docs_plus,tray]",
+    # Total: ~1.1 GB download — for power users and developers only
 ]
 
 [project.urls]
@@ -104,4 +127,4 @@ github   = "voxkage.plugins.github:GitHubPlugin"
 include = ["voxkage*"]
 
 [tool.setuptools.package-data]
-voxkage = ["icons/*", "templates/*"]
+voxkage = ["icons/*", "templates/*", "data/shield_blocklist.json"]

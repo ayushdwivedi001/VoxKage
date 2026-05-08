@@ -69,15 +69,25 @@ POLL_SEC = 2      # seconds between polls
 API_BASE = f"https://api.telegram.org/bot{TOKEN}"
 
 # ── Gemini CLI stdin injection ────────────────────────────────────────────────
-# How we inject messages into the running Gemini CLI process:
-# On Windows, Gemini CLI runs in a Windows Terminal / cmd window.
-# We use pyautogui to focus that window and SendKeys the message.
-# This is the only reliable cross-process stdin injection method on Windows
-# without modifying Gemini CLI itself.
+# Priority order:
+#   1. Named Pipe IPC (\\.\pipe\voxkage_ipc) — zero UI interference
+#   2. pyautogui clipboard injection — legacy fallback (Windows only)
+#   3. Inbox file (telegram_inbox.jsonl) — universal fallback
 #
-# Alternative: if Gemini CLI is started with stdin redirected from a named pipe,
-# we can write directly. The launcher (cli.py) is updated to support this.
-# We try the pipe first, fall back to pyautogui keyboard injection.
+# The tray_app.py already has its own sub-agent spawning path, so this
+# watcher is primarily used when the tray is NOT running.
+
+def _inject_via_ipc(prompt: str) -> bool:
+    """Try injecting via Named Pipe IPC. Returns True on success."""
+    try:
+        from ipc import send_message
+        return send_message(prompt, source="telegram")
+    except ImportError:
+        log.debug("IPC module not available — skipping Named Pipe")
+        return False
+    except Exception as e:
+        log.debug(f"IPC injection failed: {e}")
+        return False
 
 _GEMINI_WINDOW_TITLES = [
     "gemini", "voxkage", "vision-assistant"
@@ -487,8 +497,11 @@ def run():
 
                     log.info(f"New Telegram message → injecting into VoxKage")
 
-                    # Try live injection first (pyautogui → Gemini CLI window)
-                    injected = _inject_via_pyautogui(prompt)
+                    # ── Injection chain: IPC → pyautogui → inbox file ─────
+                    injected = _inject_via_ipc(prompt)  # Try Named Pipe first
+
+                    if not injected:
+                        injected = _inject_via_pyautogui(prompt)  # Legacy fallback
 
                     # Always write to inbox file as persistent record
                     # (and as fallback if injection failed)
@@ -496,6 +509,7 @@ def run():
                         "update_id": uid,
                         "prompt": prompt,
                         "injected": injected,
+                        "method": "ipc" if injected else "inbox",
                         "timestamp": time.time(),
                     })
 

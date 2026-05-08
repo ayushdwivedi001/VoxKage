@@ -17,12 +17,19 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QPoint, QPropertyAnimation, QEasingCurve, QTimer
-from PySide6.QtGui import QFont, QColor, QPainter, QBrush, QPen, QPainterPath
-from PySide6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QComboBox, QPushButton, QFrame, QGraphicsDropShadowEffect,
-)
+try:
+    from PySide6.QtCore import Qt, QPoint, QPropertyAnimation, QEasingCurve, QTimer
+    from PySide6.QtGui import QFont, QColor, QPainter, QBrush, QPen, QPainterPath
+    from PySide6.QtWidgets import (
+        QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+        QLabel, QComboBox, QPushButton, QFrame, QGraphicsDropShadowEffect,
+    )
+except ImportError:
+    print(
+        "\n  [VoxKage] Settings panel requires PySide6.\n"
+        "  Install with: pip install voxkage[tray]\n"
+    )
+    sys.exit(1)
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 _VOXKAGE_DIR = Path(os.path.expanduser("~")) / ".voxkage"

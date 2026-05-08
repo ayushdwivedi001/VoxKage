@@ -1,6 +1,11 @@
 import queue
 import threading
-from playwright.sync_api import sync_playwright
+try:
+    from playwright.sync_api import sync_playwright
+    _PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    sync_playwright = None
+    _PLAYWRIGHT_AVAILABLE = False
 import urllib.parse
 import os
 import sys
@@ -190,6 +195,13 @@ def _sync_chrome_sessions(voxkage_dir):
 def _pw_worker():
     global _playwright, _context, _active_page, GLOBAL_VIDEO_OPTIONS
     
+    if not _PLAYWRIGHT_AVAILABLE:
+        logger.error(
+            "[VoxKage] Playwright not installed. Browser automation is disabled.\n"
+            "Install with: pip install voxkage[browser] && playwright install chromium"
+        )
+        return
+
     with sync_playwright() as p:
         _playwright = p
         

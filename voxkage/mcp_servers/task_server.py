@@ -315,12 +315,23 @@ def spawn_task(
     task_id = str(uuid.uuid4())[:8]
 
     # Model resolution  --  alias -> canonical model ID from the 6-model catalogue
+    vk_config_path = os.path.join(_MEM_DIR, "config.json")
+    subagent_model = _MODEL_STANDARD
+    try:
+        if os.path.exists(vk_config_path):
+            with open(vk_config_path, encoding="utf-8") as f:
+                cfg = json.loads(f.read())
+                subagent_model = cfg.get("subagent_model", _MODEL_STANDARD)
+    except Exception:
+        pass
+
     override_key = (model_override or "").lower().strip()
     if override_key:
         model = _MODEL_ALIASES.get(override_key, model_override)  # pass-through if exact model string
         model_reason = f"Specified: '{model_override}' -> {model}"
     else:
-        model, model_reason = _select_model(description)
+        model = subagent_model
+        model_reason = f"From settings: {model}"
 
     # Build task record
     task = {

@@ -377,13 +377,153 @@ def print_banner():
         print(art.encode("utf-8", "replace").decode("utf-8"), flush=True)
 
 
+# ── Install Command ───────────────────────────────────────────────────────────
+
+_INSTALL_GROUPS = {
+    "rag":       ("voxkage[rag]",       None,                                  "RAG Memory"),
+    "vision":    ("voxkage[vision]",     None,                                  "Vision & OCR"),
+    "browser":   ("voxkage[browser]",    "playwright install chromium",          "Browser Engine"),
+    "docs_plus": ("voxkage[docs_plus]",  None,                                  "PDF Conversion"),
+    "tray":      ("voxkage[tray]",       None,                                  "System Tray"),
+    "full":      ("voxkage[full]",       "playwright install chromium",          "Full Suite"),
+}
+
+def cmd_install(group: str):
+    """Install an optional VoxKage capability pack."""
+    if group not in _INSTALL_GROUPS:
+        print(f"\n  {_c(255,80,80)}✗  Unknown pack: '{group}'{RST}")
+        print(f"  Available packs:")
+        for name, (_, _, label) in _INSTALL_GROUPS.items():
+            print(f"    {_c(56,189,248)}{name:12s}{RST} — {label}")
+        print()
+        return
+
+    pip_spec, post_cmd, label = _INSTALL_GROUPS[group]
+    print(f"\n  {_c(56,189,248)}↓{RST}  Installing {label} ({pip_spec})...\n")
+
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", pip_spec],
+        capture_output=False,
+    )
+
+    if result.returncode != 0:
+        print(f"\n  {_c(255,80,80)}✗  Installation failed.{RST} Try manually: pip install {pip_spec}")
+        return
+
+    if post_cmd:
+        print(f"\n  {_c(56,189,248)}↓{RST}  Running post-install: {post_cmd}")
+        subprocess.run(post_cmd.split(), capture_output=False)
+
+    print(f"\n  {_c(34,197,94)}✓  {label} is ready.{RST} Restart voxkage to use it.\n")
+
+
+# ── Status Command ────────────────────────────────────────────────────────────
+
+def cmd_status():
+    """Show VoxKage system health and installed packs."""
+    print()
+    print(f"  {_c(14,165,233)}✦  VoxKage v{__version__} — System Status{RST}")
+    print(f"  {_c(71,85,105)}{'─' * 50}{RST}")
+    print()
+
+    # Core
+    gemini = find_gemini_cli()
+    gemini_ok = False
+    try:
+        result = subprocess.run(
+            [gemini, "--version"], capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW if is_windows() else 0,
+        )
+        gemini_ok = result.returncode == 0
+    except Exception:
+        pass
+
+    _ok = f"{_c(34,197,94)}✓{RST}"
+    _no = f"{_c(255,80,80)}✗{RST}"
+
+    print(f"  CORE")
+    print(f"    {_ok if gemini_ok else _no}  Gemini CLI          {'found' if gemini_ok else 'not found — run: npm i -g @google/gemini-cli'}")
+    print(f"    {_ok}  Brain directory     {voxkage_dir()}")
+
+    # Count active MCP servers from settings
+    try:
+        cfg = json.loads(config_path().read_text(encoding="utf-8"))
+        model = cfg.get("main_model", "unknown")
+        sub_model = cfg.get("subagent_model", "unknown")
+        print(f"    {_ok}  Main model          {model}")
+        print(f"    {_ok}  Sub-agent model     {sub_model}")
+    except Exception:
+        pass
+    print()
+
+    # Capability Packs
+    print(f"  CAPABILITY PACKS")
+    print(f"    {_ok}  Core AI + OS Control       (always on)")
+
+    pack_checks = [
+        ("RAG Memory",       "chromadb",              "rag"),
+        ("Vision & OCR",     "cv2",                   "vision"),
+        ("Browser Engine",   "playwright",            "browser"),
+        ("PDF Conversion",   "fitz",                  "docs_plus"),
+        ("System Tray",      "PySide6",               "tray"),
+    ]
+    for label, module, group in pack_checks:
+        try:
+            __import__(module)
+            print(f"    {_ok}  {label:24s} installed")
+        except ImportError:
+            print(f"    {_no}  {label:24s} pip install voxkage[{group}]")
+    print()
+
+    # Integrations
+    print(f"  INTEGRATIONS")
+    integrations = [
+        ("Telegram", "TELEGRAM_BOT_TOKEN"),
+        ("Gmail",    "GOOGLE_APPLICATION_CREDENTIALS"),
+        ("Spotify",  "SPOTIFY_CLIENT_ID"),
+        ("GitHub",   "GITHUB_PAT"),
+    ]
+    from voxkage._env import load_voxkage_env
+    load_voxkage_env()
+    for name, env_var in integrations:
+        configured = bool(os.environ.get(env_var, "").strip())
+        if name == "Gmail":
+            # Gmail uses a token file
+            gmail_token = Path(os.path.expanduser("~")) / ".voxkage" / "gmail_token.json"
+            configured = gmail_token.exists()
+        if configured:
+            print(f"    {_ok}  {name:20s} Connected")
+        else:
+            print(f"    {_no}  {name:20s} voxkage plugins add {name.lower()}")
+
+    # Community Plugins
+    print()
+    print(f"  COMMUNITY PLUGINS")
+    try:
+        import importlib.metadata
+        eps = list(importlib.metadata.entry_points(group="voxkage.plugins"))
+        community = [ep for ep in eps if ep.name not in ("telegram", "gmail", "spotify", "github")]
+        if community:
+            for ep in community:
+                print(f"    {_ok}  {ep.name}")
+        else:
+            print(f"    (none installed)              voxkage plugins search <query>")
+    except Exception:
+        print(f"    (none installed)")
+    print()
+
+
 # ── Init Command ──────────────────────────────────────────────────────────────
 
 def cmd_init():
-    """First-time setup wizard."""
+    """First-time setup wizard — v1.0.0 interactive flow."""
     print()
-    print(f"  {_c(14,165,233)}VoxKage Setup{RST}")
-    print(f"  {_c(71,85,105)}─────────────────────────────────────{RST}")
+    print(f"  {_c(14,165,233)}┌{'─' * 60}┐{RST}")
+    print(f"  {_c(14,165,233)}│{RST}  {_c(34,211,238)}✦  VoxKage v{__version__} — First-Time Setup{RST}{' ' * 22}{_c(14,165,233)}│{RST}")
+    print(f"  {_c(14,165,233)}│{RST}  {_c(71,85,105)}{'─' * 56}{RST}  {_c(14,165,233)}│{RST}")
+    print(f"  {_c(14,165,233)}│{RST}  VoxKage supercharges your Gemini CLI into a living OS AI.{_c(14,165,233)}│{RST}")
+    print(f"  {_c(14,165,233)}│{RST}  This takes about 2 minutes.{' ' * 30}{_c(14,165,233)}│{RST}")
+    print(f"  {_c(14,165,233)}└{'─' * 60}┘{RST}")
     print()
 
     if not is_supported_platform():
@@ -393,12 +533,14 @@ def cmd_init():
     plat = "Windows" if is_windows() else "macOS"
     print(f"  {_c(34,197,94)}✓{RST}  Platform: {plat}")
 
+    # Create directories
     voxkage_dir()
     data_dir()
     task_logs_dir()
     gemini_dir()
     print(f"  {_c(34,197,94)}✓{RST}  Data directory: {voxkage_dir()}")
 
+    # Create .env if missing
     if not env_path().exists():
         tpl = template_path(".env.example")
         if tpl.exists():
@@ -418,66 +560,136 @@ def cmd_init():
     else:
         print(f"  {_c(34,197,94)}✓{RST}  .env already exists")
 
+    # Create config if missing
     if not config_path().exists():
         default_cfg = {
             "main_model": "gemini-2.5-flash",
             "subagent_model": "gemini-2.5-flash",
             "autostart": False,
-            "voice_replies": False,
+            "safe_mode": True,
         }
         config_path().write_text(json.dumps(default_cfg, indent=2), encoding="utf-8")
         print(f"  {_c(34,197,94)}✓{RST}  Created default config")
     else:
         print(f"  {_c(34,197,94)}✓{RST}  Config already exists")
 
-    npm = find_npm()
-    if not npm:
-        print()
-        print(f"  {_c(255,180,84)}⚠  npm not found.{RST} VoxKage needs Node.js for the Gemini CLI backend.")
-        print(f"     Install Node.js from: {_c(56,189,248)}https://nodejs.org/{RST}")
-        print(f"     Then re-run: {_c(56,189,248)}voxkage init{RST}")
-        print()
-        return
-    print(f"  {_c(34,197,94)}✓{RST}  npm found: {npm}")
-
+    # Check Gemini CLI
+    gemini_ok = False
     gemini = find_gemini_cli()
-    gemini_works = False
     try:
         result = subprocess.run(
             [gemini, "--version"], capture_output=True, text=True, timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW if is_windows() else 0,
         )
-        if result.returncode == 0:
-            gemini_works = True
+        gemini_ok = result.returncode == 0
     except Exception:
         pass
 
-    if gemini_works:
+    if gemini_ok:
         print(f"  {_c(34,197,94)}✓{RST}  Gemini CLI found: {gemini}")
     else:
-        print(f"  {_c(56,189,248)}↓{RST}  Installing Gemini CLI...")
-        try:
-            npm_cmd = [npm, "install", "-g", "@anthropic-ai/gemini-cli"]
-            if is_windows():
-                npm_cmd = [npm + ".cmd" if not npm.endswith(".cmd") else npm,
-                           "install", "-g", "@google/gemini-cli"]
-            subprocess.run(npm_cmd, check=True, timeout=120)
-            print(f"  {_c(34,197,94)}✓{RST}  Gemini CLI installed")
-        except Exception as e:
-            print(f"  {_c(255,80,80)}✗{RST}  Failed to install Gemini CLI: {e}")
-            print(f"     Try manually: {_c(56,189,248)}npm install -g @google/gemini-cli{RST}")
+        print(f"  {_c(255,180,84)}⚠  Gemini CLI not found.{RST}")
+        print(f"     Install: {_c(56,189,248)}npm install -g @google/gemini-cli{RST}")
+        print(f"     Then authenticate: {_c(56,189,248)}gemini{RST}")
 
-    print(f"  {_c(56,189,248)}↓{RST}  Setting up VoxKage browser (Playwright Chromium)...")
+    print()
+    print(f"  {_c(71,85,105)}Note: Gemini authentication is managed by the Gemini CLI.{RST}")
+    print(f"  {_c(71,85,105)}Run `gemini` if you haven't set that up yet.{RST}")
+    print()
+
+    # ── [1/3] Capability Packs ────────────────────────────────────────────────
+    print(f"  {_c(34,211,238)}[1/3] Capability Packs{RST}")
+    print()
+    print(f"  VoxKage core is already installed and ready. It includes:")
+    print(f"    {_c(34,197,94)}✓{RST}  Agentic memory (SOUL system, problem/solution logs)")
+    print(f"    {_c(34,197,94)}✓{RST}  ACE coding engine (step-by-step planning)")
+    print(f"    {_c(34,197,94)}✓{RST}  Full OS control (open, edit, move, delete any file)")
+    print(f"    {_c(34,197,94)}✓{RST}  System health, process management, date/time")
+    print(f"    {_c(34,197,94)}✓{RST}  Office documents (Word, Excel, PowerPoint)")
+    print(f"    {_c(34,197,94)}✓{RST}  Plugin credentials (Telegram, Gmail, Spotify, GitHub)")
+    print(f"    {_c(34,197,94)}✓{RST}  Live internet access via agentic web search")
+    print()
+    print(f"  Optional packs add heavier capabilities:")
+    print()
+    print(f"  {_c(56,189,248)}[B]{RST} RAG Memory       Semantic codebase + document search  (~450 MB)")
+    print(f"  {_c(56,189,248)}[C]{RST} Browser Engine   Full web automation in Chrome         (~500 MB)")
+    print(f"  {_c(56,189,248)}[D]{RST} Vision           Screenshot analysis, OCR              (~250 MB)")
+    print(f"  {_c(56,189,248)}[E]{RST} PDF Conversion   Convert between PDF ↔ Word ↔ other   (~80 MB)")
+    print(f"  {_c(56,189,248)}[F]{RST} System Tray      VoxKage lives in your taskbar         (~200 MB)")
+    print(f"  {_c(56,189,248)}[G]{RST} Install Everything (Full Suite — ~1.1 GB)")
+    print(f"  {_c(56,189,248)}[S]{RST} Skip — install later with `voxkage install <pack>`")
+    print()
+
+    pack_map = {
+        "b": "rag", "c": "browser", "d": "vision",
+        "e": "docs_plus", "f": "tray", "g": "full",
+    }
+
     try:
-        subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "chromium"],
-            check=True, timeout=300, capture_output=True,
-        )
-        print(f"  {_c(34,197,94)}✓{RST}  Playwright Chromium ready")
-    except Exception as e:
-        print(f"  {_c(255,180,84)}⚠{RST}  Playwright setup issue: {e}")
-        print(f"     Try manually: {_c(56,189,248)}python -m playwright install chromium{RST}")
+        choice = input(f"  Choose packs to install (e.g. B,C or G or S): ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        choice = "s"
 
+    if choice != "s" and choice:
+        for letter in choice.replace(",", " ").split():
+            letter = letter.strip()
+            if letter in pack_map:
+                cmd_install(pack_map[letter])
+    print()
+
+    # ── [2/3] Integrations ────────────────────────────────────────────────────
+    print(f"  {_c(34,211,238)}[2/3] Integrations (Optional){RST}")
+    print(f"  Connect your services to unlock VoxKage's full powers:")
+    print()
+    print(f"  [ ] Telegram — Bidirectional phone ↔ VoxKage bridge")
+    print(f"  [ ] Gmail    — Read, compose, send emails hands-free")
+    print(f"  [ ] Spotify  — Control music by text")
+    print(f"  [ ] GitHub   — Clone, commit, push repositories")
+    print()
+
+    try:
+        configure = input(f"  Configure now? (y/N): ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        configure = "n"
+
+    if configure == "y":
+        from voxkage.plugins.registry import list_plugins, add_plugin
+        for plugin_name in ["telegram", "gmail", "spotify", "github"]:
+            try:
+                setup_yn = input(f"  Set up {plugin_name}? (y/N): ").strip().lower()
+                if setup_yn == "y":
+                    add_plugin(plugin_name)
+            except (EOFError, KeyboardInterrupt):
+                pass
+    print()
+
+    # ── [3/3] Auto-start ──────────────────────────────────────────────────────
+    print(f"  {_c(34,211,238)}[3/3] Auto-start on Boot{RST}")
+    print(f"  Start VoxKage system tray automatically on Windows login.")
+    print(f"  Keeps the Telegram bridge alive in the background.")
+    print()
+
+    try:
+        autostart = input(f"  Enable autostart? (y/N): ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        autostart = "n"
+
+    if autostart == "y":
+        try:
+            from voxkage.autostart import enable_autostart
+            enable_autostart()
+            print(f"  {_c(34,197,94)}✓{RST}  Autostart enabled")
+            # Update config
+            try:
+                cfg = json.loads(config_path().read_text(encoding="utf-8"))
+                cfg["autostart"] = True
+                config_path().write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"  {_c(255,180,84)}⚠{RST}  Autostart setup failed: {e}")
+
+    # Generate settings & GEMINI.md
     _generate_settings_json()
     print(f"  {_c(34,197,94)}✓{RST}  Generated MCP settings")
 
@@ -487,13 +699,9 @@ def cmd_init():
     _install_platform_deps()
 
     print()
-    print(f"  {_c(71,85,105)}─────────────────────────────────────{RST}")
-    print(f"  {_c(34,197,94)}Setup complete!{RST}")
-    print()
-    print(f"  Next steps:")
-    print(f"    {_c(56,189,248)}voxkage{RST}          — Launch VoxKage")
-    print(f"    {_c(56,189,248)}voxkage plugins{RST}  — Configure integrations (Telegram, Gmail, etc.)")
-    print(f"    {_c(56,189,248)}voxkage tray{RST}     — Start system tray icon")
+    print(f"  {_c(71,85,105)}{'─' * 60}{RST}")
+    print(f"  {_c(34,197,94)}✓  VoxKage is ready. Type `voxkage` to start your OS AI.{RST}")
+    print(f"  {_c(71,85,105)}{'─' * 60}{RST}")
     print()
 
 
@@ -805,7 +1013,16 @@ def main():
     parser = argparse.ArgumentParser(
         prog="voxkage",
         description="VoxKage — OS-level Agentic AI Assistant",
-        epilog="Run 'voxkage' without arguments to launch an interactive session.",
+        epilog=(
+            "Quick start:\n"
+            "  voxkage                  Launch VoxKage interactive session\n"
+            "  voxkage init             First-time setup wizard\n"
+            "  voxkage status           Show system health & installed packs\n"
+            "  voxkage install <pack>   Install a capability pack (rag, vision, browser, docs_plus, tray, full)\n"
+            "  voxkage plugins          List or configure integrations\n"
+            "  voxkage tray             Launch system tray icon\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--version", "-V", action="version",
@@ -815,6 +1032,10 @@ def main():
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("init", help="Run first-time setup wizard")
     subparsers.add_parser("tray", help="Launch/restore system tray icon")
+    subparsers.add_parser("status", help="Show system health & installed packs")
+
+    install_parser = subparsers.add_parser("install", help="Install a capability pack")
+    install_parser.add_argument("pack", help="Pack name: rag, vision, browser, docs_plus, tray, full")
 
     plugins_parser = subparsers.add_parser("plugins", help="List or configure plugins")
     plugins_parser.add_argument("plugin_action", nargs="?", default=None, help="Action: 'add'")
@@ -826,6 +1047,10 @@ def main():
         cmd_init()
     elif args.command == "tray":
         cmd_tray()
+    elif args.command == "status":
+        cmd_status()
+    elif args.command == "install":
+        cmd_install(args.pack)
     elif args.command == "plugins":
         cmd_plugins(args)
     else:

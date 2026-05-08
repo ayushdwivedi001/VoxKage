@@ -81,6 +81,17 @@ def _find_file(description: str) -> str | None:
     return None
 
 
+# ── VoxKage Shield Protocol ──────────────────────────────────────────────────
+
+def _shield_path(path: str, action: str = "access") -> str | None:
+    """Shield-check a path. Returns error string if blocked, None if safe."""
+    try:
+        from shield import shield_gate_path
+        return shield_gate_path(path, action)
+    except ImportError:
+        return None  # Shield not installed — allow (graceful degradation)
+
+
 # ── MCP Tools ─────────────────────────────────────────────────────────────────
 
 @mcp.tool()
@@ -120,6 +131,10 @@ def copy_item(
             f"  📁 To:   {dst_path}\n\n"
             f"Agreed?"
         )
+    # ── Shield Protocol — block system paths ──────────────────────────────
+    block = _shield_path(dst_path, "copy")
+    if block:
+        return block
     try:
         if os.path.isdir(src):
             shutil.copytree(src, dst_path, dirs_exist_ok=True)
@@ -164,6 +179,10 @@ def cut_item(
             f"  📁 To:   {dst_path}\n\n"
             f"⚠️ The original will be removed from its current location. Agreed?"
         )
+    # ── Shield Protocol — block system paths ──────────────────────────────
+    block = _shield_path(src, "move") or _shield_path(dst_path, "move")
+    if block:
+        return block
     try:
         shutil.move(src, dst_path)
         return f"✓ Moved '{os.path.basename(src)}' → {dst_dir}"

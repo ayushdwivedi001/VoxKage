@@ -1,6 +1,14 @@
 import os
-import fitz  # PyMuPDF
-from docx import Document
+
+try:
+    import fitz  # PyMuPDF — requires pip install voxkage[docs_plus]
+except ImportError:
+    fitz = None
+
+try:
+    from docx import Document  # python-docx — ships in core
+except ImportError:
+    Document = None
 import logging
 import threading
 
@@ -18,6 +26,8 @@ def extract_text(file_path: str) -> str:
     
     try:
         if ext == '.pdf':
+            if fitz is None:
+                return "[VoxKage] PDF reading requires PyMuPDF. Run: pip install voxkage[docs_plus]"
             text = ""
             with fitz.open(file_path) as doc:
                 for page in doc:
@@ -52,6 +62,8 @@ def extract_text(file_path: str) -> str:
                 return ""
             
         elif ext == '.docx':
+            if Document is None:
+                return "[VoxKage] DOCX reading requires python-docx. Run: pip install python-docx"
             doc = Document(file_path)
             return "\n".join([paragraph.text for paragraph in doc.paragraphs]).strip()
             

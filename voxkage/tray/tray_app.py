@@ -84,9 +84,16 @@ def _load_config() -> dict:
     return defaults
 
 # ── Qt imports ────────────────────────────────────────────────────────────────
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
-from PySide6.QtGui import QIcon, QAction
-from PySide6.QtCore import Qt, QTimer
+try:
+    from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
+    from PySide6.QtGui import QIcon, QAction
+    from PySide6.QtCore import Qt, QTimer
+except ImportError:
+    print(
+        "\n  [VoxKage] System Tray requires PySide6.\n"
+        "  Install with: pip install voxkage[tray]\n"
+    )
+    sys.exit(1)
 
 # ── Telegram offset helpers ───────────────────────────────────────────────────
 def _read_offset() -> int:

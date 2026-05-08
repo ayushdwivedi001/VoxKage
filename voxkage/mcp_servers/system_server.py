@@ -252,20 +252,28 @@ async def run_shell_command(command: str) -> str:
     - Process checks: "tasklist | findstr chrome"
     
     SAFETY: Commands that modify system state (format, del *, reg delete, etc.)
-    will be blocked. Only read-only and safe installation commands are allowed.
+    will be blocked by the VoxKage Shield Protocol.
     """
     def _run():
         import subprocess as _sp
 
-        cmd_lower = command.lower().strip()
-        _BLOCKED = [
-            "format ", "rd /s", "rmdir /s", "del /f /s", "del *",
-            "reg delete", "bcdedit", "diskpart", "shutdown", "restart",
-            "net user", "net localgroup", "sfc ", "dism ",
-        ]
-        for blocked in _BLOCKED:
-            if blocked in cmd_lower:
-                return f"BLOCKED: '{blocked}' is a dangerous system command. VoxKage refuses to execute it."
+        # ── VoxKage Shield Protocol — Layer 1 + Layer 3 ──────────────────
+        try:
+            from shield import shield_gate_command
+            block_msg = shield_gate_command(command)
+            if block_msg:
+                return block_msg
+        except ImportError:
+            # Fallback if shield module not found — basic inline blocklist
+            cmd_lower = command.lower().strip()
+            _BLOCKED = [
+                "format ", "rd /s", "rmdir /s", "del /f /s", "del *",
+                "reg delete", "bcdedit", "diskpart", "shutdown", "restart",
+                "net user", "net localgroup", "sfc ", "dism ",
+            ]
+            for blocked in _BLOCKED:
+                if blocked in cmd_lower:
+                    return f"BLOCKED: '{blocked}' is a dangerous system command. VoxKage refuses to execute it."
 
         try:
             pwsh_path = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"

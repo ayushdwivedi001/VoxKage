@@ -27,13 +27,42 @@ META = _c(71, 85, 105)
 
 
 def _load_all_plugins():
-    """Load all registered plugins."""
+    """
+    Load all registered plugins — built-in + community (entry-point discovery).
+
+    Community plugins can register via pyproject.toml:
+        [project.entry-points."voxkage.plugins"]
+        my_plugin = "my_package.plugin:MyPlugin"
+    """
     from voxkage.plugins.telegram import TelegramPlugin
     from voxkage.plugins.gmail import GmailPlugin
     from voxkage.plugins.spotify import SpotifyPlugin
     from voxkage.plugins.github import GitHubPlugin
 
-    return [TelegramPlugin(), GmailPlugin(), SpotifyPlugin(), GitHubPlugin()]
+    builtin = [TelegramPlugin(), GmailPlugin(), SpotifyPlugin(), GitHubPlugin()]
+    _BUILTIN_NAMES = {"telegram", "gmail", "spotify", "github"}
+
+    # Discover community plugins via importlib.metadata
+    community = []
+    try:
+        import importlib.metadata
+        eps = importlib.metadata.entry_points(group="voxkage.plugins")
+        for ep in eps:
+            if ep.name in _BUILTIN_NAMES:
+                continue  # Skip built-in plugins (already loaded above)
+            try:
+                plugin_cls = ep.load()
+                plugin_instance = plugin_cls()
+                community.append(plugin_instance)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"[VoxKage] Failed to load community plugin '{ep.name}': {e}"
+                )
+    except Exception:
+        pass
+
+    return builtin + community
 
 
 def list_plugins():
