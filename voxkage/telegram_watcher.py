@@ -307,29 +307,103 @@ def _format_prompt(update: dict, downloaded_path: str | None = None) -> str | No
 
 # ── Singleton lock ────────────────────────────────────────────────────────────
 
+def _is_process_alive(pid: int) -> bool:
+    """Check if a process with the given PID is alive (Windows-safe)."""
+    try:
+        import psutil
+        return psutil.pid_exists(pid)
+    except ImportError:
+        pass
+    # Fallback without psutil
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, SystemError, ValueError):
+        return False
+
+
+def _kill_stale_watcher(pid: int):
+    """Forcefully kill a stale watcher process."""
+    try:
+        import psutil
+        proc = psutil.Process(pid)
+        proc.terminate()
+        proc.wait(timeout=3)
+        log.info(f"Killed stale watcher (PID {pid}) via psutil")
+        return
+    except Exception:
+        pass
+    # Fallback: os-level kill
+    try:
+        if sys.platform == "win32":
+            os.system(f"taskkill /f /pid {pid} >nul 2>&1")
+        else:
+            os.kill(pid, signal.SIGTERM)
+        log.info(f"Killed stale watcher (PID {pid}) via OS signal")
+    except Exception as e:
+        log.warning(f"Could not kill PID {pid}: {e}")
+
+
 def _acquire_lock() -> bool:
-    """Ensure only one watcher runs. Returns False if already running."""
+    """
+    Singleton lock for the Telegram watcher.
+
+    Rules:
+      - If lock file exists and PID is alive AND it's our own watcher
+        (not some random process that reused the PID), return False.
+      - If lock file exists but process is dead/stale → kill it, claim lock.
+      - If no lock file → claim lock.
+
+    Only ONE watcher instance is allowed across ALL VoxKage sessions.
+    Re-launching VoxKage CLI does NOT spawn a new watcher if one is already running.
+    """
     try:
         if _LOCK_FILE.exists():
-            pid = int(_LOCK_FILE.read_text().strip())
-            # Check if that process is still alive
             try:
-                import psutil
-                if psutil.pid_exists(pid):
-                    log.info(f"Watcher already running (PID {pid})")
-                    return False
-            except Exception:
-                # Fallback if psutil fails/missing
+                pid = int(_LOCK_FILE.read_text().strip())
+            except (ValueError, OSError):
+                # Corrupt lock file — overwrite it
+                _LOCK_FILE.unlink(missing_ok=True)
+                _LOCK_FILE.write_text(str(os.getpid()))
+                return True
+
+            if _is_process_alive(pid):
+                # Process IS alive — check if it's actually a Python/watcher process
+                # (not a random system process that reused the PID)
                 try:
-                    os.kill(pid, 0)
-                    log.info(f"Watcher already running (PID {pid})")
+                    import psutil
+                    proc = psutil.Process(pid)
+                    cmdline = " ".join(proc.cmdline()).lower()
+                    if "telegram_watcher" in cmdline or "python" in cmdline:
+                        log.info(f"Watcher already running (PID {pid}) — not spawning a new one")
+                        return False
+                    else:
+                        # PID is alive but belongs to a different process — stale lock
+                        log.warning(f"PID {pid} is alive but not a watcher — claiming lock")
+                except ImportError:
+                    # No psutil — trust the lock file
+                    log.info(f"Watcher appears alive (PID {pid}) — not spawning a new one")
                     return False
-                except OSError:
-                    pass  # Process gone — stale lock, proceed
+                except Exception:
+                    log.info(f"Watcher appears alive (PID {pid}) — not spawning a new one")
+                    return False
+            else:
+                # Process is DEAD — stale lock from a crashed session
+                log.warning(f"Stale watcher lock found (PID {pid} is dead) — cleaning up")
+                _LOCK_FILE.unlink(missing_ok=True)
+
+        # Claim the lock
         _LOCK_FILE.write_text(str(os.getpid()))
         return True
-    except Exception:
-        return True  # Proceed anyway if lock logic fails
+
+    except Exception as e:
+        log.error(f"Lock acquisition error: {e}")
+        # Proceed anyway — better to run than to silently fail
+        try:
+            _LOCK_FILE.write_text(str(os.getpid()))
+        except Exception:
+            pass
+        return True
 
 
 def _release_lock():

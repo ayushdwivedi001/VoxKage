@@ -38,6 +38,12 @@ TOOL_TO_SERVER = {
     "agent_thinking": "browser_server.py",
     "agent_step": "browser_server.py",
     
+    "dom_get_elements": "browser_server.py",
+    "dom_get_computed_style": "browser_server.py",
+    "dom_execute_js": "browser_server.py",
+    "save_frontend_snippet": "browser_server.py",
+    "search_frontend_snippets": "browser_server.py",
+    
     "check_gmail": "email_server.py",
     "get_email_summary": "email_server.py",
     

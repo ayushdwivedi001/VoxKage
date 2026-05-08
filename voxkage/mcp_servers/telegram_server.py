@@ -348,7 +348,7 @@ def telegram_get_pending_messages() -> str:
             text = msg.get("text") or msg.get("caption") or ""
             if text:
                 output.append(f"From {sender}: {text}")
-        if last_id > offset:
+        if updates:
             _save_offset(last_id)
     except Exception as e:
         output.append(f"API poll error: {e}")

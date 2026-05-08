@@ -106,6 +106,11 @@ Do NOT use `run_shell_command` MCP as a first attempt — it has a 30s timeout, 
 | Screenshot current web page | `get_browser_state` |
 | Scroll and re-read web page | `scroll_and_read` |
 | Multi-step browser workflow | `execute_browser_workflow` |
+| Get clean DOM elements & properties | `dom_get_elements` |
+| Get computed CSS styles/animations | `dom_get_computed_style` |
+| Execute raw JS in browser | `dom_execute_js` |
+| Save frontend code/animation to memory | `save_frontend_snippet` |
+| Search saved frontend memory | `search_frontend_snippets` |
 | Find download URL for software | `find_download_url` |
 | Download a file (show preview first) | `download_file` (confirmed=False first) |
 | Monitor download progress | `get_download_status` |
@@ -272,6 +277,18 @@ After collecting all validated images:
 - **No quality floor** unless user specified — even a medium-res image is fine for web use
 - **Content match**: Use vision to verify the image actually shows what was asked for
 - **Auto-delete failures**: Remove any image that fails vision check without asking the user
+
+---
+
+### DOM Inspection & Autonomous Frontend Learning
+
+When requested to get code, inspect the layout, or figure out how an animation works on a webpage, use the deep DOM tools:
+1. `open_url` to navigate to the site.
+2. `dom_get_elements` to pull clean, specific HTML/CSS structural information without full-page clutter.
+3. `dom_get_computed_style` to analyze the exact CSS values driving the visual appearance.
+4. `dom_execute_js` to run custom queries on the active page if you need very specific interaction logic.
+
+**AUTONOMOUS DIRECTIVE:** Whenever you successfully extract a beautiful UI component, an intricate CSS animation, or a highly useful frontend snippet during a task, you MUST autonomously save it using `save_frontend_snippet`. This permanently enhances your frontend development skills for future projects. Use `search_frontend_snippets` when starting a new frontend task to reuse your saved knowledge.
 
 ---
 

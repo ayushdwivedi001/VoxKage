@@ -354,5 +354,179 @@ def find_download_url(
     )
 
 
+import json
+import time
+
+MEMORY_FILE = r"C:\VoxKage\Brain\frontend_memory.jsonl"
+
+def _run_js(js_code: str) -> str:
+    """Helper to dispatch JS evaluation to the active Playwright page."""
+    import queue as _queue
+    _, _, _, _, _pw_queue = _web_agent()
+    res_q = _queue.Queue()
+    _pw_queue.put(("dom_inspect", {"js_code": js_code}, res_q))
+    try:
+        status, result = res_q.get(timeout=15)
+        if status == "ok":
+            if isinstance(result, (dict, list)):
+                return json.dumps(result, indent=2)
+            return str(result)
+        return f"DOM Evaluation Error: {result}"
+    except _queue.Empty:
+        return "DOM Evaluation Error: Timeout waiting for browser."
+
+@mcp.tool()
+def dom_get_elements(selector: str, properties: str = "innerHTML,className,id") -> str:
+    """
+    Queries the active web page DOM for elements matching the CSS selector.
+    Returns clean, filtered properties without full page clutter.
+    
+    Parameters:
+      selector: A valid CSS selector (e.g. '.btn-primary', '#header', 'article p')
+      properties: Comma-separated list of element properties to extract. 
+                  (default: 'innerHTML,className,id', can also use 'outerHTML', 'textContent', 'href', 'src')
+    """
+    props = [p.strip() for p in properties.split(",")]
+    
+    js_code = f"""
+    (() => {{
+        const elements = document.querySelectorAll('{selector}');
+        const results = [];
+        const props = {json.dumps(props)};
+        
+        elements.forEach(el => {{
+            let obj = {{}};
+            props.forEach(p => {{
+                if (p in el) {{
+                    obj[p] = el[p];
+                }} else if (el.hasAttribute(p)) {{
+                    obj[p] = el.getAttribute(p);
+                }}
+            }});
+            results.push(obj);
+        }});
+        return results;
+    }})()
+    """
+    return _run_js(js_code)
+
+@mcp.tool()
+def dom_get_computed_style(selector: str, pseudo_element: str = "") -> str:
+    """
+    Retrieves the active, computed CSS properties for the FIRST element matching the selector.
+    Crucial for understanding animations, exact layouts, colors, and inherited styles.
+    
+    Parameters:
+      selector: CSS selector for the element
+      pseudo_element: Optional (e.g. '::before', '::after')
+    """
+    js_code = f"""
+    (() => {{
+        const el = document.querySelector('{selector}');
+        if (!el) return {{"error": "Element not found"}};
+        const pseudo = '{pseudo_element}' || null;
+        const styles = window.getComputedStyle(el, pseudo);
+        const result = {{}};
+        // Filter out empty or useless default properties to reduce clutter
+        for (let i = 0; i < styles.length; i++) {{
+            const name = styles[i];
+            const value = styles.getPropertyValue(name);
+            if (value && value !== 'none' && value !== 'normal' && value !== 'auto' && value !== '0px') {{
+                result[name] = value;
+            }}
+        }}
+        return result;
+    }})()
+    """
+    return _run_js(js_code)
+
+@mcp.tool()
+def dom_execute_js(code: str) -> str:
+    """
+    Executes raw JavaScript on the active browser page and returns the result.
+    Allows for deeply specific queries or interacting with page variables.
+    Make sure your code returns a serializable value (e.g., array, object, string).
+    """
+    # Wrap in async IIFE to allow await inside code
+    js_code = f"""
+    (async () => {{
+        try {{
+            {code}
+        }} catch(e) {{
+            return "JS Error: " + e.message;
+        }}
+    }})()
+    """
+    return _run_js(js_code)
+
+@mcp.tool()
+def save_frontend_snippet(title: str, code: str, description: str, tags: str) -> str:
+    """
+    Saves a useful frontend code snippet (HTML/CSS/JS) into VoxKage's permanent frontend memory.
+    Use this autonomously when you encounter a great animation, layout, or component pattern.
+    
+    Parameters:
+      title: Short title (e.g., 'Animated CSS Button')
+      code: The code snippet
+      description: Why it's useful and how it works
+      tags: Comma-separated tags (e.g., 'css, animation, button')
+    """
+    import os
+    os.makedirs(os.path.dirname(MEMORY_FILE), exist_ok=True)
+    
+    entry = {
+        "timestamp": time.time(),
+        "title": title,
+        "description": description,
+        "code": code,
+        "tags": [t.strip().lower() for t in tags.split(",")]
+    }
+    
+    try:
+        with open(MEMORY_FILE, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(entry) + "\n")
+        return f"Successfully saved snippet '{title}' to {MEMORY_FILE}"
+    except Exception as e:
+        return f"Failed to save snippet: {e}"
+
+@mcp.tool()
+def search_frontend_snippets(query: str) -> str:
+    """
+    Searches the dedicated frontend memory for previously saved code snippets and patterns.
+    """
+    import os
+    if not os.path.exists(MEMORY_FILE):
+        return "No frontend memory file exists yet. Save some snippets first!"
+        
+    query_lower = query.lower()
+    results = []
+    
+    try:
+        with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
+            for line in f:
+                if not line.strip(): continue
+                try:
+                    data = json.loads(line)
+                    # Search in title, desc, and tags
+                    searchable_text = f"{data.get('title','')} {data.get('description','')} {' '.join(data.get('tags',[]))}".lower()
+                    if query_lower in searchable_text:
+                        results.append(data)
+                except Exception:
+                    continue
+                    
+        if not results:
+            return f"No snippets found matching '{query}'."
+            
+        out = f"Found {len(results)} matching frontend snippets:\n\n"
+        for r in results:
+            out += f"--- {r.get('title')} ---\n"
+            out += f"Tags: {', '.join(r.get('tags', []))}\n"
+            out += f"Description: {r.get('description')}\n"
+            out += f"Code:\n{r.get('code')}\n\n"
+            
+        return out
+    except Exception as e:
+        return f"Error searching memory: {e}"
+
 if __name__ == "__main__":
     mcp.run()

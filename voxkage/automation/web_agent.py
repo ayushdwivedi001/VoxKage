@@ -777,6 +777,18 @@ def _pw_worker():
                     except Exception as e:
                         res_q.put(("error", f"Failed to control YouTube media: {e}"))
                 
+                elif action == "dom_inspect":
+                    try:
+                        js_code = kwargs.get("js_code", "")
+                        if not js_code:
+                            res_q.put(("error", "No js_code provided."))
+                            continue
+                        
+                        result = page.evaluate(js_code)
+                        res_q.put(("ok", result))
+                    except Exception as e:
+                        res_q.put(("error", f"DOM evaluation failed: {e}"))
+
                 elif action == "agent_step":
                     # === PHASE 3: SINGLE ATOMIC ACTION WITH SCREENSHOT ===
                     sub_action = kwargs.get("action", "")
