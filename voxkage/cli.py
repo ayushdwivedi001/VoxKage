@@ -307,25 +307,53 @@ def _get_palette(theme: str) -> dict:
 
 # ── ASCII Banner ──────────────────────────────────────────────────────────────
 
+def _strip_ansi(s: str) -> str:
+    """Strip ANSI escape codes to get true visible character width."""
+    import re
+    return re.sub(r"\x1b\[[0-9;]*m", "", s)
+
+
+def _center_ansi_line(line: str, width: int) -> str:
+    """Center a line that contains ANSI codes (visible width ≠ byte length)."""
+    visible_len = len(_strip_ansi(line))
+    pad = max(0, (width - visible_len) // 2)
+    return " " * pad + line
+
+
 def print_banner():
-    """Print the VoxKage ASCII art banner with theme-aware colors."""
-    # Enable ANSI on Windows
+    """Print the VoxKage ASCII art banner — dynamically centered, no ANSI clears.
+
+    IMPORTANT: Do NOT use any ANSI escape sequences (\x1b[2J, \x1b[3J, \x1b[H)
+    or os.system("cls") here. Gemini CLI uses React-Ink which takes full ownership
+    of the terminal after this function returns. Any ANSI VT state we inject here
+    will corrupt Ink's internal cursor position tracking, causing the terminal to
+    go completely black on resize. Pure newlines are safe because they don't alter
+    VT parser state — they just advance the cursor downward.
+    """
+    # ── Enable ANSI colors on Windows (both CMD and PowerShell) ───────────────
     if is_windows():
         os.system("chcp 65001 >nul 2>&1")
         try:
             import ctypes
             kernel32 = ctypes.windll.kernel32
+            # ENABLE_PROCESSED_OUTPUT | ENABLE_WRAP_AT_EOL | ENABLE_VIRTUAL_TERMINAL_PROCESSING
             kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
         except Exception:
             pass
 
-    # Read theme from ~/.gemini/settings.json
+    # ── Get terminal dimensions ───────────────────────────────────────────────
+    try:
+        term_width = os.get_terminal_size().columns
+        term_height = os.get_terminal_size().lines
+    except OSError:
+        term_width, term_height = 80, 24
+
+    # ── Read theme ─────────────────────────────────────────────────────────────
     theme = "Default Dark"
     try:
         gemini_settings = Path.home() / ".gemini" / "settings.json"
         if gemini_settings.exists():
             data = json.loads(gemini_settings.read_text(encoding="utf-8"))
-            # Gemini CLI stores theme at top-level "theme" key
             theme = data.get("theme", data.get("ui", {}).get("theme", theme))
     except Exception:
         pass
@@ -333,48 +361,37 @@ def print_banner():
     p = _get_palette(theme)
     L = p["logo"]
 
-    # Load model from VoxKage config
-    model = "gemini-2.5-flash"
-    try:
-        cfg_path = config_path()
-        if cfg_path.exists():
-            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-            model = cfg.get("main_model", model)
-    except Exception:
-        pass
+    # ── Raw art lines (no leading space — centering is computed dynamically) ──
+    art_lines_raw = [
+        f"{L[0]}██╗   ██╗ ██████╗ ██╗  ██╗██╗  ██╗ █████╗  ██████╗ ███████╗{RST}",
+        f"{L[1]}██║   ██║██╔═══██╗╚██╗██╔╝██║ ██╔╝██╔══██╗██╔════╝ ██╔════╝{RST}",
+        f"{L[2]}██║   ██║██║   ██║ ╚███╔╝ █████╔╝ ███████║██║  ███╗█████╗  {RST}",
+        f"{L[3]}╚██╗ ██╔╝██║   ██║ ██╔██╗ ██╔═██╗ ██╔══██║██║   ██║██╔══╝  {RST}",
+        f"{L[4]} ╚████╔╝ ╚██████╔╝██╔╝ ██╗██║  ██╗██║  ██║╚██████╔╝███████╗{RST}",
+        f"{L[5]}  ╚═══╝   ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝{RST}",
+    ]
 
-    cwd = os.getcwd()
+    # ── Build horizontally centered output ────────────────────────────────────
+    # CRITICAL: Do NOT add vertical padding (newlines before art).
+    # React-Ink tracks its height using relative cursor moves (\x1b[NA).
+    # If we push the cursor down with newlines, React-Ink's "move up N rows"
+    # calculation on resize goes out of bounds → Windows Terminal shows a blank
+    # screen. Keep it to just a couple of breathing-room newlines at most.
+    centered_art = []
+    for line in art_lines_raw:
+        centered_art.append(_center_ansi_line(line, term_width))
 
-    art = (
-        f"\n"
-        f" {L[0]} ██╗   ██╗ ██████╗ ██╗  ██╗██╗  ██╗ █████╗  ██████╗ ███████╗{RST}\n"
-        f" {L[1]} ██║   ██║██╔═══██╗╚██╗██╔╝██║ ██╔╝██╔══██╗██╔════╝ ██╔════╝{RST}\n"
-        f" {L[2]} ██║   ██║██║   ██║ ╚███╔╝ █████╔╝ ███████║██║  ███╗█████╗  {RST}\n"
-        f" {L[3]} ╚██╗ ██╔╝██║   ██║ ██╔██╗ ██╔═██╗ ██╔══██║██║   ██║██╔══╝  {RST}\n"
-        f" {L[4]}  ╚████╔╝ ╚██████╔╝██╔╝ ██╗██║  ██╗██║  ██║╚██████╔╝███████╗{RST}\n"
-        f" {L[5]}   ╚═══╝   ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝{RST}\n"
-        f"\n"
-        f" {p['meta']} ──────────────────────────────────────────────────────────────{RST}\n"
-        f"  {p['tag']}◈{RST}  {p['val']}OS Agentic AI{RST}    {p['meta']}│{RST}    {p['tag']}◈{RST}  {p['val']}Autonomous  ·  Persistent  ·  Aware{RST}\n"
-        f" {p['meta']} ──────────────────────────────────────────────────────────────{RST}\n"
-        f"\n"
-        f" {p['meta']} session  {p['prompt']}›{RST}  {p['val']}{cwd}{RST}\n"
-        f" {p['meta']} theme    {p['prompt']}›{RST}  {p['val']}{theme}{RST}\n"
-        f" {p['meta']} engine   {p['prompt']}›{RST}  {p['val']}{model}{RST}\n"
-        f" {p['meta']} status   {p['prompt']}›{RST}  {p['green']}● ready{RST}\n"
-        f"\n"
-        f" {p['meta']} ──────────────────────────────────────────────────────────────{RST}\n"
-        f" {p['notice']}  VoxKage uses Gemini CLI as its inference backend. All intelligence,{RST}\n"
-        f" {p['notice']}  memory, and agentic behavior is orchestrated by VoxKage core.{RST}\n"
-        f" {p['meta']} ──────────────────────────────────────────────────────────────{RST}\n"
-        f"\n"
-    )
+    # 2 blank lines before art, 1 after — minimal and resize-safe
+    output = "\n\n" + "\n".join(centered_art) + "\n"
 
     try:
-        sys.stdout.buffer.write(art.encode("utf-8") + b"\n")
-        sys.stdout.flush()
+        sys.stdout.buffer.write(output.encode("utf-8"))
+        sys.stdout.buffer.flush()
     except AttributeError:
-        print(art.encode("utf-8", "replace").decode("utf-8"), flush=True)
+        sys.stdout.write(output)
+        sys.stdout.flush()
+
+
 
 
 # ── Install Command ───────────────────────────────────────────────────────────
@@ -943,7 +960,215 @@ def _ensure_telegram_watcher_running():
         pass  # Non-critical — VoxKage still works, just no auto-injection
 
 
+# ── Gemini CLI Bundle Patch ──────────────────────────────────────────────────
+
+def _patch_gemini_bundle():
+    """Inject VoxKage logo into Gemini CLI's React-Ink component tree.
+
+    Surgically patches the active interactiveCli-*.js bundle so that:
+      1. The 'loggedOut' gate is removed so the logo always shows
+      2. The VoxKage ASCII art replaces Gemini's logo text
+
+    Since the bundle retains readable (non-minified) source for UI components,
+    exact string matching is used. The gate removal runs BEFORE art replacement
+    because both reference 'longAsciiLogoCompactText'.
+
+    Idempotent: skips if already patched. Creates a .voxkage_orig backup.
+    Safe to call on every launch.
+    """
+    import re as _re
+    import shutil as _shutil
+
+    SENTINEL = "// __VOXKAGE_PATCHED_v1__"
+
+    # VoxKage art — using exact ANSI codes from the dark palette
+    # (The raw characters are injected into the bundle and colored dynamically by JS)
+    RST = "\x1b[0m"
+    VOXKAGE_ART = (
+        "\u2588\u2588\u2557   \u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557  \u2588\u2588\u2557\u2588\u2588\u2557  \u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\n"
+        "\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2550\u2588\u2588\u2557\u255a\u2588\u2588\u2557\u2588\u2588\u2554\u255d\u2588\u2588\u2551 \u2588\u2588\u2554\u255d\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d \u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\n"
+        "\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2551   \u2588\u2588\u2551 \u255a\u2588\u2588\u2588\u2554\u255d \u2588\u2588\u2588\u2588\u2588\u2554\u255d \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2557  \n"
+        "\u255a\u2588\u2588\u2557 \u2588\u2588\u2554\u255d\u2588\u2588\u2551   \u2588\u2588\u2551 \u2588\u2588\u2554\u2588\u2588\u2557 \u2588\u2588\u2554\u2550\u2588\u2588\u2557 \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u255d  \n"
+        " \u255a\u2588\u2588\u2588\u2588\u2554\u255d \u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2554\u255d \u2588\u2588\u2557\u2588\u2588\u2551  \u2588\u2588\u2557\u2588\u2588\u2551  \u2588\u2588\u2551\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\n"
+        "  \u255a\u2550\u2550\u2550\u255d   \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d"
+    )
+
+    try:
+        npm_global = Path.home() / "AppData" / "Roaming" / "npm"
+        bundle_dir = npm_global / "node_modules" / "@google" / "gemini-cli" / "bundle"
+        if not bundle_dir.exists():
+            return
+
+        # Patch ALL interactiveCli bundles to be absolutely certain we hit the active one
+        for bundle_file in bundle_dir.glob("interactiveCli-*.js"):
+            content = bundle_file.read_text(encoding="utf-8", errors="ignore")
+
+            # Already patched — skip (idempotent)
+            if SENTINEL in content:
+                continue
+
+            # Backup original
+            backup = bundle_file.with_suffix(".js.voxkage_orig")
+            if not backup.exists():
+                _shutil.copy2(bundle_file, backup)
+
+            patched = False
+
+            # ── Patch 1: Remove the 'loggedOut' gate and the width check ─────────────
+            original_gate = (
+                "if (loggedOut) {\n"
+                "    const widthOfLongLogo = getAsciiArtWidth(longAsciiLogoCompactText) + LOGO_METADATA_PADDING;\n"
+                "    if (terminalWidth >= widthOfLongLogo) {"
+            )
+            bypassed_gate = (
+                "if (true) {\n"
+                "    const widthOfLongLogo = 0;\n"
+                "    if (true) {"
+            )
+            if original_gate in content:
+                content = content.replace(original_gate, bypassed_gate, 1)
+                patched = True
+            else:
+                gate_start = content.find("if (loggedOut) {")
+                if gate_start != -1:
+                    content = content[:gate_start] + "if (true) {" + content[gate_start + len("if (loggedOut) {"):]
+                    width_calc = "const widthOfLongLogo = getAsciiArtWidth(longAsciiLogoCompactText) + LOGO_METADATA_PADDING;"
+                    if width_calc in content:
+                        content = content.replace(width_calc, "const widthOfLongLogo = 0;")
+                    patched = True
+
+            # ── Patch 2: Replace longAsciiLogoCompactText with VoxKage art ──────────
+            logo_marker = "var longAsciiLogoCompactText = "
+            logo_start = content.find(logo_marker)
+            if logo_start != -1:
+                open_bt = content.find("`", logo_start + len(logo_marker))
+                close_bt = content.find("`", open_bt + 1)
+                original_logo = content[logo_start : close_bt + 2]
+                replacement_logo = logo_marker + "`\n" + VOXKAGE_ART + "\n`;"
+                content = content.replace(original_logo, replacement_logo, 1)
+                patched = True
+
+            # ── Patch 3: Dynamic Theme Injection & Centering ───────
+            # Replace renderLogo with a dynamic JS function that calculates the ANSI colors
+            # dynamically based on `settings.merged?.ui?.theme` and pads the logo horizontally.
+            orig_render_logo = (
+                'const renderLogo = () => /* @__PURE__ */ (0, import_jsx_runtime63.jsxs)(Box_default, { flexDirection: "row", children: [\n'
+                '    /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(Box_default, { flexShrink: 0, children: /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(ThemedGradient, { children: ICON }) }),\n'
+                '    logoTextArt && /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(Box_default, { marginLeft: 3, children: /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(Text, { color: theme.text.primary, children: logoTextArt }) })\n'
+                '  ] });'
+            )
+            new_render_logo = (
+                'const renderLogo = () => { '
+                'let tName = ((typeof theme !== "undefined" && theme && theme.name) || (typeof settings !== "undefined" && settings && settings.merged && settings.merged.ui && settings.merged.ui.theme) || "").toLowerCase().replace(/[^a-z]/g, ""); '
+                'const palettes = { "default": ["\\x1b[38;2;14;165;233m", "\\x1b[38;2;34;211;238m", "\\x1b[38;2;103;232;249m", "\\x1b[38;2;147;197;253m", "\\x1b[38;2;186;230;253m", "\\x1b[38;2;30;58;138m"], "ansidark": ["\\x1b[38;2;0;229;255m", "\\x1b[38;2;0;207;207m", "\\x1b[38;2;0;180;255m", "\\x1b[38;2;0;144;255m", "\\x1b[38;2;0;110;255m", "\\x1b[38;2;0;51;128m"], "atomonedark": ["\\x1b[38;2;97;175;239m", "\\x1b[38;2;86;182;194m", "\\x1b[38;2;198;120;221m", "\\x1b[38;2;224;108;117m", "\\x1b[38;2;229;192;123m", "\\x1b[38;2;75;82;99m"], "ayudark": ["\\x1b[38;2;57;186;230m", "\\x1b[38;2;89;194;255m", "\\x1b[38;2;115;208;255m", "\\x1b[38;2;255;180;84m", "\\x1b[38;2;255;213;128m", "\\x1b[38;2;45;54;64m"], "draculadark": ["\\x1b[38;2;255;121;198m", "\\x1b[38;2;189;147;249m", "\\x1b[38;2;139;233;253m", "\\x1b[38;2;80;250;123m", "\\x1b[38;2;241;250;140m", "\\x1b[38;2;98;114;164m"], "githubdark": ["\\x1b[38;2;121;192;255m", "\\x1b[38;2;88;166;255m", "\\x1b[38;2;56;139;253m", "\\x1b[38;2;31;111;235m", "\\x1b[38;2;56;139;253m", "\\x1b[38;2;28;42;58m"], "githubdarkcolorblinddark": ["\\x1b[38;2;121;192;255m", "\\x1b[38;2;88;166;255m", "\\x1b[38;2;227;179;65m", "\\x1b[38;2;255;166;87m", "\\x1b[38;2;210;168;255m", "\\x1b[38;2;28;42;58m"], "holidaydark": ["\\x1b[38;2;255;77;77m", "\\x1b[38;2;255;140;0m", "\\x1b[38;2;255;215;0m", "\\x1b[38;2;127;255;0m", "\\x1b[38;2;0;250;154m", "\\x1b[38;2;26;26;58m"], "shadesofpurpledark": ["\\x1b[38;2;250;208;0m", "\\x1b[38;2;255;98;140m", "\\x1b[38;2;165;255;144m", "\\x1b[38;2;158;255;255m", "\\x1b[38;2;251;148;255m", "\\x1b[38;2;61;59;110m"], "solarizeddark": ["\\x1b[38;2;38;139;210m", "\\x1b[38;2;42;161;152m", "\\x1b[38;2;133;153;0m", "\\x1b[38;2;181;137;0m", "\\x1b[38;2;203;75;22m", "\\x1b[38;2;7;54;66m"], "tokyonightdark": ["\\x1b[38;2;122;162;247m", "\\x1b[38;2;187;154;247m", "\\x1b[38;2;158;206;106m", "\\x1b[38;2;224;175;104m", "\\x1b[38;2;247;118;142m", "\\x1b[38;2;59;66;97m"], "light": ["\\x1b[38;2;9;105;218m", "\\x1b[38;2;5;80;174m", "\\x1b[38;2;26;127;55m", "\\x1b[38;2;130;80;223m", "\\x1b[38;2;207;34;46m", "\\x1b[38;2;192;200;210m"] }; '
+                'let p = palettes["default"]; '
+                'if (tName.includes("light")) p = palettes["light"]; '
+                'else if (palettes[tName]) p = palettes[tName]; '
+                'else if (tName === "ansi") p = palettes["ansidark"]; '
+                'else if (tName === "atomone") p = palettes["atomonedark"]; '
+                'else if (tName === "ayu") p = palettes["ayudark"]; '
+                'else if (tName === "github") p = palettes["githubdark"]; '
+                'else if (tName === "solarized") p = palettes["solarizeddark"]; '
+                'const rawArt = ["\\u2588\\u2588\\u2557   \\u2588\\u2588\\u2557 \\u2588\\u2588\\u2588\\u2588\\u2588\\u2588\\u2557 \\u2588\\u2588\\u2557  \\u2588\\u2588\\u2557\\u2588\\u2588\\u2557  \\u2588\\u2588\\u2557 \\u2588\\u2588\\u2588\\u2588\\u2588\\u2557  \\u2588\\u2588\\u2588\\u2588\\u2588\\u2588\\u2557 \\u2588\\u2588\\u2588\\u2588\\u2588\\u2588\\u2588\\u2557", "\\u2588\\u2588\\u2551   \\u2588\\u2588\\u2551\\u2588\\u2588\\u2554\\u2550\\u2550\\u2550\\u2588\\u2588\\u2557\\u255a\\u2588\\u2588\\u2557\\u2588\\u2588\\u2554\\u255d\\u2588\\u2588\\u2551 \\u2588\\u2588\\u2554\\u255d\\u2588\\u2588\\u2554\\u2550\\u2550\\u2588\\u2588\\u2557\\u2588\\u2588\\u2554\\u2550\\u2550\\u2550\\u2550\\u255d \\u2588\\u2588\\u2554\\u2550\\u2550\\u2550\\u2550\\u255d", "\\u2588\\u2588\\u2551   \\u2588\\u2588\\u2551\\u2588\\u2588\\u2551   \\u2588\\u2588\\u2551 \\u255a\\u2588\\u2588\\u2588\\u2554\\u255d \\u2588\\u2588\\u2588\\u2588\\u2588\\u2554\\u255d \\u2588\\u2588\\u2588\\u2588\\u2588\\u2588\\u2588\\u2551\\u2588\\u2588\\u2551  \\u2588\\u2588\\u2588\\u2557\\u2588\\u2588\\u2588\\u2588\\u2588\\u2557  ", "\\u255a\\u2588\\u2588\\u2557 \\u2588\\u2588\\u2554\\u255d\\u2588\\u2588\\u2551   \\u2588\\u2588\\u2551 \\u2588\\u2588\\u2554\\u2588\\u2588\\u2557 \\u2588\\u2588\\u2554\\u2550\\u2588\\u2588\\u2557 \\u2588\\u2588\\u2554\\u2550\\u2550\\u2588\\u2588\\u2551\\u2588\\u2588\\u2551   \\u2588\\u2588\\u2551\\u2588\\u2588\\u2554\\u2550\\u2550\\u255d  ", " \\u255a\\u2588\\u2588\\u2588\\u2588\\u2554\\u255d \\u255a\\u2588\\u2588\\u2588\\u2588\\u2588\\u2588\\u2554\\u255d\\u2588\\u2588\\u2554\\u255d \\u2588\\u2588\\u2557\\u2588\\u2588\\u2551  \\u2588\\u2588\\u2557\\u2588\\u2588\\u2551  \\u2588\\u2588\\u2551\\u255a\\u2588\\u2588\\u2588\\u2588\\u2588\\u2588\\u2554\\u255d\\u2588\\u2588\\u2588\\u2588\\u2588\\u2588\\u2588\\u2557", "  \\u255a\\u2550\\u2550\\u2550\\u255d   \\u255a\\u2550\\u2550\\u2550\\u2550\\u2550\\u255d \\u255a\\u2550\\u255d  \\u255a\\u2550\\u255d\\u255a\\u2550\\u255d  \\u255a\\u2550\\u255d\\u255a\\u2550\\u255d  \\u255a\\u2550\\u255d \\u255a\\u2550\\u2550\\u2550\\u2550\\u2550\\u255d \\u255a\\u2550\\u2550\\u2550\\u2550\\u2550\\u2550\\u255d"]; '
+                'const pad = Math.max(0, Math.floor((terminalWidth - 61) / 2)); '
+                'const dynamicArt = "\\n" + rawArt.map((l, i) => " ".repeat(pad) + p[i] + l + "\\x1b[0m").join("\\n") + "\\n"; '
+                'return /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(Box_default, { width: "100%", children: logoTextArt && /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(Box_default, { children: /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(Text, { children: dynamicArt }) }) }); };'
+            )
+            if orig_render_logo in content:
+                content = content.replace(orig_render_logo, new_render_logo, 1)
+                patched = True
+
+            # ── Patch 4: Remove "Gemini CLI" & Metadata completely ─────────────
+            orig_render_metadata = (
+                'const renderMetadata = (isBelow = false) => /* @__PURE__ */ (0, import_jsx_runtime63.jsxs)(Box_default, { marginLeft: isBelow ? 0 : 2, flexDirection: "column", children: [\n'
+                '    /* @__PURE__ */ (0, import_jsx_runtime63.jsxs)(Box_default, { children: [\n'
+                '      /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(Text, { bold: true, color: theme.text.primary, children: "Gemini CLI" }),\n'
+                '      /* @__PURE__ */ (0, import_jsx_runtime63.jsxs)(Text, { color: theme.text.secondary, children: [\n'
+                '        " v",\n'
+                '        version\n'
+                '      ] }),\n'
+                '      updateInfo?.isUpdating && /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(Box_default, { marginLeft: 2, children: /* @__PURE__ */ (0, import_jsx_runtime63.jsxs)(Text, { color: theme.text.secondary, children: [\n'
+                '        /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(CliSpinner, {}),\n'
+                '        " Updating"\n'
+                '      ] }) })\n'
+                '    ] }),\n'
+                '    showDetails && /* @__PURE__ */ (0, import_jsx_runtime63.jsxs)(import_jsx_runtime63.Fragment, { children: [\n'
+                '      /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(Box_default, { height: 1 }),\n'
+                '      settings.merged.ui.showUserIdentity !== false && /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(UserIdentity, { config })\n'
+                '    ] })\n'
+                '  ] });'
+            )
+            new_render_metadata = 'const renderMetadata = (isBelow = false) => null;'
+            if orig_render_metadata in content:
+                content = content.replace(orig_render_metadata, new_render_metadata, 1)
+                patched = True
+
+            if patched:
+                content = content + "\n" + SENTINEL + "\n"
+                bundle_file.write_text(content, encoding="utf-8")
+
+
+
+    except Exception:
+        pass  # Non-critical — VoxKage still works, logo just won't be in React-Ink tree
+
+
+# ── Gemini CLI Settings Patch ─────────────────────────────────────────────────
+def _patch_gemini_settings():
+    """Patch Gemini CLI settings to hide banner and tips for clean VoxKage experience."""
+    import pathlib
+    
+    gemini_settings = pathlib.Path.home() / ".gemini" / "settings.json"
+    
+    # Ensure directory exists
+    gemini_settings.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Load existing or create new
+    settings = {}
+    if gemini_settings.exists():
+        try:
+            settings = json.loads(gemini_settings.read_text(encoding="utf-8"))
+        except Exception:
+            settings = {}
+    
+    # Add/hide banner settings if not present
+    need_update = False
+    if "ui" not in settings:
+        settings["ui"] = {}
+    
+    # hideBanner=False: we want the header to show since we patched it to show
+    # VoxKage art instead of Gemini's logo via _patch_gemini_bundle()
+    if settings.get("ui", {}).get("hideBanner") != False:
+        settings["ui"]["hideBanner"] = False
+        need_update = True
+
+    if settings.get("ui", {}).get("hideTips") != True:
+        settings["ui"]["hideTips"] = True
+        need_update = True
+
+    # Sync top-level keys
+    if settings.get("hideBanner") != False:
+        settings["hideBanner"] = False
+        need_update = True
+
+    if settings.get("hideTips") != True:
+        settings["hideTips"] = True
+        need_update = True
+    
+    if need_update:
+        try:
+            gemini_settings.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass  # Non-critical
+
+
 def cmd_launch(extra_args: list[str] | None = None):
+    # Set window title
+    if is_windows():
+        os.system("title VoxKage")
+    else:
+        os.system("echo -e \"\\033]0;VoxKage\\a\"")
+    
     if not config_path().exists():
         print(f"  {_c(56,189,248)}First run detected — running setup...{RST}")
         print()
@@ -954,10 +1179,21 @@ def cmd_launch(extra_args: list[str] | None = None):
     except Exception:
         pass
 
+    # Patch Gemini CLI bundle to inject VoxKage logo into React-Ink component tree
+    # (idempotent - skips instantly if already patched)
+    _patch_gemini_bundle()
+
+    # Patch Gemini CLI settings (hideBanner=False so our patched header shows)
+    _patch_gemini_settings()
+
     _ensure_tray_running()
     _ensure_telegram_watcher_running()
 
-    print_banner()
+    # Clean slate before handing over to Gemini CLI
+    if is_windows():
+        os.system("cls")
+    else:
+        os.system("clear")
 
     model = "gemini-2.5-flash"
     try:
