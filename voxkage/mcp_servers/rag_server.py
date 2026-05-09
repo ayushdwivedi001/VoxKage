@@ -29,6 +29,7 @@ import contextlib
 
 @contextlib.contextmanager
 def suppress_stdout():
+    """Redirect stdout to /dev/null — prevents progress bars from corrupting MCP stdio JSON-RPC."""
     with open(os.devnull, "w") as devnull:
         old_stdout = sys.stdout
         sys.stdout = devnull
@@ -36,6 +37,19 @@ def suppress_stdout():
             yield
         finally:
             sys.stdout = old_stdout
+
+@contextlib.contextmanager
+def suppress_all_output():
+    """Redirect both stdout and stderr — used during heavy ops to keep MCP channel clean."""
+    with open(os.devnull, "w") as devnull:
+        old_stdout, old_stderr = sys.stdout, sys.stderr
+        sys.stdout = devnull
+        sys.stderr = devnull
+        try:
+            yield
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
@@ -102,7 +116,7 @@ def _get_collection():
 def _get_embedder():
     """Return a sentence-transformer model (lazy-initialized, cached)."""
     if not hasattr(_get_embedder, "_model"):
-        with suppress_stdout():
+        with suppress_all_output():  # must suppress stdout AND stderr — both corrupt MCP stdio
             import warnings
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
@@ -166,17 +180,13 @@ def _extract_text(file_path: str) -> str:
                 return f.read()
 
         elif ext == ".pdf":
-            import fitz
-            import sys
+            try:
+                import fitz
+            except ImportError:
+                return "[RAG] PDF reading requires PyMuPDF. Run: pip install voxkage[docs_plus]"
             text = ""
             with fitz.open(file_path) as doc:
-                total_pages = len(doc)
                 for i, page in enumerate(doc):
-                    # Periodically report progress to stderr to avoid JSON-RPC corruption
-                    if i % 5 == 0 or i == total_pages - 1:
-                        sys.stderr.write(f"\r[RAG] Extracting PDF: Page {i+1}/{total_pages} ...")
-                        sys.stderr.flush()
-                        
                     page_text = page.get_text().strip()
                     # If page is mostly images / no text, perform OCR
                     if len(page_text) < 20:
@@ -184,18 +194,15 @@ def _extract_text(file_path: str) -> str:
                             import numpy as np
                             ocr = _get_ocr()
                             if ocr:
-                                sys.stderr.write(f"\r[RAG] OCR processing page {i+1}/{total_pages} ...")
-                                sys.stderr.flush()
-                                pix = page.get_pixmap(dpi=150, alpha=False)
-                                img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
-                                result, _ = ocr(img)
+                                with suppress_all_output():
+                                    pix = page.get_pixmap(dpi=150, alpha=False)
+                                    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
+                                    result, _ = ocr(img)
                                 if result:
                                     page_text = "\n".join([line[1] for line in result])
                         except Exception as e:
                             logger.error(f"OCR failed on PDF page {i+1}: {e}")
                     text += page_text + "\n"
-            sys.stderr.write("\r" + " " * 60 + "\r")
-            sys.stderr.flush()
             return text.strip()
 
         elif ext in (".png", ".jpg", ".jpeg", ".bmp"):
@@ -363,10 +370,14 @@ def _do_index(file_path: str, force: bool = False) -> dict:
     if not chunks:
         return {"status": "error", "message": "No content extracted from file"}
 
-    # Build embeddings (show progress bar for large files to keep user informed)
+    # Build embeddings — MUST suppress all output to avoid MCP stdio corruption
     embedder = _get_embedder()
-    show_pb = len(chunks) > 10
-    embeddings = embedder.encode(chunks, show_progress_bar=show_pb).tolist()
+    with suppress_all_output():
+        embeddings = embedder.encode(
+            chunks,
+            show_progress_bar=False,  # NEVER use progress bar — it writes to stdout/stderr
+            batch_size=32,
+        ).tolist()
 
     # Get collection and remove old chunks for this file
     collection = _get_collection()
@@ -650,59 +661,62 @@ def index_directory(
         # Default to TEXT extensions ONLY to avoid massive OCR hangs on codebase images
         target_exts = _TEXT_EXTS
 
-    results = {"indexed": 0, "reindexed": 0, "unchanged": 0, "skipped": 0, "errors": 0}
-    processed = []
-
+    # ── Phase 1: Quick scan to count files (before heavy work) ─────────────────────
+    all_target_files = []
     walker = os.walk(directory) if recursive else [(directory, [], os.listdir(directory))]
-
     for root, dirs, files in walker:
-        # Prune skip directories in-place
         if recursive:
             dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
-
         for fname in files:
             ext = Path(fname).suffix.lower()
-            if ext not in target_exts:
-                continue
+            if ext in target_exts:
+                all_target_files.append(os.path.join(root, fname))
+    
+    total_files = len(all_target_files)
+    if total_files == 0:
+        return f"[RAG] No supported files found in: {directory}\n  Looked for extensions: {', '.join(sorted(target_exts))}"
 
-            fpath = os.path.join(root, fname)
-            import sys
-            # Print live progress to stderr to avoid corrupting MCP stdio JSON-RPC
-            sys.stderr.write(f"\r[RAG] Indexing: {fname[:50]:<50}")
-            sys.stderr.flush()
-            
-            try:
-                result = _do_index(fpath, force=False)
-                status = result.get("status", "error")
-                action = result.get("action", "")
-                if status == "success" and action == "indexed":
-                    results["indexed"] += 1
-                    processed.append(f"  [NEW]: {fname}")
-                elif status == "success" and action == "reindexed":
-                    results["reindexed"] += 1
-                    processed.append(f"  [UPDATED]: {fname}")
-                elif status == "unchanged":
-                    results["unchanged"] += 1
-                elif status == "skipped":
-                    results["skipped"] += 1
-                else:
-                    results["errors"] += 1
-                    processed.append(f"  [ERROR]: {fname} -- {result.get('message', '')}")
-            except Exception as e:
+    results = {"indexed": 0, "reindexed": 0, "unchanged": 0, "skipped": 0, "errors": 0}
+    processed = []
+    progress_log = [f"[RAG] Starting index of {total_files} files..."]
+
+    # ── Phase 2: Index with progress tracking ────────────────────────────────────
+    for idx, fpath in enumerate(all_target_files, 1):
+        fname = os.path.basename(fpath)
+        
+        # Emit progress every 10 files or on first/last
+        if idx == 1 or idx % 10 == 0 or idx == total_files:
+            progress_log.append(f"[RAG] Indexing {idx}/{total_files} files... ({int(idx/total_files*100)}%)")
+        
+        try:
+            result = _do_index(fpath, force=False)
+            status = result.get("status", "error")
+            action = result.get("action", "")
+            if status == "success" and action == "indexed":
+                results["indexed"] += 1
+                processed.append(f"  [NEW]: {fname}")
+            elif status == "success" and action == "reindexed":
+                results["reindexed"] += 1
+                processed.append(f"  [UPDATED]: {fname}")
+            elif status == "unchanged":
+                results["unchanged"] += 1
+            elif status == "skipped":
+                results["skipped"] += 1
+            else:
                 results["errors"] += 1
-                processed.append(f"  [EXCEPTION]: {fname} -- {e}")
-
-    import sys
-    sys.stderr.write("\r" + " " * 70 + "\r")
-    sys.stderr.flush()
+                processed.append(f"  [ERROR]: {fname} -- {result.get('message', '')}")
+        except Exception as e:
+            results["errors"] += 1
+            processed.append(f"  [EXCEPTION]: {fname} -- {e}")
 
     summary_lines = [
-        f"[RAG] Directory indexing complete for: {directory}",
+        f"[RAG] ✓ Directory indexing complete for: {directory}",
+        f"  Total files scanned : {total_files}",
         f"  New files indexed  : {results['indexed']}",
-        f"  Files reindexed    : {results['reindexed']}",
-        f"  Unchanged (skipped): {results['unchanged']}",
+        f"  Files reindexed  : {results['reindexed']}",
+        f"  Unchanged (cached): {results['unchanged']}",
         f"  Unsupported/skipped: {results['skipped']}",
-        f"  Errors             : {results['errors']}",
+        f"  Errors           : {results['errors']}",
         "",
     ]
     if processed:
@@ -710,6 +724,23 @@ def index_directory(
         summary_lines.extend(processed[:30])  # cap output
         if len(processed) > 30:
             summary_lines.append(f"  ... and {len(processed) - 30} more")
+
+    # ── Stamp the index cache so coding_thinking skips re-scan within 10 min ──
+    try:
+        _BRAIN_DIR = Path(r"C:\VoxKage\Brain")
+        _cache_file = _BRAIN_DIR / "index_cache.json"
+        _BRAIN_DIR.mkdir(parents=True, exist_ok=True)
+        import json as _json
+        _cache = {}
+        if _cache_file.exists():
+            try:
+                _cache = _json.loads(_cache_file.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        _cache[os.path.normpath(directory)] = time.time()
+        _cache_file.write_text(_json.dumps(_cache, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
     return "\n".join(summary_lines)
 

@@ -46,9 +46,17 @@ logger = logging.getLogger(__name__)
 # ── Storage ───────────────────────────────────────────────────────────────────
 _BRAIN_DIR = Path(r"C:\VoxKage\Brain")
 _BRAIN_DIR.mkdir(parents=True, exist_ok=True)
-_PLAN_FILE = _BRAIN_DIR / "active_plan.md"
+_PLAN_FILE  = _BRAIN_DIR / "active_plan.md"
 _SCRATCH_DIR = _BRAIN_DIR / "scratch"
 _SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+_INDEX_CACHE_FILE = _BRAIN_DIR / "index_cache.json"  # {dir_path: last_indexed_epoch}
+
+# ── Absolute path to mcp_servers directory (for cross-process imports) ────────
+_MCP_DIR = os.path.dirname(os.path.abspath(__file__))  # always the mcp_servers/ folder
+if _MCP_DIR not in sys.path:
+    sys.path.insert(0, _MCP_DIR)
+
+_INDEX_CACHE_TTL = 600  # 10 minutes — skip re-hashing if indexed within this window
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -216,7 +224,7 @@ def _regex_skeleton_js(file_path: str) -> str:
     return "\n".join(lines) if len(lines) > 2 else f"// No declarations found in {os.path.basename(file_path)}"
 
 
-def _build_plan_markdown(goal: str, steps: list[str], rag_context: str = "") -> str:
+def _build_plan_markdown(goal: str, steps: list, rag_context: str = "") -> str:
     """Build a formatted active_plan.md file."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     plan_lines = [
@@ -252,69 +260,104 @@ def _build_plan_markdown(goal: str, steps: list[str], rag_context: str = "") -> 
     return "\n".join(plan_lines)
 
 
+# ── Index cache helpers ───────────────────────────────────────────────────────
+
+def _load_index_cache() -> dict:
+    try:
+        if _INDEX_CACHE_FILE.exists():
+            return json.loads(_INDEX_CACHE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _save_index_cache(cache: dict):
+    try:
+        _INDEX_CACHE_FILE.write_text(json.dumps(cache, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _is_recently_indexed(directory: str, ttl: int = _INDEX_CACHE_TTL) -> bool:
+    """Return True if this directory was indexed within the last `ttl` seconds."""
+    cache = _load_index_cache()
+    last_ts = cache.get(os.path.normpath(directory), 0)
+    return (time.time() - last_ts) < ttl
+
+
+def _mark_indexed(directory: str):
+    cache = _load_index_cache()
+    cache[os.path.normpath(directory)] = time.time()
+    _save_index_cache(cache)
+
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # MCP TOOLS
 # ═════════════════════════════════════════════════════════════════════════════
 
 @mcp.tool()
-def coding_thinking(goal: str, project_dir: str = "", steps: str = "") -> str:
+def coding_thinking(goal: str, project_dir: str = "", steps: str = "", rag_context: str = "") -> str:
     """
-    ACE ENTRY POINT — Mandatory first call for ANY development task.
+    ACE ENTRY POINT — Fast plan generator. Runs in <2 seconds.
 
-    This tool initializes VoxKage's coding engine by:
-      1. Auto-indexing the project directory into RAG (skips unchanged files)
-      2. Querying RAG for relevant codebase architecture
-      3. Creating a persistent todo plan at C:\\VoxKage\\Brain\\active_plan.md
+    Creates a persistent step-by-step plan at C:\\VoxKage\\Brain\\active_plan.md
+    and returns RAG context for the goal from the already-indexed codebase.
+
+    USAGE PROTOCOL (CRITICAL — follow this order):
+    1. If project_dir is NEW or not indexed recently:
+         → Call `index_directory(directory=project_dir)` (using rag_server) FIRST as a separate tool
+         → This shows live indexing progress in its own MCP block
+    2. Then, call `query_rag(query=goal)` (using rag_server) as a separate tool.
+    3. FINALLY, call coding_thinking(goal=goal, project_dir=..., rag_context=<results from query_rag>)
 
     Parameters:
       goal        : What you are trying to accomplish (natural language)
-      project_dir : Root directory of the codebase to work on (optional)
+      project_dir : Root directory of the codebase (optional, for cache check only)
       steps       : Pipe-separated list of planned steps
                     e.g. "Create auth module|Add middleware|Update routes|Write tests"
+      rag_context : The output from query_rag() to inform the plan.
 
-    After calling this, read the returned plan and execute step by step.
-    After each step, call update_coding_plan(step_number, "done") to tick it off.
+    After calling this, show the user the plan, then execute step by step.
+    After each step: call update_coding_plan(step_number, "done") to tick it off.
 
     MANDATORY RULES:
-    - Call this BEFORE writing any code for a new task
-    - Call this BEFORE modifying any file in a project
-    - If project_dir is given, codebase is auto-indexed (costs 0 tokens for cached files)
+    - Call this BEFORE writing any code
+    - Use get_code_skeleton(file_path) to understand structure — NEVER read full files first
+    - Never skip update_coding_plan() — the user sees the plan progress
     """
     output_parts = []
 
-    # ── Phase 1: Auto-index the project ───────────────────────────────────
-    indexed_summary = ""
+    # ── Phase 1: Index status check (instant — no file I/O beyond cache) ──────
     if project_dir and os.path.isdir(project_dir):
-        try:
-            # Import RAG server internals for direct indexing
-            sys.path.insert(0, os.path.dirname(__file__))
-            from rag_server import index_directory
-            idx_result = index_directory(
-                directory=project_dir,
-                extensions=".py,.js,.ts,.tsx,.jsx,.json,.md,.yaml,.yml,.css,.html",
-                recursive=True,
+        if _is_recently_indexed(project_dir):
+            output_parts.append(
+                f"[ACE Phase 1] ✅ Using cached RAG index for '{os.path.basename(project_dir)}' "
+                f"(indexed within last 10 min — no re-scan needed)"
             )
-            indexed_summary = idx_result
-            output_parts.append(f"[ACE Phase 1] RAG Indexing:\n{idx_result}")
-        except Exception as e:
-            output_parts.append(f"[ACE Phase 1] RAG indexing skipped: {e}")
-    else:
-        output_parts.append("[ACE Phase 1] No project_dir provided — skipping auto-index.")
-
-    # ── Phase 2: Query RAG for relevant context ───────────────────────────
-    rag_context = ""
-    try:
-        from rag_server import query_rag
-        rag_result = query_rag(query=goal, top_k=6)
-        if rag_result and "[RAG] Found" in rag_result:
-            rag_context = rag_result
-            output_parts.append(f"\n[ACE Phase 2] RAG Context Retrieved:\n{rag_result[:2000]}")
         else:
-            output_parts.append(f"\n[ACE Phase 2] No relevant RAG context found for: \"{goal}\"")
-    except Exception as e:
-        output_parts.append(f"\n[ACE Phase 2] RAG query failed: {e}")
+            mins_ago = ""
+            cache = _load_index_cache()
+            last_ts = cache.get(os.path.normpath(project_dir), 0)
+            if last_ts:
+                mins_ago = f" (last indexed {int((time.time() - last_ts) / 60)} min ago)"
+            output_parts.append(
+                f"[ACE Phase 1] ⚠️  Project not recently indexed{mins_ago}.\n"
+                f"  NEXT STEP: Call index_directory(directory='{project_dir}') first\n"
+                f"  for live indexing progress."
+            )
+    else:
+        output_parts.append("[ACE Phase 1] No project_dir — proceeding with provided RAG context.")
 
-    # ── Phase 3: Build the plan ───────────────────────────────────────────
+    # ── Phase 2: RAG query injection ──
+    if rag_context:
+        output_parts.append(f"\n[ACE Phase 2] ✅ RAG context injected via parameters.")
+    else:
+        output_parts.append(
+            "\n[ACE Phase 2] ⚠️ No RAG context provided. You should run query_rag() first and pass it here."
+        )
+
+    # ── Phase 3: Build the plan ───────────────────────────────────────────────
     step_list = [s.strip() for s in steps.split("|") if s.strip()] if steps else []
     if not step_list:
         step_list = [
@@ -329,24 +372,25 @@ def coding_thinking(goal: str, project_dir: str = "", steps: str = "") -> str:
 
     try:
         _PLAN_FILE.write_text(plan_md, encoding="utf-8")
-        output_parts.append(f"\n[ACE Phase 3] Plan saved to: {_PLAN_FILE}")
+        output_parts.append(f"\n[ACE Phase 3] ✅ Plan saved → {_PLAN_FILE}")
     except Exception as e:
-        output_parts.append(f"\n[ACE Phase 3] Plan file write failed: {e}")
+        output_parts.append(f"\n[ACE Phase 3] Plan write failed: {e}")
 
-    # ── Return the full plan to the model ─────────────────────────────────
+    # ── Return the full plan ──────────────────────────────────────────────────
     output_parts.append(f"\n{'='*60}")
-    output_parts.append("ACE PLAN — Execute these steps in order:")
+    output_parts.append("ACE PLAN — Show this to the user, then execute step by step:")
     output_parts.append(f"{'='*60}")
     for i, step in enumerate(step_list, 1):
         output_parts.append(f"  [ ] Step {i}: {step}")
     output_parts.append(f"{'='*60}")
     output_parts.append(
-        "\nINSTRUCTIONS: Execute each step one at a time. "
-        "After completing each step, call update_coding_plan(step_number, 'done'). "
-        "If a step fails, call update_coding_plan(step_number, 'failed') and fix it before proceeding. "
-        "After all steps are done, run a final syntax check across all changed files. "
-        "Use get_code_skeleton(file_path) to understand file structure before editing — "
-        "NEVER read a full file when a skeleton suffices."
+        "\nEXECUTION PROTOCOL:\n"
+        "1. Print the plan above for the user to see immediately.\n"
+        "2. Execute each step one at a time.\n"
+        "3. After each step: update_coding_plan(step_number, 'done') ← mandatory.\n"
+        "4. If a step fails: update_coding_plan(step_number, 'failed') → fix → retry.\n"
+        "5. Use get_code_skeleton(file_path) before any edit — saves 95% tokens.\n"
+        "6. After all done: run py_compile or equivalent syntax check on changed files."
     )
 
     return "\n".join(output_parts)

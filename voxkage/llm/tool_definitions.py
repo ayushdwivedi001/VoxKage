@@ -11,17 +11,17 @@ TOOL_DEFINITIONS = [
     {
         "name": "system_control",
         "description": (
-            "Controls PC hardware and power state: adjust volume (sound level, audio), "
-            "adjust screen brightness (display light), toggle WiFi on or off, toggle Bluetooth on or off, "
-            "change desktop wallpaper (background), shutdown the computer (power off, turn off PC), "
-            "restart the computer (reboot), put the computer to sleep (hibernate, suspend), lock the screen."
+            "Controls PC hardware and power state: adjust volume, adjust screen brightness, "
+            "toggle WiFi, toggle Bluetooth, toggle mobile hotspot, toggle night light, "
+            "run Intel DSA diagnostics, shutdown, restart, sleep, hibernate, lock screen."
         ),
-        "tags": ["system", "hardware", "power", "wifi", "bluetooth", "volume", "brightness"],
+        "tags": ["system", "hardware", "power", "wifi", "bluetooth", "volume", "brightness", "hotspot"],
         "example_queries": [
             "set volume to 50", "turn volume up", "make it louder", "mute the sound",
             "increase brightness", "dim the screen", "screen too bright",
             "turn wifi on", "disable wifi", "enable bluetooth", "bluetooth off",
-            "change wallpaper", "new desktop background",
+            "turn on hotspot", "disable hotspot", "toggle night light",
+            "run Intel DSA", "check diagnostics",
             "shutdown the computer", "turn off PC", "restart", "reboot",
             "put computer to sleep", "hibernate", "lock the screen"
         ],
@@ -31,9 +31,10 @@ TOOL_DEFINITIONS = [
                 "action": {
                     "type": "string",
                     "description": (
-                        "The action to perform. One of: 'volume', 'brightness', "
+                        "The action to perform. One of: 'set_volume', 'set_brightness', "
                         "'wifi_on', 'wifi_off', 'bluetooth_on', 'bluetooth_off', "
-                        "'wallpaper', 'shutdown', 'restart', 'sleep'."
+                        "'hotspot_on', 'hotspot_off', 'night_light_on', 'night_light_off', "
+                        "'intel_dsa', 'shutdown', 'restart', 'sleep', 'hibernate', 'lock'."
                     )
                 },
                 "level": {
@@ -457,29 +458,29 @@ TOOL_DEFINITIONS = [
     {
         "name": "media_control",
         "description": (
-            "Controls media playback on Spotify or YouTube: pause, play/resume, stop, next track, "
-            "previous track, get currently playing song status, toggle fullscreen. "
-            "Use for: 'pause music', 'resume', 'stop', 'next song', 'skip', 'what song is playing', "
-            "'what am I listening to', 'who sings this'."
+            "Controls media playback on Spotify or YouTube: play, pause, stop, next track, "
+            "previous track, skip, get currently playing status. "
+            "Use for: 'pause music', 'resume', 'stop', 'next song', 'skip', 'previous song', "
+            "'what song is playing', 'what am I listening to'."
         ),
         "tags": ["media", "spotify", "youtube", "control", "pause", "play", "skip", "status"],
         "example_queries": [
             "pause the music", "resume playing", "stop music", "next song", "skip track",
             "previous song", "what song is playing", "what am I listening to",
-            "who sings this", "pause YouTube", "stop Spotify", "fullscreen video"
+            "pause YouTube", "stop Spotify"
         ],
         "parameters": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["play", "pause", "stop", "next", "prev", "status", "fullscreen"],
-                    "description": "The playback action to perform."
+                    "enum": ["play", "pause", "stop", "next", "previous", "skip", "status"],
+                    "description": "The playback action: play, pause, stop, next, previous, skip, or status."
                 },
                 "target": {
                     "type": "string",
                     "enum": ["auto", "spotify", "youtube"],
-                    "description": "Which media player to control. Use 'auto' if unsure."
+                    "description": "Which media player to control: 'auto', 'spotify', or 'youtube'."
                 }
             },
             "required": ["action"]
@@ -487,69 +488,114 @@ TOOL_DEFINITIONS = [
     },
 
     # ─────────────────────────────────────────────
-    # GMAIL CHECK
+    # EMAIL (GMAIL)
     # ─────────────────────────────────────────────
     {
-        "name": "check_gmail",
+        "name": "check_email",
         "description": (
-            "Checks the user's Gmail inbox and returns a list of recent emails with sender, subject, "
-            "and snippet. Use for: 'check my emails', 'any new messages', 'check inbox', "
-            "'do I have any unread mail', 'show me my emails', 'check spam'. "
-            "After calling, summarize the emails aloud — do NOT chain further tools."
+            "Checks the user's Gmail inbox or any folder/label with optional search. "
+            "Returns recent emails with sender, subject, and snippet. "
+            "Supports labels: INBOX, UNREAD, SENT, SPAM, TRASH, CATEGORY_PROMOTIONS, CATEGORY_SOCIAL, CATEGORY_UPDATES."
         ),
         "tags": ["email", "gmail", "inbox", "mail", "messages", "communication"],
         "example_queries": [
-            "check my emails", "any new messages", "check inbox", "do I have mail",
-            "check unread emails", "show me my emails", "any important emails",
-            "check my Gmail", "read my inbox", "any emails from LinkedIn"
+            "check my emails", "check inbox", "any new messages", "do I have mail",
+            "check unread emails", "show me my emails", "check spam", "check promotions"
         ],
         "parameters": {
             "type": "object",
             "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Optional search term (e.g., 'from:linkedin.com' or 'project update')."
-                },
-                "label": {
-                    "type": "string",
-                    "enum": ["INBOX", "UNREAD", "SPAM", "SENT", "STARRED"],
-                    "description": "Gmail label to filter by (default: INBOX)."
-                },
-                "max_results": {
-                    "type": "integer",
-                    "description": "Number of emails to fetch (default: 5)."
-                }
+                "query": {"type": "string", "description": "Optional Gmail search query (e.g. 'from:boss@company.com', 'subject:invoice', 'is:unread')."},
+                "label": {"type": "string", "description": "Gmail label/folder (default: INBOX)."},
+                "max_results": {"type": "integer", "description": "Number of emails to fetch (default: 5)."}
             },
             "required": []
         }
     },
-
-    # ─────────────────────────────────────────────
-    # EMAIL READ
-    # ─────────────────────────────────────────────
     {
-        "name": "get_email_summary",
+        "name": "read_email",
         "description": (
-            "Reads the full body text of a specific email. "
-            "Use ONLY when user asks to 'read the first email', 'tell me more about that email', "
-            "'read the email from X', or refers to a specific email from a previous check_gmail result. "
-            "Extract the email ID from the previous check_gmail tool result."
+            "Reads the full body text of a specific email by its ID. "
+            "Use after check_email to read a specific email."
         ),
-        "tags": ["email", "gmail", "read", "body", "summary", "communication"],
+        "tags": ["email", "gmail", "read", "body", "communication"],
         "example_queries": [
             "read the first email", "read that email", "tell me what it says",
-            "open the email from Google", "read the second email", "read more about that",
-            "what does the email say", "read full email"
+            "read the email from Google", "read more about that"
         ],
         "parameters": {
             "type": "object",
             "properties": {
-                "email_id": {
-                    "type": "string",
-                    "description": "The Gmail message ID from a previous check_gmail result."
-                }
+                "email_id": {"type": "string", "description": "The Gmail message ID from check_email."}
             },
             "required": ["email_id"]
+        }
+    },
+    {
+        "name": "send_email",
+        "description": "Compose and send an email via Gmail immediately.",
+        "tags": ["email", "gmail", "send", "compose", "communication"],
+        "example_queries": ["send an email", "email to bob", "send this to friend@gmail.com"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "Recipient email address."},
+                "subject": {"type": "string", "description": "Email subject line."},
+                "body": {"type": "string", "description": "Email body text."},
+                "cc": {"type": "string", "description": "Optional CC addresses (comma-separated)."}
+            },
+            "required": ["to", "subject", "body"]
+        }
+    },
+    {
+        "name": "reply_to_email",
+        "description": "Reply to an existing email thread by ID.",
+        "tags": ["email", "gmail", "reply", "communication"],
+        "example_queries": ["reply to that email", "reply to the first message"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "email_id": {"type": "string", "description": "The message ID to reply to."},
+                "body": {"type": "string", "description": "Your reply text."}
+            },
+            "required": ["email_id", "body"]
+        }
+    },
+    {
+        "name": "delete_email",
+        "description": "Move a specific email to Trash.",
+        "tags": ["email", "gmail", "delete", "trash"],
+        "example_queries": ["delete this email", "trash that message", "delete the first email"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "email_id": {"type": "string", "description": "The message ID to delete."}
+            },
+            "required": ["email_id"]
+        }
+    },
+    {
+        "name": "mark_email_read",
+        "description": "Mark a specific email as read.",
+        "tags": ["email", "gmail", "read", "mark"],
+        "example_queries": ["mark as read", "mark this email as read"],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "email_id": {"type": "string", "description": "The message ID to mark as read."}
+            },
+            "required": ["email_id"]
+        }
+    },
+    {
+        "name": "get_email_stats",
+        "description": "Get a quick summary of inbox stats: unread count, promotions, spam, etc.",
+        "tags": ["email", "gmail", "stats", "summary"],
+        "example_queries": ["how many unread emails", "check my email stats", "inbox summary"],
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
         }
     },
 
@@ -806,14 +852,22 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "query_rag",
-        "description": "RAG MEMORY SEARCH: Semantic search across all indexed documents. Use to answer questions about any file VoxKage has seen before WITHOUT re-reading it. Always check_and_index the file first.",
+        "description": (
+            "RAG MEMORY SEARCH: Semantic search across all indexed documents. "
+            "Use to answer questions about any file VoxKage has seen before WITHOUT re-reading it. "
+            "Shows relevance confidence for each result."
+        ),
         "tags": ["rag", "memory", "search", "query", "knowledge"],
-        "example_queries": ["search memory for", "what does the indexed file say", "query rag memory"],
+        "example_queries": [
+            "search memory for authentication", "what does the indexed file say",
+            "query rag memory for API fallbacks", "find how we handle errors"
+        ],
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Natural language question, e.g. 'how did we handle API fallbacks'"},
-                "n_results": {"type": "integer", "description": "Number of snippets to return (default 5)"}
+                "top_k": {"type": "integer", "description": "Number of results to return (default 5)"},
+                "file_filter": {"type": "string", "description": "Optional file name substring to filter results"}
             },
             "required": ["query"]
         }
@@ -855,52 +909,146 @@ TOOL_DEFINITIONS = [
             "required": ["file_path"]
         }
     },
-    {
+{
         "name": "index_directory",
-        "description": "Crawls and indexes an entire directory (like a codebase) into RAG memory. Use when asked to learn a whole project.",
+        "description": (
+            "RAG MEMORY: Bulk-index an entire directory (codebase, documents folder) into RAG memory. "
+            "Use when asked to learn a whole project or index a codebase. "
+            "Shows progress as it indexes. Already-indexed unchanged files are skipped automatically."
+        ),
         "tags": ["rag", "memory", "index", "directory", "codebase", "folder"],
-        "example_queries": ["index my project folder", "learn this codebase", "add this directory to memory"],
+        "example_queries": [
+            "index my project folder", "learn this codebase", "add this directory to memory",
+            "index the vision-assistant folder", "learn the voxkage project"
+        ],
         "parameters": {
             "type": "object",
             "properties": {
-                "directory": {"type": "string", "description": "Absolute path to the directory"}
+                "directory": {"type": "string", "description": "Absolute path to the directory to index"},
+                "extensions": {"type": "string", "description": "Comma-separated extensions filter (e.g. '.py,.md,.txt'). Leave empty for all text files."},
+                "recursive": {"type": "boolean", "description": "Whether to recurse into subdirectories (default true)"}
             },
             "required": ["directory"]
         }
     },
 
-
-
     # ─────────────────────────────────────────────
+    # CODING ENGINE (ACE - Agentic Coding Engine)
+    # ─────────────────────────────────────────────
+    {
+        "name": "coding_thinking",
+        "description": (
+            "ACE ENTRY POINT — Creates a persistent step-by-step plan with RAG context integration. "
+            "Uses 5-phase pipeline: Problem Decomposition → RAG-First Awareness → Knowledge Gap Fill → Plan → Execute/Verify. "
+            "MUST be called BEFORE writing any code. Creates active_plan.md in C:\\VoxKage\\Brain\\."
+        ),
+        "tags": ["coding", "ace", "plan", "reasoning", "code"],
+        "example_queries": [
+            "help me create a new feature", "implement authentication", "refactor this module",
+            "write tests for the api", "fix that bug", "add validation"
+        ],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string", "description": "What you are trying to accomplish (natural language)"},
+                "project_dir": {"type": "string", "description": "Root directory of the codebase (optional, for cache check only)"},
+                "steps": {"type": "string", "description": "Pipe-separated list of planned steps (e.g. 'Create auth module|Add middleware|Update routes')"},
+                "rag_context": {"type": "string", "description": "The output from query_rag() to inform the plan."}
+            },
+            "required": ["goal"]
+        }
+    },
+    {
+        "name": "get_code_skeleton",
+        "description": (
+            "ACE TOOL: Get a compact structural skeleton of a code file. "
+            "Returns ONLY: imports, class names, function signatures, docstrings, and top-level constants. "
+            "Reduces a 2000-line file to ~40 lines. Use INSTEAD of reading full files to understand structure."
+        ),
+        "tags": ["coding", "skeleton", "structure", "ast"],
+        "example_queries": [
+            "show me the structure of this file", "what functions are in main.py",
+            "get the skeleton of utils.py", "what classes does auth.py have"
+        ],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Absolute path to the code file"}
+            },
+            "required": ["file_path"]
+        }
+    },
+    {
+        "name": "update_coding_plan",
+        "description": (
+            "ACE TOOL: Mark a step in the active plan as done or failed. "
+            "Call this after completing each step in the coding_thinking plan. "
+            "Shows remaining open items with checkmarks."
+        ),
+        "tags": ["coding", "plan", "todo", "checklist", "ace"],
+        "example_queries": [
+            "mark step 1 done", "step 2 is complete", "step 3 failed",
+            "update the plan", "tick off step 1"
+        ],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "step_number": {"type": "integer", "description": "Which step to update (1-indexed)"},
+                "status": {"type": "string", "description": "Status: 'done' to mark complete, 'failed' to mark as failed"}
+            },
+            "required": ["step_number"]
+        }
+    },
+    {
+        "name": "get_coding_plan",
+        "description": (
+            "ACE TOOL: Read the current active coding plan. "
+            "Returns full contents of C:\\VoxKage\\Brain\\active_plan.md. "
+            "Use to recall what steps remain when resuming a task."
+        ),
+        "tags": ["coding", "plan", "read", "ace"],
+        "example_queries": [
+            "show me the current plan", "what steps remain", "read the active plan",
+            "what is the coding plan"
+        ],
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+
+
+# ─────────────────────────────────────────────
     # GITHUB OPERATIONS
     # ─────────────────────────────────────────────
     {
         "name": "git_clone",
-        "description": "Clones a remote repository to the local machine.",
+        "description": "Clone a git repository to the local machine.",
         "tags": ["git", "github", "clone", "repository"],
-        "example_queries": ["clone repo", "download repository", "git clone"],
+        "example_queries": ["clone repo", "clone github repo", "git clone"],
         "parameters": {
             "type": "object",
             "properties": {
-                "repo_url": {"type": "string", "description": "URL of the repository to clone"},
-                "dest_folder": {"type": "string", "description": "Optional destination folder name"}
+                "url": {"type": "string", "description": "URL of the repository to clone."},
+                "dest_name": {"type": "string", "description": "Optional destination folder name."}
             },
-            "required": ["repo_url"]
+            "required": ["url"]
         }
     },
     {
         "name": "git_smart_commit",
-        "description": "Commits all changes in a local repository with a provided message, optionally pushing.",
+        "description": "Commit all changes in a local repository with a message and optionally push.",
         "tags": ["git", "github", "commit", "push", "save"],
         "example_queries": ["commit changes", "push to github", "git commit and push"],
         "parameters": {
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string", "description": "Path to the local repository"},
-                "commit_message": {"type": "string", "description": "Commit message"},
-                "push": {"type": "boolean", "description": "Whether to push after committing (default true)"}
+                "repo_path": {"type": "string", "description": "Path to the local repository."},
+                "message": {"type": "string", "description": "Commit message."},
+                "push": {"type": "boolean", "description": "Whether to push after committing (default false)."}
             },
-            "required": ["repo_path", "commit_message"]
+            "required": ["repo_path"]
         }
     },
     {
@@ -918,67 +1066,69 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "fake_commit",
-        "description": "Creates a fake, empty commit to trigger CI/CD pipelines.",
+        "description": "Create empty fake commits to trigger CI/CD pipelines.",
         "tags": ["git", "github", "commit", "trigger", "ci"],
         "example_queries": ["trigger build", "fake commit", "empty commit"],
         "parameters": {
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string", "description": "Path to the local repository"},
-                "message": {"type": "string", "description": "Commit message"}
+                "repo_path": {"type": "string", "description": "Path to the local repository."},
+                "message": {"type": "string", "description": "Commit message."}
             },
-            "required": ["repo_path", "message"]
+            "required": ["repo_path"]
         }
     },
     {
         "name": "detect_and_install_deps",
-        "description": "Detects project type (Node, Python, etc.) and auto-installs dependencies.",
+        "description": "Detect package managers (npm, pip, cargo) and auto-install dependencies.",
         "tags": ["git", "dependencies", "install", "npm", "pip", "project"],
         "example_queries": ["install dependencies", "setup project", "npm install", "pip install"],
         "parameters": {
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string", "description": "Path to the local repository"}
+                "repo_path": {"type": "string", "description": "Path to the local repository."}
             },
             "required": ["repo_path"]
         }
     },
     {
         "name": "run_project",
-        "description": "Runs a cloned project in the background (e.g. npm start, python app.py).",
+        "description": "Run a project in the background (npm start, python app.py, etc).",
         "tags": ["project", "run", "start", "server", "background"],
         "example_queries": ["run the project", "start the server", "run app"],
         "parameters": {
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string", "description": "Path to the local repository"},
-                "command": {"type": "string", "description": "Optional custom command to run"}
+                "repo_path": {"type": "string", "description": "Path to the local repository."},
+                "command": {"type": "string", "description": "Optional custom command to run."},
+                "port": {"type": "integer", "description": "Optional port number."}
             },
             "required": ["repo_path"]
         }
     },
     {
         "name": "kill_project",
-        "description": "Kills a background project started with run_project.",
+        "description": "Kill a background project started by run_project.",
         "tags": ["project", "kill", "stop", "server"],
         "example_queries": ["stop the server", "kill project", "stop running app"],
         "parameters": {
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string", "description": "Path to the local repository"}
+                "repo_path": {"type": "string", "description": "Path to the local repository."}
             },
             "required": ["repo_path"]
         }
     },
     {
         "name": "check_project_health",
-        "description": "Checks if a background project is still running and healthy.",
+        "description": "Check if a background project is still running.",
         "tags": ["project", "health", "status", "server"],
         "example_queries": ["is the server running", "check project health", "server status"],
         "parameters": {
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string", "description": "Path to the local repository"}
+                "repo_path": {"type": "string", "description": "Path to the local repository."},
+                "port": {"type": "integer", "description": "Port to check."}
             },
             "required": ["repo_path"]
         }
@@ -996,31 +1146,32 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "list_my_repos",
-        "description": "Lists the authenticated user's GitHub repositories.",
+        "description": "List the authenticated user's GitHub repositories.",
         "tags": ["github", "repos", "repositories", "list"],
         "example_queries": ["list my repos", "what repos do i have", "show my repositories"],
         "parameters": {
             "type": "object",
             "properties": {
-                "limit": {"type": "integer", "description": "Max number of repos to return (default 10)"}
+                "limit": {"type": "integer", "description": "Max repos to return (default 10)."},
+                "sort": {"type": "string", "description": "Sort by: 'updated', 'created', 'pushed' (default: updated)."}
             },
             "required": []
         }
     },
     {
         "name": "create_repo_local",
-        "description": "Creates a new GitHub repository and clones it locally in one step.",
+        "description": "Create a new GitHub repo and clone it locally.",
         "tags": ["github", "create", "repo", "new", "repository"],
         "example_queries": ["create a new repo", "make a github repository", "create private repo"],
         "parameters": {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "Repository name"},
-                "description": {"type": "string", "description": "Repository description"},
-                "private": {"type": "boolean", "description": "Whether the repo is private (default true)"},
-                "init_readme": {"type": "boolean", "description": "Initialize with README (default true)"}
+                "path": {"type": "string", "description": "Local directory path."},
+                "name": {"type": "string", "description": "Repository name."},
+                "private": {"type": "boolean", "description": "Whether repo is private (default true)."},
+                "push": {"type": "boolean", "description": "Whether to push after creating (default true)."}
             },
-            "required": ["name"]
+            "required": ["path", "name"]
         }
     },
     {

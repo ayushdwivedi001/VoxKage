@@ -746,6 +746,7 @@ def _generate_settings_json():
         ("voxkage-tasks",     "mcp_servers/task_server.py"),
         ("voxkage-rag",       "mcp_servers/rag_server.py"),
         ("voxkage-devserver", "mcp_servers/devserver_server.py"),
+        ("voxkage-coding",    "mcp_servers/coding_server.py"),
     ]
 
     servers = {}

@@ -98,6 +98,11 @@ TOOL_TO_SERVER = {
     "actions_list": "github_server.py",
     "actions_get": "github_server.py",
     "get_job_logs": "github_server.py",
+    # Coding Engine (ACE)
+    "coding_thinking": "coding_server.py",
+    "get_code_skeleton": "coding_server.py",
+    "update_coding_plan": "coding_server.py",
+    "get_coding_plan": "coding_server.py",
 }
 
 # Tools that must run via tool_registry directly when inside an async context.
@@ -116,6 +121,8 @@ _HEAVY_TOOLS = {
     # RAG Knowledge Base — must run directly to share ChromaDB state
     "index_document", "check_and_index", "query_rag",
     "list_indexed_documents", "delete_from_rag", "index_directory",
+    # Coding Engine (ACE) — shares RAG state, must run directly
+    "coding_thinking", "get_code_skeleton", "update_coding_plan", "get_coding_plan",
     # GitHub integration
     "git_clone", "git_smart_commit",
     "git_pull", "fake_commit", "detect_and_install_deps", "run_project",

@@ -4,7 +4,7 @@ logger = logging.getLogger(__name__)
 from automation.app_launcher import open_app, execute_special_command
 from automation.browser_control import open_website, search_google
 from automation.system_control import (
-    set_volume, set_brightness, toggle_wifi, toggle_bluetooth, change_wallpaper_from_folder
+    set_volume, set_brightness, toggle_wifi, toggle_bluetooth
 )
 from automation.web_agent import browse_and_extract, search_media_options, play_media_selection, execute_browser_workflow_sync, get_browser_state, agent_step_sync, control_media_web
 from automation.document_parser import analyze_specific_file_sync, find_file
@@ -24,6 +24,20 @@ def _rag(fn_name: str, **kwargs):
         "list_indexed_documents": list_indexed_documents,
         "delete_from_rag": delete_from_rag,
         "index_directory": index_directory,
+    }
+    return _fns[fn_name](**kwargs)
+
+# Coding Engine (ACE) — imported lazily to share RAG/ChromaDB state
+def _coding(fn_name: str, **kwargs):
+    from mcp_servers.coding_server import (
+        coding_thinking, get_code_skeleton,
+        update_coding_plan, get_coding_plan,
+    )
+    _fns = {
+        "coding_thinking": coding_thinking,
+        "get_code_skeleton": get_code_skeleton,
+        "update_coding_plan": update_coding_plan,
+        "get_coding_plan": get_coding_plan,
     }
     return _fns[fn_name](**kwargs)
 
@@ -295,6 +309,32 @@ def execute_tool_call(tool_name: str, arguments: dict):
                 extensions=arguments.get("extensions", ""),
                 recursive=bool(arguments.get("recursive", True)),
             )
+        
+        # ── Coding Engine (ACE) ─────────────────────────────────────────────
+        elif tool_name == "coding_thinking":
+            return _coding(
+                "coding_thinking",
+                goal=arguments.get("goal", ""),
+                project_dir=arguments.get("project_dir", ""),
+                steps=arguments.get("steps", ""),
+                rag_context=arguments.get("rag_context", ""),
+            )
+        
+        elif tool_name == "get_code_skeleton":
+            return _coding(
+                "get_code_skeleton",
+                file_path=arguments.get("file_path", ""),
+            )
+        
+        elif tool_name == "update_coding_plan":
+            return _coding(
+                "update_coding_plan",
+                step_number=arguments.get("step_number", 1),
+                status=arguments.get("status", "done"),
+            )
+        
+        elif tool_name == "get_coding_plan":
+            return _coding("get_coding_plan")
                 
         elif tool_name == "take_screenshot":
             from automation.screenshot import take_screenshot
