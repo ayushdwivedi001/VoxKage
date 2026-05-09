@@ -221,6 +221,10 @@ Do NOT use `run_shell_command` MCP as a first attempt — it has a 30s timeout, 
 | GitHub: list Actions runs | `github_actions_list` |
 | GitHub: get specific Action run | `github_actions_get` |
 | GitHub: get job logs | `github_get_job_logs` |
+| Start ACE coding session (plan + RAG) | `coding_thinking` |
+| Get file structure skeleton (95% token save) | `get_code_skeleton` |
+| Mark a plan step done/failed | `update_coding_plan` |
+| Read the current coding plan | `get_coding_plan` |
 
 ---
 
@@ -350,6 +354,73 @@ NEVER mix them up.
 
 ### Telegram Character Limits
 - **CRITICAL**: Telegram messages and reports have a hard limit of 4096 characters. ALWAYS keep messages concise and strictly under this limit to avoid `ConnectionResetError` and API timeouts.
+
+---
+
+## AGENTIC CODING ENGINE (ACE) — voxkage-coding
+
+For **any coding task** (adding a feature, fixing a bug, building a new file, refactoring), use the ACE workflow. It is your structured developer brain. Never skip it for anything larger than a 5-line fix.
+
+### ACE Tools
+
+| Tool | What it does |
+|---|---|
+| `coding_thinking(goal, project_dir, steps, rag_context)` | Creates a persistent step-by-step plan at `C:\VoxKage\Brain\active_plan.md`. Returns the plan and execution protocol. **Call this last after indexing and RAG.** |
+| `get_code_skeleton(file_path)` | Returns imports + class names + function signatures only. Reduces a 2000-line file to ~40 lines. **Always call this before reading a full file.** |
+| `update_coding_plan(step_number, status)` | Ticks a step as `"done"` or `"failed"` in the active plan. **Mandatory after every step.** |
+| `get_coding_plan()` | Reads the current active plan. Use when resuming a task after interruption. |
+
+### ACE Pre-Flight Protocol (CRITICAL — 3 SEPARATE TOOL CALLS, NEVER MERGED)
+
+Before writing any code, run this exact sequence. Each step is its **own independent tool call** — never bundle them:
+
+**Step A — Index the codebase** (call `index_directory` from `voxkage-rag`):
+```
+mcp_voxkage-rag_index_directory(directory="<project_dir>")
+```
+- Skip this step only if `coding_thinking` reports the cache is fresh (indexed within last 10 min)
+- This gives you live progress and runs separately so you can see it working
+
+**Step B — Query RAG for relevant context** (call `query_rag` from `voxkage-rag`):
+```
+mcp_voxkage-rag_query_rag(query="<your goal>")
+```
+- Pass the result directly to Step C as the `rag_context` parameter
+
+**Step C — Call coding_thinking** (call from `voxkage-coding`):
+```
+mcp_voxkage-coding_coding_thinking(
+    goal="<your goal>",
+    project_dir="<project_dir>",
+    steps="Step 1 desc|Step 2 desc|Step 3 desc",
+    rag_context="<output from Step B>"
+)
+```
+- Pipe-separate your planned steps in the `steps` parameter
+- `coding_thinking` writes the plan to disk and shows it to the user
+
+### ACE Execution Loop (after the plan is shown)
+
+Execute **one step per turn**:
+1. Call `get_code_skeleton(file_path)` to understand the file structure before editing
+2. Make the targeted edit using the native shell or Gemini CLI file tools
+3. Run a syntax check: `python -m py_compile <file>` (Python) or `npx tsc --noEmit` (TypeScript)
+4. Call `update_coding_plan(step_number, "done")` to tick the step — **never skip this**
+5. Move to the next step
+
+If a step fails:
+- Call `update_coding_plan(step_number, "failed")`
+- Fix the issue, then call `update_coding_plan(step_number, "done")` once resolved
+
+### ACE Critical Rules
+
+- **NEVER call `index_directory` inside `coding_thinking`** — they are always two separate, sequential tool calls
+- **NEVER read a full file before calling `get_code_skeleton`** — the skeleton saves 95% of context
+- **NEVER skip `update_coding_plan`** — the user is watching the plan checkbox tick
+- **NEVER start coding without a plan** — call `coding_thinking` first, always
+- **NEVER call multiple ACE tools in one turn** — one tool call per turn, wait for result
+- If a task resumes after a break: call `get_coding_plan()` first to reload the current state
+- For small fixes (< 5 lines, single file, no dependencies): skip ACE, use native shell directly
 
 ---
 

@@ -783,13 +783,13 @@ def _generate_settings_json():
     except Exception:
         pass
 
-    global_gemini = Path.home() / ".gemini" / "settings.json"
-    global_gemini.parent.mkdir(parents=True, exist_ok=True)
+    vk_settings = settings_json_path()
+    vk_settings.parent.mkdir(parents=True, exist_ok=True)
 
     settings = {}
-    if global_gemini.exists():
+    if vk_settings.exists():
         try:
-            settings = json.loads(global_gemini.read_text(encoding="utf-8"))
+            settings = json.loads(vk_settings.read_text(encoding="utf-8"))
         except Exception:
             pass
 
@@ -798,12 +798,10 @@ def _generate_settings_json():
     settings["mcpServers"].update(servers)
     settings = _sanitize_settings(settings)
 
-    global_gemini.write_text(
+    vk_settings.write_text(
         json.dumps(settings, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-
-    _patch_local_settings(servers)
 
 
 def _generate_gemini_md():
@@ -859,43 +857,7 @@ def cmd_plugins(args):
 
 # ── Launch Command (default) ─────────────────────────────────────────────────
 
-def _patch_local_settings(servers: dict | None = None):
-    local_gemini = Path(os.getcwd()) / ".gemini" / "settings.json"
-    if not local_gemini.exists():
-        return
 
-    try:
-        local_settings = json.loads(local_gemini.read_text(encoding="utf-8"))
-    except Exception:
-        return
-
-    changed = False
-
-    tools = local_settings.get("tools", {})
-    if isinstance(tools, dict) and "core" in tools:
-        del tools["core"]
-        if "disableLLMCorrection" not in tools:
-            tools["disableLLMCorrection"] = False
-        changed = True
-
-    if servers:
-        if "mcpServers" not in local_settings:
-            local_settings["mcpServers"] = {}
-        local_settings["mcpServers"].update(servers)
-        changed = True
-
-    for name, cfg in local_settings.get("mcpServers", {}).items():
-        if name.startswith("voxkage-"):
-            env = cfg.get("env", {})
-            if not env or "VOXKAGE_HOME" not in env:
-                cfg["env"] = {"VOXKAGE_HOME": str(voxkage_dir())}
-                changed = True
-
-    if changed:
-        local_gemini.write_text(
-            json.dumps(local_settings, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
 
 
 def _ensure_telegram_watcher_running():
@@ -1021,9 +983,9 @@ def _patch_gemini_bundle():
                 "    if (terminalWidth >= widthOfLongLogo) {"
             )
             bypassed_gate = (
-                "if (true) {\n"
-                "    const widthOfLongLogo = 0;\n"
-                "    if (true) {"
+                "if (process.env.VOXKAGE_ACTIVE || loggedOut) {\n"
+                "    const widthOfLongLogo = process.env.VOXKAGE_ACTIVE ? 0 : (getAsciiArtWidth(longAsciiLogoCompactText) + LOGO_METADATA_PADDING);\n"
+                "    if (process.env.VOXKAGE_ACTIVE || terminalWidth >= widthOfLongLogo) {"
             )
             if original_gate in content:
                 content = content.replace(original_gate, bypassed_gate, 1)
@@ -1031,10 +993,13 @@ def _patch_gemini_bundle():
             else:
                 gate_start = content.find("if (loggedOut) {")
                 if gate_start != -1:
-                    content = content[:gate_start] + "if (true) {" + content[gate_start + len("if (loggedOut) {"):]
+                    content = content[:gate_start] + "if (process.env.VOXKAGE_ACTIVE || loggedOut) {" + content[gate_start + len("if (loggedOut) {"):]
                     width_calc = "const widthOfLongLogo = getAsciiArtWidth(longAsciiLogoCompactText) + LOGO_METADATA_PADDING;"
                     if width_calc in content:
-                        content = content.replace(width_calc, "const widthOfLongLogo = 0;")
+                        content = content.replace(width_calc, "const widthOfLongLogo = process.env.VOXKAGE_ACTIVE ? 0 : (getAsciiArtWidth(longAsciiLogoCompactText) + LOGO_METADATA_PADDING);")
+                    terminal_gate = "if (terminalWidth >= widthOfLongLogo) {"
+                    if terminal_gate in content:
+                        content = content.replace(terminal_gate, "if (process.env.VOXKAGE_ACTIVE || terminalWidth >= widthOfLongLogo) {")
                     patched = True
 
             # ── Patch 2: Replace longAsciiLogoCompactText with VoxKage art ──────────
@@ -1059,6 +1024,7 @@ def _patch_gemini_bundle():
             )
             new_render_logo = (
                 'const renderLogo = () => { '
+                'if (!process.env.VOXKAGE_ACTIVE) return /* @__PURE__ */ (0, import_jsx_runtime63.jsxs)(Box_default, { flexDirection: "row", children: [ /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(Box_default, { flexShrink: 0, children: /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(ThemedGradient, { children: ICON }) }), logoTextArt && /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(Box_default, { marginLeft: 3, children: /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(Text, { color: theme.text.primary, children: logoTextArt }) }) ] }); '
                 'let tName = ((typeof theme !== "undefined" && theme && theme.name) || (typeof settings !== "undefined" && settings && settings.merged && settings.merged.ui && settings.merged.ui.theme) || "").toLowerCase().replace(/[^a-z]/g, ""); '
                 'const palettes = { "default": ["\\x1b[38;2;14;165;233m", "\\x1b[38;2;34;211;238m", "\\x1b[38;2;103;232;249m", "\\x1b[38;2;147;197;253m", "\\x1b[38;2;186;230;253m", "\\x1b[38;2;30;58;138m"], "ansidark": ["\\x1b[38;2;0;229;255m", "\\x1b[38;2;0;207;207m", "\\x1b[38;2;0;180;255m", "\\x1b[38;2;0;144;255m", "\\x1b[38;2;0;110;255m", "\\x1b[38;2;0;51;128m"], "atomonedark": ["\\x1b[38;2;97;175;239m", "\\x1b[38;2;86;182;194m", "\\x1b[38;2;198;120;221m", "\\x1b[38;2;224;108;117m", "\\x1b[38;2;229;192;123m", "\\x1b[38;2;75;82;99m"], "ayudark": ["\\x1b[38;2;57;186;230m", "\\x1b[38;2;89;194;255m", "\\x1b[38;2;115;208;255m", "\\x1b[38;2;255;180;84m", "\\x1b[38;2;255;213;128m", "\\x1b[38;2;45;54;64m"], "draculadark": ["\\x1b[38;2;255;121;198m", "\\x1b[38;2;189;147;249m", "\\x1b[38;2;139;233;253m", "\\x1b[38;2;80;250;123m", "\\x1b[38;2;241;250;140m", "\\x1b[38;2;98;114;164m"], "githubdark": ["\\x1b[38;2;121;192;255m", "\\x1b[38;2;88;166;255m", "\\x1b[38;2;56;139;253m", "\\x1b[38;2;31;111;235m", "\\x1b[38;2;56;139;253m", "\\x1b[38;2;28;42;58m"], "githubdarkcolorblinddark": ["\\x1b[38;2;121;192;255m", "\\x1b[38;2;88;166;255m", "\\x1b[38;2;227;179;65m", "\\x1b[38;2;255;166;87m", "\\x1b[38;2;210;168;255m", "\\x1b[38;2;28;42;58m"], "holidaydark": ["\\x1b[38;2;255;77;77m", "\\x1b[38;2;255;140;0m", "\\x1b[38;2;255;215;0m", "\\x1b[38;2;127;255;0m", "\\x1b[38;2;0;250;154m", "\\x1b[38;2;26;26;58m"], "shadesofpurpledark": ["\\x1b[38;2;250;208;0m", "\\x1b[38;2;255;98;140m", "\\x1b[38;2;165;255;144m", "\\x1b[38;2;158;255;255m", "\\x1b[38;2;251;148;255m", "\\x1b[38;2;61;59;110m"], "solarizeddark": ["\\x1b[38;2;38;139;210m", "\\x1b[38;2;42;161;152m", "\\x1b[38;2;133;153;0m", "\\x1b[38;2;181;137;0m", "\\x1b[38;2;203;75;22m", "\\x1b[38;2;7;54;66m"], "tokyonightdark": ["\\x1b[38;2;122;162;247m", "\\x1b[38;2;187;154;247m", "\\x1b[38;2;158;206;106m", "\\x1b[38;2;224;175;104m", "\\x1b[38;2;247;118;142m", "\\x1b[38;2;59;66;97m"], "light": ["\\x1b[38;2;9;105;218m", "\\x1b[38;2;5;80;174m", "\\x1b[38;2;26;127;55m", "\\x1b[38;2;130;80;223m", "\\x1b[38;2;207;34;46m", "\\x1b[38;2;192;200;210m"] }; '
                 'let p = palettes["default"]; '
@@ -1098,9 +1064,21 @@ def _patch_gemini_bundle():
                 '    ] })\n'
                 '  ] });'
             )
-            new_render_metadata = 'const renderMetadata = (isBelow = false) => null;'
+            new_render_metadata = (
+                'const renderMetadata = (isBelow = false) => { '
+                'if (!process.env.VOXKAGE_ACTIVE) return /* @__PURE__ */ (0, import_jsx_runtime63.jsxs)(Box_default, { marginLeft: isBelow ? 0 : 2, flexDirection: "column", children: [ /* @__PURE__ */ (0, import_jsx_runtime63.jsxs)(Box_default, { children: [ /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(Text, { bold: true, color: theme.text.primary, children: "Gemini CLI" }), /* @__PURE__ */ (0, import_jsx_runtime63.jsxs)(Text, { color: theme.text.secondary, children: [ " v", version ] }), updateInfo?.isUpdating && /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(Box_default, { marginLeft: 2, children: /* @__PURE__ */ (0, import_jsx_runtime63.jsxs)(Text, { color: theme.text.secondary, children: [ /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(CliSpinner, {}), " Updating" ] }) }) ] }), showDetails && /* @__PURE__ */ (0, import_jsx_runtime63.jsxs)(import_jsx_runtime63.Fragment, { children: [ /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(Box_default, { height: 1 }), settings.merged.ui.showUserIdentity !== false && /* @__PURE__ */ (0, import_jsx_runtime63.jsx)(UserIdentity, { config }) ] }) ] }); '
+                'return null; '
+                '};'
+            )
             if orig_render_metadata in content:
                 content = content.replace(orig_render_metadata, new_render_metadata, 1)
+                patched = True
+
+            # ── Patch 5: Isolate Settings JSON ───────────────────────────────────────
+            orig_settings_path = 'var settingsPath = path4.join(homedir(), GEMINI_DIR, "settings.json");'
+            new_settings_path = 'var settingsPath = process.env.VOXKAGE_ACTIVE ? path4.join(homedir(), ".voxkage", ".gemini", "settings.json") : path4.join(homedir(), GEMINI_DIR, "settings.json");'
+            if orig_settings_path in content:
+                content = content.replace(orig_settings_path, new_settings_path, 1)
                 patched = True
 
             if patched:
@@ -1118,7 +1096,7 @@ def _patch_gemini_settings():
     """Patch Gemini CLI settings to hide banner and tips for clean VoxKage experience."""
     import pathlib
     
-    gemini_settings = pathlib.Path.home() / ".gemini" / "settings.json"
+    gemini_settings = settings_json_path()
     
     # Ensure directory exists
     gemini_settings.parent.mkdir(parents=True, exist_ok=True)
@@ -1162,6 +1140,75 @@ def _patch_gemini_settings():
             pass  # Non-critical
 
 
+def _inject_global_settings():
+    """Merge VoxKage MCP servers into ~/.gemini/settings.json for the session."""
+    global_path = Path.home() / ".gemini" / "settings.json"
+    global_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Read VoxKage's isolated settings (has 18 MCP servers)
+    vk_settings = settings_json_path()
+    if not vk_settings.exists():
+        return
+    try:
+        vk_data = json.loads(vk_settings.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    vk_servers = vk_data.get("mcpServers", {})
+    if not vk_servers:
+        return
+
+    # Read existing global settings (preserve user's own config)
+    global_data = {}
+    if global_path.exists():
+        try:
+            global_data = json.loads(global_path.read_text(encoding="utf-8"))
+        except Exception:
+            global_data = {}
+
+    if "mcpServers" not in global_data:
+        global_data["mcpServers"] = {}
+
+    # Merge VoxKage servers in
+    global_data["mcpServers"].update(vk_servers)
+
+    # Copy over VoxKage UI settings (hideBanner, hideTips)
+    vk_ui = vk_data.get("ui", {})
+    if vk_ui:
+        if "ui" not in global_data:
+            global_data["ui"] = {}
+        global_data["ui"].update(vk_ui)
+
+    global_path.write_text(
+        json.dumps(global_data, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _cleanup_global_settings():
+    """Remove VoxKage MCP servers from ~/.gemini/settings.json after session ends."""
+    global_path = Path.home() / ".gemini" / "settings.json"
+    if not global_path.exists():
+        return
+
+    try:
+        global_data = json.loads(global_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+
+    servers = global_data.get("mcpServers", {})
+    vk_keys = [k for k in servers if k.startswith("voxkage-")]
+    if not vk_keys:
+        return
+
+    for k in vk_keys:
+        del servers[k]
+
+    global_path.write_text(
+        json.dumps(global_data, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
 def cmd_launch(extra_args: list[str] | None = None):
     # Set window title
     if is_windows():
@@ -1186,6 +1233,9 @@ def cmd_launch(extra_args: list[str] | None = None):
     # Patch Gemini CLI settings (hideBanner=False so our patched header shows)
     _patch_gemini_settings()
 
+    # Inject VoxKage MCP servers into global ~/.gemini/settings.json for this session
+    _inject_global_settings()
+
     _ensure_tray_running()
     _ensure_telegram_watcher_running()
 
@@ -1203,27 +1253,35 @@ def cmd_launch(extra_args: list[str] | None = None):
         pass
 
     gemini = find_gemini_cli()
-    vk_home = str(voxkage_dir())
+    vk_gemini_home = str(gemini_dir())
 
     cmd = [
         gemini,
         "-m", model,
-        "--include-directories", vk_home,
+        "--include-directories", vk_gemini_home,
         "--skip-trust",
     ]
 
     if extra_args:
         cmd.extend(extra_args)
 
+    env = os.environ.copy()
+    env["VOXKAGE_ACTIVE"] = "1"
+
     try:
-        proc = subprocess.run(cmd, cwd=os.getcwd())
-        sys.exit(proc.returncode)
+        proc = subprocess.run(cmd, cwd=os.getcwd(), env=env)
     except FileNotFoundError:
         print(f"\n  {_c(255,80,80)}✗  Gemini CLI not found.{RST}")
         print(f"     Run {_c(56,189,248)}voxkage init{RST} to install it.\n")
+        _cleanup_global_settings()
         sys.exit(1)
     except KeyboardInterrupt:
-        sys.exit(0)
+        pass
+    finally:
+        # Always clean up: remove VoxKage servers from global settings on exit
+        _cleanup_global_settings()
+
+    sys.exit(proc.returncode if 'proc' in dir() else 0)
 
 
 def _ensure_tray_running():

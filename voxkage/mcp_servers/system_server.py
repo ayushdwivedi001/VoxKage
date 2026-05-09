@@ -248,7 +248,7 @@ async def run_shell_command(command: str) -> str:
     - Install VS Code extensions: "code --install-extension formulahendry.code-runner"
     - Check installed software: "winget list --name spotify"
     - Open apps: 'start spotify:'
-    - Quick file checks: "dir C:\\Users\\AYUSH\\Desktop\\*.txt"
+    - Quick file checks: "dir C:\\Users\\<Username>\\Desktop\\*.txt"
     - Process checks: "tasklist | findstr chrome"
     
     SAFETY: Commands that modify system state (format, del *, reg delete, etc.)

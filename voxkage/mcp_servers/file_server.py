@@ -417,8 +417,8 @@ def browse_directory(path: str) -> str:
     or when you need context about a folder's contents before opening a file.
 
     path: absolute Windows path, e.g.:
-      "C:\\Users\\AYUSH\\Documents"
-      "C:\\Users\\AYUSH\\Downloads"
+      "C:\\Users\\<Username>\\Documents"
+      "C:\\Users\\<Username>\\Downloads"
     """
     if not os.path.exists(path):
         # Try smart-finding the folder first

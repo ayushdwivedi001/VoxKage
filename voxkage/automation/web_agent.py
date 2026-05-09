@@ -152,7 +152,7 @@ def clear_session_screenshots():
 def _sync_chrome_sessions(voxkage_dir):
     """One-time sync: copy session data from Chrome Default profile to VoxKage."""
     import shutil
-    chrome_default = r"C:\Users\AYUSH\AppData\Local\Google\Chrome\User Data\Default"
+    chrome_default = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\Default")
     voxkage_default = os.path.join(voxkage_dir, "Default")
     
     if not os.path.exists(chrome_default):

@@ -640,7 +640,7 @@ def index_directory(
     RAG MEMORY: Bulk-index an entire directory (codebase, documents folder, etc.).
 
     Parameters:
-      directory  : The folder to index (e.g. "C:\\Users\\AYUSH\\Desktop\\Vision-Assistant")
+      directory  : The folder to index (e.g. "C:\\Users\\<Username>\\Desktop\\Vision-Assistant")
       extensions : Comma-separated list of file extensions to include (e.g. ".py,.md,.txt")
                    Leave empty to use all supported extensions.
       recursive  : Whether to index subdirectories (default True)
