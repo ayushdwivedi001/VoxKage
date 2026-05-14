@@ -61,6 +61,8 @@ transformers_cache/
 temp/
 tmp/
 *.tmp
+debug_out.txt
+ASCII_issue.png
 
 # Configuration (sensitive - user creates their own)
 config.json
