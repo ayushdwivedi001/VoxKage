@@ -348,6 +348,23 @@ NEVER mix them up.
   - **Execute One by One:** Execute exactly ONE tool per conversational turn. Wait for the result, verify it succeeded (if it didn't, retry or wait), and then proceed to the next step in your next turn. This guarantees perfect execution and allows you to catch issues immediately.
   - **VERIFICATION CHECK:** Before proceeding to the next step in a sequence, explicitly verify the previous tool call worked with the proper output. If it is still loading or returned an error due to speed, handle it gracefully and retry or wait in the subsequent turn.
 
+### Telegram Remote Mode — CRITICAL RULE
+
+When your prompt contains `[TELEGRAM MESSAGE from ...]`:
+
+1. **This is a REMOTE COMMAND from the user's phone.**
+2. Process the task using your tools exactly as normal.
+3. **ALWAYS end the task by calling `telegram_send_message` with your response** — even for simple answers. The user cannot see your terminal output; Telegram IS their only screen.
+4. Keep the Telegram reply concise and under 4000 characters.
+5. If the task generates a file (PDF, image, code, etc.), call `telegram_send_file` after `telegram_send_message`.
+
+**Example flow:**
+> `[TELEGRAM MESSAGE from Ayush] what's the weather in Mumbai?`
+> → call `search_web(query="Mumbai weather now")`
+> → call `telegram_send_message(message="🌤 Mumbai: 34°C, partly cloudy. Humidity 72%. Feels like 38°C.")`
+
+**NEVER respond only to the terminal when you see [TELEGRAM MESSAGE] — the user is on their phone.**
+
 ### Telegram Yes/No Flow
 - Call `telegram_ask_save` → non-blocking
 - On **next turn**, call `telegram_check_reply()` to get YES_SAVE / NO_SKIP / WAITING

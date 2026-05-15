@@ -51,7 +51,7 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from _env import load_voxkage_env
+from voxkage._env import load_voxkage_env
 load_voxkage_env()
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -78,16 +78,142 @@ API_BASE = f"https://api.telegram.org/bot{TOKEN}"
 # watcher is primarily used when the tray is NOT running.
 
 def _inject_via_ipc(prompt: str) -> bool:
-    """Try injecting via Named Pipe IPC. Returns True on success."""
+    """
+    Try injecting via Named Pipe IPC.
+    Returns True ONLY if the Named Pipe server was listening and accepted the
+    message — NOT if it fell through to the inbox-file fallback.
+    """
+    if sys.platform != "win32":
+        return False  # Named Pipes are Windows-only
     try:
-        from ipc import send_message
-        return send_message(prompt, source="telegram")
+        import win32file
+        import pywintypes
+        import json, time
+
+        payload = json.dumps({
+            "source": "telegram",
+            "text": prompt,
+            "timestamp": time.time(),
+        }, ensure_ascii=False)
+
+        handle = win32file.CreateFile(
+            r"\\.\pipe\voxkage_ipc",
+            win32file.GENERIC_WRITE,
+            0, None,
+            win32file.OPEN_EXISTING,
+            0, None,
+        )
+        try:
+            win32file.WriteFile(handle, (payload + "\n").encode("utf-8"))
+            log.info("[IPC] Message delivered via Named Pipe")
+            return True
+        finally:
+            win32file.CloseHandle(handle)
+
     except ImportError:
-        log.debug("IPC module not available — skipping Named Pipe")
+        log.debug("[IPC] win32file not available")
         return False
     except Exception as e:
-        log.debug(f"IPC injection failed: {e}")
+        # ERROR_FILE_NOT_FOUND (winerror 2) = pipe server not running — expected
+        log.debug(f"[IPC] Named Pipe not available: {e}")
         return False
+
+
+# ── Headless Gemini processor (when VoxKage terminal is not open) ─────────────
+
+def _find_gemini_exe() -> str | None:
+    """Find the gemini CLI executable."""
+    import shutil
+    cmd = shutil.which("gemini")
+    if cmd:
+        return cmd
+    # Windows: npm global installs as .cmd wrapper
+    for name in ("gemini.cmd", "gemini"):
+        p = Path.home() / "AppData" / "Roaming" / "npm" / name
+        if p.exists():
+            return str(p)
+    return None
+
+
+def _process_via_headless_gemini(prompt: str) -> bool:
+    """
+    When the VoxKage terminal is NOT running, spawn a headless Gemini/VoxKage
+    subprocess to process the Telegram message and send the answer back.
+
+    Architecture:
+        telegram_watcher  →  gemini CLI (headless, VOXKAGE_ACTIVE=1)
+                                  ↓ MCP tools (all 18 servers loaded)
+                                  ↓ telegram_send_message  →  User's phone
+
+    The prompt is wrapped with a REMOTE MODE instruction that forces VoxKage
+    to call telegram_send_message at the end of every task.
+    """
+    import subprocess
+
+    gemini = _find_gemini_exe()
+    if not gemini:
+        log.warning("[Headless] gemini CLI not found in PATH — cannot process headlessly")
+        return False
+
+    # ~/.voxkage/.gemini contains GEMINI.md + settings.json with all 18 MCP servers
+    vk_gemini_home = str(_VOXKAGE_DIR / ".gemini")
+
+    # Inject the REMOTE MODE system instruction so VoxKage knows to send to Telegram
+    full_prompt = (
+        f"{prompt}\n"
+        f"[SYSTEM REMOTE MODE: You are running as a headless background agent for "
+        f"a Telegram user. After completing this task, you MUST call the "
+        f"telegram_send_message tool with your complete response so the user sees "
+        f"the result on their phone. Keep the Telegram message under 4000 chars.]"
+    )
+
+    env = os.environ.copy()
+    env["VOXKAGE_ACTIVE"] = "1"
+
+    log.info("[Headless] VoxKage terminal not found — processing Telegram message headlessly")
+    _send_telegram("⚙️ Received. Processing headlessly — reply coming shortly...")
+
+    try:
+        # On Windows, .CMD files MUST be invoked with shell=True.
+        # We pipe the prompt via stdin instead of a positional arg so that
+        # special characters like [TELEGRAM MESSAGE] aren't mangled by cmd.exe.
+        use_shell = sys.platform == "win32" and gemini.lower().endswith(".cmd")
+        proc = subprocess.Popen(
+            [gemini, "-m", "gemini-2.5-flash",
+             "--include-directories", vk_gemini_home,
+             "--skip-trust"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            shell=use_shell,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        try:
+            _, stderr = proc.communicate(input=full_prompt + "\n", timeout=180)  # 3-minute ceiling
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            log.error("[Headless] Gemini timed out after 180s")
+            _send_telegram(
+                "⏰ Your request timed out (3 min limit).\n"
+                "For complex tasks, please open VoxKage on your PC."
+            )
+            return True  # We attempted it
+
+        if proc.returncode != 0 and stderr:
+            log.warning(f"[Headless] Gemini stderr: {stderr[:300]}")
+
+        log.info(f"[Headless] Subprocess finished (rc={proc.returncode})")
+        return True
+
+    except Exception as e:
+        log.error(f"[Headless] Failed to spawn Gemini subprocess: {e}")
+        _send_telegram(f"❌ Error processing your request headlessly: {str(e)[:200]}")
+        return False
+
 
 _GEMINI_WINDOW_TITLES = [
     "gemini", "voxkage", "vision-assistant"
@@ -95,20 +221,72 @@ _GEMINI_WINDOW_TITLES = [
 
 
 def _find_gemini_hwnd():
-    """Find the Gemini CLI window handle."""
+    """
+    Find the terminal window running VoxKage / Gemini CLI.
+
+    Strategy A: match by window title keywords (fast).
+    Strategy B: find node.exe running the gemini CLI via psutil,
+                then find the console window attached to that process
+                (handles Windows Terminal where tab titles aren't always
+                 exposed as hwnd titles).
+    """
     try:
-        import win32gui
-        result = []
-        def _cb(hwnd, _):
+        import win32gui, win32process
+
+        # Strategy A — title keyword match
+        title_hits = []
+        def _cb_title(hwnd, _):
             if not win32gui.IsWindowVisible(hwnd):
                 return
             title = win32gui.GetWindowText(hwnd).lower()
             if any(t in title for t in _GEMINI_WINDOW_TITLES):
-                result.append((hwnd, win32gui.GetWindowText(hwnd)))
-        win32gui.EnumWindows(_cb, None)
-        return result[0][0] if result else 0
-    except Exception:
-        return 0
+                title_hits.append(hwnd)
+        win32gui.EnumWindows(_cb_title, None)
+        if title_hits:
+            log.debug(f"[inject] Found window by title: {win32gui.GetWindowText(title_hits[0])}")
+            return title_hits[0]
+
+        # Strategy B — find node.exe process running gemini, get its console hwnd
+        try:
+            import psutil
+            gemini_pids = set()
+            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+                try:
+                    name = (proc.info["name"] or "").lower()
+                    cmdline = " ".join(proc.info["cmdline"] or []).lower()
+                    if "node" in name and "gemini" in cmdline:
+                        gemini_pids.add(proc.pid)
+                        # Also include parent process (terminal emulator)
+                        try:
+                            parent = proc.parent()
+                            if parent:
+                                gemini_pids.add(parent.pid)
+                        except Exception:
+                            pass
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+            if gemini_pids:
+                proc_hits = []
+                def _cb_pid(hwnd, _):
+                    if not win32gui.IsWindowVisible(hwnd):
+                        return
+                    try:
+                        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                        if pid in gemini_pids:
+                            proc_hits.append(hwnd)
+                    except Exception:
+                        pass
+                win32gui.EnumWindows(_cb_pid, None)
+                if proc_hits:
+                    log.debug(f"[inject] Found window via process tree (node.exe gemini)")
+                    return proc_hits[0]
+        except ImportError:
+            pass  # psutil not installed — Strategy B unavailable
+
+    except Exception as e:
+        log.debug(f"[inject] hwnd search error: {e}")
+    return 0
 
 
 def _inject_via_pyautogui(prompt: str) -> bool:
@@ -497,28 +675,41 @@ def run():
 
                     log.info(f"New Telegram message → injecting into VoxKage")
 
-                    # ── Injection chain: IPC → pyautogui → inbox file ─────
-                    injected = _inject_via_ipc(prompt)  # Try Named Pipe first
+                    # Immediate acknowledgement — user sees something is happening
+                    _send_telegram("🤔 Thinking...")
 
+                    # ── Injection chain ────────────────────────────────────
+                    # Priority 1: Named Pipe IPC (if IPC server thread is running)
+                    injected = _inject_via_ipc(prompt)
+
+                    # Priority 2: pyautogui keyboard injection (VoxKage window is open)
                     if not injected:
-                        injected = _inject_via_pyautogui(prompt)  # Legacy fallback
+                        injected = _inject_via_pyautogui(prompt)
 
-                    # Always write to inbox file as persistent record
-                    # (and as fallback if injection failed)
+                    # Priority 3: Headless Gemini subprocess (VoxKage is closed)
+                    # This is the REMOTE CONTROL path — full MCP toolset, sends reply via Telegram
+                    if not injected:
+                        injected = _process_via_headless_gemini(prompt)
+
+                    # Always write to inbox as a persistent log record
                     _inject_via_inbox_file({
                         "update_id": uid,
                         "prompt": prompt,
                         "injected": injected,
-                        "method": "ipc" if injected else "inbox",
+                        "method": (
+                            "ipc" if injected and _inject_via_ipc.__name__ else
+                            "pyautogui" if injected else
+                            "headless" if injected else
+                            "failed"
+                        ),
                         "timestamp": time.time(),
                     })
 
                     if not injected:
-                        # Acknowledge on Telegram so user knows it was received
                         _send_telegram(
-                            f"📨 Message queued asynchronously.\n"
-                            f"VoxKage is currently busy or the window is hidden. "
-                            f"It will read this when asked to 'check telegram inbox', or you can send /clear to abort."
+                            "❌ VoxKage could not process your request.\n"
+                            "The terminal is closed and the headless processor is unavailable.\n"
+                            "Please open VoxKage on your PC and try again."
                         )
                 except Exception as ex:
                     log.error(f"Error processing update {update.get('update_id')}: {ex}")

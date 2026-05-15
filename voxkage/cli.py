@@ -826,18 +826,19 @@ def _generate_gemini_md():
 # ── Tray Command ──────────────────────────────────────────────────────────────
 
 def cmd_tray():
-    tray_module = "voxkage.tray.tray_app"
+    import subprocess
+    tray_script = package_dir() / "tray" / "tray_app.py"
     if is_windows():
         pythonw = sys.executable.replace("python.exe", "pythonw.exe")
         if not os.path.exists(pythonw):
             pythonw = sys.executable
         subprocess.Popen(
-            [pythonw, "-m", tray_module],
+            [pythonw, str(tray_script)],
             creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
         )
     else:
         subprocess.Popen(
-            [sys.executable, "-m", tray_module],
+            [sys.executable, str(tray_script)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
@@ -1367,7 +1368,7 @@ def cmd_launch(extra_args: list[str] | None = None):
     _inject_global_settings()
 
     _ensure_tray_running()
-    _ensure_telegram_watcher_running()
+    _ensure_telegram_watcher_running()  # Start Telegram background watcher
 
     # Clean slate before handing over to Gemini CLI
     if is_windows():

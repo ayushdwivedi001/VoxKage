@@ -37,6 +37,7 @@ try:
     _singleton = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     _singleton.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
     _singleton.bind(("127.0.0.1", 49998))
+    _singleton.listen(1)
     # Keep socket open for the lifetime of this process
 except OSError:
     # Another tray instance is already running — exit silently.
@@ -44,7 +45,7 @@ except OSError:
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 _DIR  = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.abspath(os.path.join(_DIR, ".."))
+_ROOT = os.path.abspath(os.path.join(_DIR, "..", ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 if _DIR not in sys.path:
@@ -64,7 +65,7 @@ _VOXKAGE_DIR.mkdir(parents=True, exist_ok=True)
 _OFFSET_FILE    = _VOXKAGE_DIR / "telegram_offset.json"
 _VOXKAGE_CONFIG = _VOXKAGE_DIR / "config.json"
 
-_ICON = os.path.join(_ROOT, "icons", "icon.png")
+_ICON = os.path.join(_ROOT, "voxkage", "icons", "icon.png")
 
 from voxkage.paths import find_gemini_cli as _paths_find_gemini
 _GEMINI_EXE = _paths_find_gemini()
@@ -210,10 +211,7 @@ def _handle_message(msg: str):
     Runs in its own thread; holds the processing lock for its duration.
     Hard 90-second timeout on the sub-agent.
     """
-    acquired = _tg_lock.acquire(blocking=True, timeout=3)
-    if not acquired:
-        # Another message is mid-flight — this one will be retried next poll
-        return
+    _tg_lock.acquire(blocking=True)
     try:
         cfg            = _load_config()
         subagent_model = cfg.get("subagent_model", _DEFAULT_SUBAGENT_MODEL)
@@ -228,12 +226,10 @@ def _handle_message(msg: str):
             "  1. Read the user's message above.\n"
             "  2. Fulfill the request using your tools if needed.\n"
             "  3. Compose a clear, concise reply.\n"
-            "  4. Send the reply using telegram_send_message EXACTLY ONCE.\n\n"
-            "STRICT RULES — violating these causes silent failures:\n"
-            "  - CRITICAL OVERRIDE: Ignore any global rules about outputting plain text for 'conversations'.\n"
-            "  - Because you have no terminal output, you MUST ALWAYS use the telegram_send_message tool to reply.\n"
-            "  - If the user is just chatting, put your witty response inside the 'message' argument of the tool.\n"
-            "  - CRITICAL: Do NOT attempt to check for pending messages. The message is already provided above.\n"
+            "  4. You MUST send the reply using the telegram_send_message tool.\n\n"
+            "STRICT RULES:\n"
+            "  - Because you have no terminal output, you MUST ALWAYS use the telegram_send_message tool to reply. If you output plain text, it will be deleted and the user will never see it.\n"
+            "  - CRITICAL: Do NOT call telegram_get_pending_messages or telegram_check_inbox. The message text is literally provided above.\n"
             "  - Call telegram_send_message EXACTLY ONCE and then terminate.\n"
             "BEGIN. Send your response via the tool now."
         )
