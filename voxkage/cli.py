@@ -861,44 +861,93 @@ def cmd_plugins(args):
 
 
 
+def _kill_telegram_watcher(pid: int):
+    """Force-kill a running watcher process."""
+    try:
+        import psutil
+        p = psutil.Process(pid)
+        p.terminate()
+        p.wait(timeout=3)
+        return
+    except Exception:
+        pass
+    try:
+        if sys.platform == "win32":
+            subprocess.call(
+                ["taskkill", "/F", "/PID", str(pid)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        else:
+            import signal as _sig
+            os.kill(pid, _sig.SIGTERM)
+    except Exception:
+        pass
+
+
 def _ensure_telegram_watcher_running():
     """
-    Start the Telegram Watcher background process if not already running.
+    Start (or restart) the Telegram Watcher background process.
 
-    Singleton-aware:
-      - If a watcher is already alive (from a previous VoxKage session), do nothing.
-      - If the lock file contains a dead PID, clean it up and spawn a fresh watcher.
+    Singleton-aware with env-change detection:
+      - If a watcher is alive AND TELEGRAM_CHAT_ID matches current env -> skip.
+      - If a watcher is alive but CHAT_ID changed (e.g. just fixed) -> kill and restart.
+      - If the lock file has a dead PID -> clean up and spawn fresh.
       - Only starts if TELEGRAM_BOT_TOKEN is configured.
     """
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    from voxkage._env import load_voxkage_env
+    load_voxkage_env()
+
+    token   = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     if not token:
-        return  # Telegram not configured — skip silently
+        return
 
     voxkage_dir_path = Path(os.path.expanduser("~")) / ".voxkage"
-    lock_file = voxkage_dir_path / "telegram_watcher.lock"
+    lock_file    = voxkage_dir_path / "telegram_watcher.lock"
+    env_sig_file = voxkage_dir_path / "telegram_watcher.env_sig"
 
-    # Check if a watcher is already alive
+    def _read_saved_chat_id() -> str:
+        try:
+            return env_sig_file.read_text(encoding="utf-8").strip()
+        except Exception:
+            return ""
+
+    def _save_chat_id(cid: str):
+        try:
+            env_sig_file.write_text(cid, encoding="utf-8")
+        except Exception:
+            pass
+
     if lock_file.exists():
         try:
             pid = int(lock_file.read_text().strip())
-            # Windows-safe process existence check
+            alive = False
             try:
                 import psutil
-                if psutil.pid_exists(pid):
-                    return  # Watcher is alive — do not spawn another
+                alive = psutil.pid_exists(pid)
             except ImportError:
                 try:
                     os.kill(pid, 0)
-                    return  # Watcher is alive
+                    alive = True
                 except (OSError, SystemError, ValueError):
-                    pass  # Dead PID — proceed to clean up and spawn
-        except (ValueError, OSError):
-            pass  # Corrupt lock file — will be overwritten by the new watcher
+                    pass
 
-    # Locate the watcher script
+            if alive:
+                if _read_saved_chat_id() == chat_id:
+                    return  # Watcher is alive and env matches
+                # Chat ID changed — kill stale watcher and restart fresh
+                _kill_telegram_watcher(pid)
+                lock_file.unlink(missing_ok=True)
+                time.sleep(0.5)
+
+        except (ValueError, OSError):
+            pass
+
     watcher_script = Path(__file__).parent / "telegram_watcher.py"
     if not watcher_script.exists():
-        return  # Watcher not installed
+        return
+
+    _save_chat_id(chat_id)
 
     try:
         pythonw = sys.executable.replace("python.exe", "pythonw.exe")
@@ -920,7 +969,8 @@ def _ensure_telegram_watcher_running():
                 start_new_session=True,
             )
     except Exception:
-        pass  # Non-critical — VoxKage still works, just no auto-injection
+        pass
+
 
 
 # ── Gemini CLI Bundle Patch ──────────────────────────────────────────────────

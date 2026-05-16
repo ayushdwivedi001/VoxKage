@@ -63,10 +63,31 @@ _STDIN_PIPE    = _VOXKAGE_DIR / "gemini_stdin.pipe"      # named pipe path (Wind
 
 _VOXKAGE_DIR.mkdir(parents=True, exist_ok=True)
 
-TOKEN    = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-CHAT_ID  = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+# NOTE: TOKEN and CHAT_ID are read dynamically inside functions so that
+# any .env change (e.g. fixing TELEGRAM_CHAT_ID) is picked up without
+# restarting the watcher process.
 POLL_SEC = 2      # seconds between polls
-API_BASE = f"https://api.telegram.org/bot{TOKEN}"
+
+
+def _get_token() -> str:
+    """Always read from env so .env changes are picked up live."""
+    return os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+
+
+def _get_chat_id() -> str:
+    """Always read from env so .env changes are picked up live."""
+    return os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+
+
+def _api_base() -> str:
+    return f"https://api.telegram.org/bot{_get_token()}"
+
+
+# Keep module-level aliases for legacy code paths that reference TOKEN/CHAT_ID directly.
+# These are evaluated at import time so they capture the initial value — but all
+# internal code below uses the _get_*() helpers instead.
+TOKEN   = _get_token()
+CHAT_ID = _get_chat_id()
 
 # ── Gemini CLI stdin injection ────────────────────────────────────────────────
 # Priority order:
@@ -181,7 +202,8 @@ def _process_via_headless_gemini(prompt: str) -> bool:
         proc = subprocess.Popen(
             [gemini, "-m", "gemini-2.5-flash",
              "--include-directories", vk_gemini_home,
-             "--skip-trust"],
+             "--skip-trust",
+             "--approval-mode", "yolo"],   # <-- allow tools without asking permission
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -215,74 +237,141 @@ def _process_via_headless_gemini(prompt: str) -> bool:
         return False
 
 
+# Window title keywords for terminal detection (must match terminal windows only)
 _GEMINI_WINDOW_TITLES = [
     "gemini", "voxkage", "vision-assistant"
 ]
 
+# Browser window class names — NEVER inject into these
+_BROWSER_WIN_CLASSES = {
+    "Chrome_WidgetWin_1",       # Google Chrome / Chromium / Brave
+    "MozillaWindowClass",       # Firefox
+    "MicrosoftEdgeWin32Cls",    # Microsoft Edge (legacy)
+    "ApplicationFrameWindow",   # Edge (UWP shell frame)
+    "OperaWindowClass",         # Opera
+}
+
+# Console/terminal window class names — ONLY inject into these
+_CONSOLE_WIN_CLASSES = {
+    "ConsoleWindowClass",       # Classic Windows console (cmd.exe, PowerShell)
+    "CASCADIA_HOSTING_WINDOW_CLASS",  # Windows Terminal
+    "PseudoConsoleWindow",      # ConPTY-based terminals
+    "VirtualConsoleClass",
+}
+
 
 def _find_gemini_hwnd():
     """
-    Find the terminal window running VoxKage / Gemini CLI.
+    Find the TERMINAL window running VoxKage / Gemini CLI.
 
-    Strategy A: match by window title keywords (fast).
-    Strategy B: find node.exe running the gemini CLI via psutil,
-                then find the console window attached to that process
-                (handles Windows Terminal where tab titles aren't always
-                 exposed as hwnd titles).
+    IMPORTANT: Only returns console/terminal windows — never browser windows.
+    Browser tabs may have 'voxkage' in their title (e.g. GitHub repo page)
+    and would cause messages to be pasted into the browser instead.
+
+    Strategy A: title keyword match, filtered to console window classes only.
+    Strategy B: find node.exe running gemini via psutil, trace to its console.
     """
     try:
         import win32gui, win32process
 
-        # Strategy A — title keyword match
+        # Strategy A — title keyword match, CONSOLE WINDOWS ONLY
         title_hits = []
         def _cb_title(hwnd, _):
             if not win32gui.IsWindowVisible(hwnd):
                 return
             title = win32gui.GetWindowText(hwnd).lower()
-            if any(t in title for t in _GEMINI_WINDOW_TITLES):
+            if not any(t in title for t in _GEMINI_WINDOW_TITLES):
+                return
+            # ── Critical filter: skip browser windows ──────────────────────
+            try:
+                cls = win32gui.GetClassName(hwnd)
+                if cls in _BROWSER_WIN_CLASSES:
+                    log.debug(f"[inject] Skipping browser window: '{win32gui.GetWindowText(hwnd)}' (class: {cls})")
+                    return
+                # Prefer known console classes; accept unknowns cautiously
+                if cls in _CONSOLE_WIN_CLASSES or "console" in cls.lower() or "terminal" in cls.lower():
+                    title_hits.insert(0, hwnd)  # prefer confirmed consoles
+                    return
+                # Unknown class with matching title — add as lower-priority fallback
                 title_hits.append(hwnd)
+            except Exception:
+                title_hits.append(hwnd)
+
         win32gui.EnumWindows(_cb_title, None)
         if title_hits:
-            log.debug(f"[inject] Found window by title: {win32gui.GetWindowText(title_hits[0])}")
-            return title_hits[0]
+            chosen = title_hits[0]
+            log.debug(f"[inject] Found terminal window: '{win32gui.GetWindowText(chosen)}' (class: {win32gui.GetClassName(chosen)})")
+            return chosen
 
-        # Strategy B — find node.exe process running gemini, get its console hwnd
+        # Strategy B — walk the FULL process ancestry from node.exe (gemini CLI)
+        # up to the terminal host (WindowsTerminal.exe, conhost.exe, powershell.exe).
+        # Simple parent-only lookup misses Windows Terminal because the window
+        # belongs to WindowsTerminal.exe, several levels above node.exe:
+        #   WindowsTerminal.exe  <- owns CASCADIA_HOSTING_WINDOW_CLASS
+        #     powershell.exe
+        #       python.exe  (voxkage)
+        #         node.exe  (gemini CLI)  <- we start here
         try:
             import psutil
-            gemini_pids = set()
+
+            def _all_ancestors(start_pid: int) -> set:
+                pids = {start_pid}
+                try:
+                    p = psutil.Process(start_pid)
+                    while True:
+                        parent = p.parent()
+                        if parent is None or parent.pid in (0, 4):
+                            break
+                        pids.add(parent.pid)
+                        p = parent
+                except Exception:
+                    pass
+                return pids
+
+            all_candidate_pids: set = set()
             for proc in psutil.process_iter(["pid", "name", "cmdline"]):
                 try:
                     name = (proc.info["name"] or "").lower()
                     cmdline = " ".join(proc.info["cmdline"] or []).lower()
-                    if "node" in name and "gemini" in cmdline:
-                        gemini_pids.add(proc.pid)
-                        # Also include parent process (terminal emulator)
-                        try:
-                            parent = proc.parent()
-                            if parent:
-                                gemini_pids.add(parent.pid)
-                        except Exception:
-                            pass
+                    if ("node" in name and "gemini" in cmdline) or \
+                       ("python" in name and "voxkage" in cmdline):
+                        all_candidate_pids.update(_all_ancestors(proc.pid))
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
 
-            if gemini_pids:
-                proc_hits = []
+            if all_candidate_pids:
+                terminal_hits, other_hits = [], []
+
                 def _cb_pid(hwnd, _):
                     if not win32gui.IsWindowVisible(hwnd):
                         return
                     try:
                         _, pid = win32process.GetWindowThreadProcessId(hwnd)
-                        if pid in gemini_pids:
-                            proc_hits.append(hwnd)
+                        if pid not in all_candidate_pids:
+                            return
+                        cls = win32gui.GetClassName(hwnd)
+                        if cls in _BROWSER_WIN_CLASSES:
+                            return
+                        if cls in _CONSOLE_WIN_CLASSES or "console" in cls.lower() or "terminal" in cls.lower():
+                            terminal_hits.append(hwnd)
+                        else:
+                            other_hits.append(hwnd)
                     except Exception:
                         pass
+
                 win32gui.EnumWindows(_cb_pid, None)
-                if proc_hits:
-                    log.debug(f"[inject] Found window via process tree (node.exe gemini)")
-                    return proc_hits[0]
+                best = terminal_hits or other_hits
+                if best:
+                    chosen = best[0]
+                    log.debug(
+                        f"[inject] Found terminal via ancestry walk: "
+                        f"'{win32gui.GetWindowText(chosen)}' "
+                        f"(class: {win32gui.GetClassName(chosen)})"
+                    )
+                    return chosen
+
         except ImportError:
-            pass  # psutil not installed — Strategy B unavailable
+            pass  # psutil not installed
 
     except Exception as e:
         log.debug(f"[inject] hwnd search error: {e}")
@@ -358,7 +447,7 @@ def _api(method: str, **kwargs) -> dict:
     """Call Telegram Bot API. Returns {} on failure."""
     try:
         import requests
-        resp = requests.get(f"{API_BASE}/{method}", params=kwargs, timeout=10)
+        resp = requests.get(f"{_api_base()}/{method}", params=kwargs, timeout=10)
         if resp.status_code == 200:
             return resp.json()
         log.warning(f"API {method} returned {resp.status_code}: {resp.text[:200]}")
@@ -370,7 +459,7 @@ def _api(method: str, **kwargs) -> dict:
 def _api_post(method: str, **kwargs) -> dict:
     try:
         import requests
-        resp = requests.post(f"{API_BASE}/{method}", json=kwargs, timeout=10)
+        resp = requests.post(f"{_api_base()}/{method}", json=kwargs, timeout=10)
         if resp.status_code == 200:
             return resp.json()
     except Exception as e:
@@ -386,7 +475,7 @@ def _download_file(file_id: str, dest_dir: Path) -> str | None:
         file_path = r.get("result", {}).get("file_path")
         if not file_path:
             return None
-        url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+        url = f"https://api.telegram.org/file/bot{_get_token()}/{file_path}"
         fname = Path(file_path).name
         local = dest_dir / fname
         with requests.get(url, stream=True, timeout=30) as resp:
@@ -401,7 +490,11 @@ def _download_file(file_id: str, dest_dir: Path) -> str | None:
 
 def _send_telegram(text: str):
     """Send a message back to the user's Telegram."""
-    _api_post("sendMessage", chat_id=CHAT_ID, text=text, parse_mode="Markdown")
+    chat_id = _get_chat_id()
+    if not chat_id:
+        log.warning("_send_telegram: TELEGRAM_CHAT_ID not set — cannot send reply")
+        return
+    _api_post("sendMessage", chat_id=chat_id, text=text, parse_mode="Markdown")
 
 
 # ── Offset persistence ────────────────────────────────────────────────────────
@@ -433,9 +526,12 @@ def _format_prompt(update: dict, downloaded_path: str | None = None) -> str | No
     if not msg:
         return None
 
-    # Only process messages from the configured chat
+    # Only process messages from the configured chat (read dynamically so .env
+    # changes take effect without restarting the watcher).
+    current_chat_id = _get_chat_id()
     chat_id = str(msg.get("chat", {}).get("id", ""))
-    if CHAT_ID and chat_id != CHAT_ID:
+    if current_chat_id and chat_id != current_chat_id:
+        log.debug(f"Skipping message from chat {chat_id} (expected {current_chat_id})")
         return None
 
     sender = msg.get("from", {}).get("first_name", "User")
@@ -611,15 +707,21 @@ _DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 # ── Main poll loop ────────────────────────────────────────────────────────────
 
 def run():
-    if not TOKEN:
+    token = _get_token()
+    if not token:
         log.error("TELEGRAM_BOT_TOKEN not set — watcher cannot start")
         sys.exit(1)
+
+    # Reload .env at runtime so any fix applied after the watcher was first
+    # launched (e.g. correcting TELEGRAM_CHAT_ID) is picked up immediately.
+    from voxkage._env import load_voxkage_env
+    load_voxkage_env()
 
     if not _acquire_lock():
         sys.exit(0)  # Another instance is running
 
     log.info(f"Telegram Watcher started (PID {os.getpid()})")
-    log.info(f"Polling every {POLL_SEC}s | Chat ID filter: {CHAT_ID or 'any'}")
+    log.info(f"Polling every {POLL_SEC}s | Chat ID filter: {_get_chat_id() or 'any'}")
     _send_telegram("🟢 VoxKage is online and listening.")
 
     def _cleanup(sig, frame):
@@ -679,15 +781,20 @@ def run():
                     _send_telegram("🤔 Thinking...")
 
                     # ── Injection chain ────────────────────────────────────
-                    # Priority 1: Named Pipe IPC (if IPC server thread is running)
+                    # Priority 1: Named Pipe IPC (zero-UI, instant, no focus needed)
                     injected = _inject_via_ipc(prompt)
 
-                    # Priority 2: pyautogui keyboard injection (VoxKage window is open)
+                    # Priority 2: pyautogui — type into the VoxKage terminal
+                    # This shows the message IN the running VoxKage/Gemini CLI session
+                    # so the user can watch tools execute in real time.
+                    # Browser windows are now excluded by _find_gemini_hwnd().
                     if not injected:
                         injected = _inject_via_pyautogui(prompt)
 
-                    # Priority 3: Headless Gemini subprocess (VoxKage is closed)
-                    # This is the REMOTE CONTROL path — full MCP toolset, sends reply via Telegram
+                    # Priority 3: Headless Gemini — when VoxKage terminal is closed
+                    # Spawns a fresh Gemini CLI subprocess with --approval-mode yolo
+                    # so all MCP tools run automatically without permission prompts.
+                    # Sends the reply back to the user's phone via Telegram.
                     if not injected:
                         injected = _process_via_headless_gemini(prompt)
 
@@ -696,12 +803,6 @@ def run():
                         "update_id": uid,
                         "prompt": prompt,
                         "injected": injected,
-                        "method": (
-                            "ipc" if injected and _inject_via_ipc.__name__ else
-                            "pyautogui" if injected else
-                            "headless" if injected else
-                            "failed"
-                        ),
                         "timestamp": time.time(),
                     })
 
