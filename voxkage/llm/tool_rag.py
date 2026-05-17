@@ -108,7 +108,7 @@ def _bm25_retrieve(query: str, top_k: int = 8) -> list:
     BM25-style keyword retrieval. Used when no embedding model is available.
     Scores each tool by term overlap between query and corpus_text.
     """
-    from llm.tool_definitions import TOOL_DEFINITIONS, get_schema
+    from voxkage.llm.tool_definitions import TOOL_DEFINITIONS, get_schema
     query_tokens = set(query.lower().split())
     scored = []
     for tool in TOOL_DEFINITIONS:
@@ -141,7 +141,7 @@ def build_tool_index(force: bool = False) -> None:
         return
 
     logger.info("[ToolRAG] Building tool index...")
-    from llm.tool_definitions import TOOL_DEFINITIONS, get_schema
+    from voxkage.llm.tool_definitions import TOOL_DEFINITIONS, get_schema
     import lancedb
     import pyarrow as pa
 
@@ -260,7 +260,7 @@ def retrieve_tools(query: str, top_k: int = 8) -> list:
 
     except Exception as e:
         logger.error(f"[ToolRAG] Retrieval failed: {e}. Falling back to full schema.")
-        from llm.tool_definitions import get_all_schemas
+        from voxkage.llm.tool_definitions import get_all_schemas
         return get_all_schemas()
 
 
@@ -275,7 +275,7 @@ def get_schema_by_name(tool_name: str) -> dict | None:
     Fetch the full schema for a specific tool by name.
     Used as fallback when the LLM calls a tool that wasn't in the retrieved subset.
     """
-    from llm.tool_definitions import TOOL_DEFINITIONS_BY_NAME, get_schema
+    from voxkage.llm.tool_definitions import TOOL_DEFINITIONS_BY_NAME, get_schema
     tool_def = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
     if tool_def:
         return get_schema(tool_def)

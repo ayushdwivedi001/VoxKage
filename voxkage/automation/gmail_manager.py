@@ -134,7 +134,7 @@ def detect_email_intent(prompt: str) -> dict | None:
 def _generate_email_json(context: str, existing_subject: str = None, existing_body: str = None) -> dict:
     """Isolated LLM sub-agent for generating email JSON. No tools, no schemas — just JSON."""
     import asyncio
-    from llm.gemini_engine import ask_voxkage_brain, clean_cli_json
+    from voxkage.llm.gemini_engine import ask_voxkage_brain, clean_cli_json
     
     if existing_subject and existing_body:
         sys_prompt = "You are an email assistant editing an existing draft. Output ONLY valid JSON."
@@ -216,7 +216,7 @@ def handle_compose(recipient: str, instructions: str) -> str:
         
         # Push to HUD (silent — not spoken)
         try:
-            from llm.helpers import log_to_hud
+            from voxkage.llm.helpers import log_to_hud
             hud_msg = f"📝 DRAFT READY\nTo: {recipient}\nSubject: {subject}\n\n{body}"
             log_to_hud("VoxKage", hud_msg)
         except Exception:
@@ -262,7 +262,7 @@ def handle_edit(instructions: str) -> str:
         _email_session['draft_id'] = draft['id']
         
         try:
-            from llm.helpers import log_to_hud
+            from voxkage.llm.helpers import log_to_hud
             hud_msg = f"📝 DRAFT UPDATED\nTo: {_email_session['recipient']}\nSubject: {new_subject}\n\n{new_body}"
             log_to_hud("VoxKage", hud_msg)
         except Exception:

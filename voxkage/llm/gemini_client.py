@@ -197,7 +197,7 @@ async def get_pool(model: str = None) -> GeminiClient:
     global _client
     if _client is None:
         try:
-            from llm.constants import GEMINI_AGENTIC_MODEL, GEMINI_CLI_PATH
+            from voxkage.llm.constants import GEMINI_AGENTIC_MODEL, GEMINI_CLI_PATH
         except ImportError:
             GEMINI_AGENTIC_MODEL = model or "gemini-2.5-pro"
             GEMINI_CLI_PATH = "gemini"

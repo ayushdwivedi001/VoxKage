@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 def _web_agent():
-    from automation.web_agent import (
+    from voxkage.automation.web_agent import (
         browse_and_extract, get_browser_state,
         execute_browser_workflow_sync, agent_step_sync, _pw_queue,
         search_media_options as yt_search,

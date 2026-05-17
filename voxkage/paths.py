@@ -65,6 +65,30 @@ def data_dir() -> Path:
     d.mkdir(parents=True, exist_ok=True)
     return d
 
+def brain_dir() -> Path:
+    """~/.voxkage/data/brain/ — coding plans and state."""
+    d = data_dir() / "brain"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+def browser_dir() -> Path:
+    """~/.voxkage/data/browser/ — isolated chrome profile."""
+    d = data_dir() / "browser"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+def rag_dir() -> Path:
+    """~/.voxkage/data/rag/ — chromadb store."""
+    d = data_dir() / "rag"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+def output_dir() -> Path:
+    """~/.voxkage/output/ — fallback directory for saving files."""
+    d = voxkage_dir() / "output"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
 def task_logs_dir() -> Path:
     """~/.voxkage/task_logs/"""
     d = voxkage_dir() / "task_logs"

@@ -6,21 +6,21 @@ from datetime import datetime
 import os
 
 
-from llm.mcp_dispatcher import dispatch_tool_call as execute_tool_call
-from llm.helpers import SentenceStreamer, log_to_hud
-from llm.constants import MAX_HISTORY, GLOBAL_LAST_RESULTS, USE_RAG, TOP_K_TOOLS
-from llm.helpers import (
+from voxkage.llm.mcp_dispatcher import dispatch_tool_call as execute_tool_call
+from voxkage.llm.helpers import SentenceStreamer, log_to_hud
+from voxkage.llm.constants import MAX_HISTORY, GLOBAL_LAST_RESULTS, USE_RAG, TOP_K_TOOLS
+from voxkage.llm.helpers import (
     _extract_json_tool_call,
     _parse_text_intent,
     _detect_browser_intent,
     clear_session_memory
 )
-from llm.system_prompt import (
+from voxkage.llm.system_prompt import (
     get_personality_prompt, get_routing_hints,
     get_datetime_context, get_persistent_memory
 )
-from llm.agentic_loop import execute_agentic_loop
-from automation.gmail_manager import detect_email_intent, handle_compose, handle_edit, handle_send, handle_cancel
+from voxkage.llm.agentic_loop import execute_agentic_loop
+from voxkage.automation.gmail_manager import detect_email_intent, handle_compose, handle_edit, handle_send, handle_cancel
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -36,20 +36,20 @@ manager = ManagerFake()
 
 def _get_tools_for_query(prompt: str) -> tuple[list, list[str]]:
     if not USE_RAG:
-        from llm.tool_definitions import get_all_schemas, TOOL_DEFINITIONS
+        from voxkage.llm.tool_definitions import get_all_schemas, TOOL_DEFINITIONS
         schemas = get_all_schemas()
         names = [t["name"] for t in TOOL_DEFINITIONS]
         return schemas, names
 
     try:
-        from llm.tool_rag import retrieve_tools, retrieve_tool_names
+        from voxkage.llm.tool_rag import retrieve_tools, retrieve_tool_names
         schemas = retrieve_tools(prompt, top_k=TOP_K_TOOLS)
         names = [s["function"]["name"] for s in schemas]
 
         _browser_set = {"execute_browser_workflow", "browse_and_extract", "search_web"}
         _agent_tools = {"agent_thinking", "agent_step"}
         if (_browser_set & set(names)) and not (_agent_tools & set(names)):
-            from llm.tool_rag import get_schema_by_name
+            from voxkage.llm.tool_rag import get_schema_by_name
             for at in ["agent_thinking", "agent_step"]:
                 s = get_schema_by_name(at)
                 if s and at not in names:
@@ -58,7 +58,7 @@ def _get_tools_for_query(prompt: str) -> tuple[list, list[str]]:
         return schemas, names
     except Exception as e:
         logger.error(f"[RAG] Tool retrieval failed: {e}. Falling back to TOOLS_SCHEMA.")
-        from llm.tool_definitions import get_all_schemas, TOOL_DEFINITIONS
+        from voxkage.llm.tool_definitions import get_all_schemas, TOOL_DEFINITIONS
         schemas = get_all_schemas()
         names = [t["name"] for t in TOOL_DEFINITIONS]
         return schemas, names
@@ -68,7 +68,7 @@ def _ensure_tool_schema(tool_name: str, current_schemas: list) -> list:
     current_names = {s["function"]["name"] for s in current_schemas}
     if tool_name not in current_names:
         try:
-            from llm.tool_rag import get_schema_by_name
+            from voxkage.llm.tool_rag import get_schema_by_name
             s = get_schema_by_name(tool_name)
             if s:
                 logger.info(f"[RAG] On-demand schema fetch for '{tool_name}'.")
@@ -83,8 +83,8 @@ def _ensure_tool_schema(tool_name: str, current_schemas: list) -> list:
 async def generate_response_stream(prompt: str, system_prompt: str = "", use_tools: bool = True):
     global _conversation_history
 
-    from llm.gemini_engine import ask_voxkage_brain, GeminiCLIError, clean_cli_json
-    from llm.gemini_prompt_builder import build_voxkage_gemini_prompt
+    from voxkage.llm.gemini_engine import ask_voxkage_brain, GeminiCLIError, clean_cli_json
+    from voxkage.llm.gemini_prompt_builder import build_voxkage_gemini_prompt
 
     # ═══════════ PRE-LLM EMAIL INTERCEPTOR ═══════════
     email_intent = detect_email_intent(prompt)

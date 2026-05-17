@@ -24,8 +24,8 @@ from typing import Dict, Any, List, Optional, AsyncGenerator, TypedDict, Annotat
 import operator
 
 from langgraph.graph import StateGraph, END, START
-from llm.mcp_dispatcher import dispatch_tool_call as execute_tool_call
-from llm.helpers import SentenceStreamer, log_to_hud
+from voxkage.llm.mcp_dispatcher import dispatch_tool_call as execute_tool_call
+from voxkage.llm.helpers import SentenceStreamer, log_to_hud
 import logging
 
 logger = logging.getLogger(__name__)
@@ -281,8 +281,8 @@ async def gemini_llm_node(state: AgentState):
     # more instruction-following than 2.5-flash for multi-step planning prompts.
     gemini_response = None
     try:
-        from llm.gemini_engine import ask_voxkage_brain, GeminiCLIError
-        from llm.constants import (
+        from voxkage.llm.gemini_engine import ask_voxkage_brain, GeminiCLIError
+        from voxkage.llm.constants import (
             GEMINI_AGENTIC_MODEL, GEMINI_AGENTIC_TIMEOUT, GEMINI_AGENTIC_RETRIES
         )
         img_path = screenshot_path if (screenshot_path and os.path.isfile(screenshot_path)) else None

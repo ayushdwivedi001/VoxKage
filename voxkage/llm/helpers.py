@@ -1,7 +1,7 @@
 import json
 import re
 from datetime import datetime
-from llm.tool_registry import execute_tool_call
+from voxkage.llm.tool_registry import execute_tool_call
 import logging
 import os
 
@@ -223,7 +223,7 @@ def _detect_browser_intent(llm_text: str, user_prompt: str) -> bool:
 def clear_session_memory():
     """Wipe all per-session memory on startup so old context never bleeds into new sessions."""
     # Import _conversation_history from llm_client to avoid circular import issues
-    from llm.llm_client import _conversation_history
+    from voxkage.llm.llm_client import _conversation_history
     _conversation_history.clear()
     # Wipe last_search.json so stale results don't corrupt new sessions
     try:
@@ -237,13 +237,13 @@ def clear_session_memory():
         logger.warning(f"Could not wipe last_search.json: {e}")
     # === PHASE 3: CLEAR SCREENSHOTS ON STARTUP ===
     try:
-        from automation.web_agent import clear_session_screenshots
+        from voxkage.automation.web_agent import clear_session_screenshots
         clear_session_screenshots()
     except Exception as e:
         logger.warning(f"Could not clear session screenshots: {e}")
     # === PHASE 4: CLEAR TASK FILES ON STARTUP ===
     try:
-        from llm.task_tracker import cleanup_all_tasks
+        from voxkage.llm.task_tracker import cleanup_all_tasks
         cleanup_all_tasks()
     except Exception as e:
         logger.warning(f"Could not cleanup task files: {e}")

@@ -36,7 +36,9 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from _env import load_voxkage_env
+from voxkage._env import load_voxkage_env
+from voxkage.paths import brain_dir
+
 load_voxkage_env()
 
 from mcp.server.fastmcp import FastMCP
@@ -44,8 +46,7 @@ mcp = FastMCP("voxkage-coding")
 logger = logging.getLogger(__name__)
 
 # ── Storage ───────────────────────────────────────────────────────────────────
-_BRAIN_DIR = Path(r"C:\VoxKage\Brain")
-_BRAIN_DIR.mkdir(parents=True, exist_ok=True)
+_BRAIN_DIR = brain_dir()
 _PLAN_FILE  = _BRAIN_DIR / "active_plan.md"
 _SCRATCH_DIR = _BRAIN_DIR / "scratch"
 _SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
@@ -301,7 +302,7 @@ def coding_thinking(goal: str, project_dir: str = "", steps: str = "", rag_conte
     """
     ACE ENTRY POINT — Fast plan generator. Runs in <2 seconds.
 
-    Creates a persistent step-by-step plan at C:\\VoxKage\\Brain\\active_plan.md
+    Creates a persistent step-by-step plan at ~/.voxkage/data/brain/active_plan.md
     and returns RAG context for the goal from the already-indexed codebase.
 
     USAGE PROTOCOL (CRITICAL — follow this order):
@@ -551,7 +552,7 @@ def get_coding_plan() -> str:
     """
     ACE TOOL: Read the current active coding plan.
 
-    Returns the full contents of C:\\VoxKage\\Brain\\active_plan.md.
+    Returns the full contents of ~/.voxkage/data/brain/active_plan.md.
     Use this to recall what steps remain when resuming a task.
     """
     if not _PLAN_FILE.exists():

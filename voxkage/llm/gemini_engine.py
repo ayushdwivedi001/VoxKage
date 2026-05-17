@@ -241,7 +241,7 @@ async def ask_voxkage_brain(
     global _LAST_CALL_TIME
 
     try:
-        from llm.constants import (
+        from voxkage.llm.constants import (
             GEMINI_CLI_PATH, GEMINI_MODEL, MAX_CLI_RETRIES, GEMINI_CLI_TIMEOUT,
         )
         _cli = cli_path or GEMINI_CLI_PATH
@@ -256,7 +256,7 @@ async def ask_voxkage_brain(
 
     # ── Strategy 1: Persistent REPL (boot-once, instant subsequent calls) ──
     try:
-        from llm.gemini_repl import get_repl, GeminiREPLError
+        from voxkage.llm.gemini_repl import get_repl, GeminiREPLError
         repl = await get_repl(model=_model)
         logger.info(
             f"[GeminiEngine] REPL call model={_model!r} prompt_len={len(prompt)}"

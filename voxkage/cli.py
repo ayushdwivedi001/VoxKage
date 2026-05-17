@@ -36,7 +36,7 @@ from voxkage.paths import (
     voxkage_dir, package_dir, config_path, env_path,
     gemini_dir, settings_json_path, gemini_md_path,
     data_dir, task_logs_dir, find_gemini_cli, find_npm,
-    python_exe, icon_path, template_path,
+    python_exe, icon_path, template_path, output_dir,
 )
 
 
@@ -819,6 +819,7 @@ def _generate_gemini_md():
     content = content.replace("{{USER_HOME}}", str(Path.home()))
     content = content.replace("{{PLATFORM}}", "windows" if is_windows() else "darwin")
     content = content.replace("{{PACKAGE_DIR}}", str(package_dir()))
+    content = content.replace("{{OUTPUT_DIR}}", str(output_dir()))
 
     # ── INJECT SOUL MEMORY ────────────────────────────────────────────────────
     soul_text = "*No user profile data available yet. Profile will grow as we interact.*"

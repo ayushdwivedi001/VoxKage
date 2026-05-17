@@ -204,7 +204,7 @@ def open_file_picker_sync() -> str:
         
         if file_path:
             try:
-                from voice.voice_manager import log_to_hud
+                from voxkage.llm.helpers import log_to_hud
                 log_to_hud("VoxKage", f"[System] File selected: {file_path}")
             except Exception as e:
                 pass

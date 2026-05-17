@@ -62,8 +62,10 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("voxkage-rag")
 logger = logging.getLogger(__name__)
 
+from voxkage.paths import rag_dir, brain_dir
+
 # ── Storage Paths ─────────────────────────────────────────────────────────────
-_RAG_DIR   = r"C:\VoxKage\RAG"
+_RAG_DIR   = str(rag_dir())
 _META_FILE = os.path.join(_RAG_DIR, "index_meta.json")
 os.makedirs(_RAG_DIR, exist_ok=True)
 
@@ -707,9 +709,8 @@ def index_directory(
             summary_lines.append(f"  ... and {len(processed) - 30} more")
 
     try:
-        _BRAIN_DIR = Path(r"C:\VoxKage\Brain")
+        _BRAIN_DIR = brain_dir()
         _cache_file = _BRAIN_DIR / "index_cache.json"
-        _BRAIN_DIR.mkdir(parents=True, exist_ok=True)
         import json as _json
         _cache = {}
         if _cache_file.exists():

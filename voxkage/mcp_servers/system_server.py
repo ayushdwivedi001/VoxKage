@@ -93,14 +93,14 @@ async def _run_on_worker(fn) -> str:
 
 # ── Lazy imports (avoid import-time side effects) ─────────────────────────────
 def _get_system():
-    from automation.system_control import (
+    from voxkage.automation.system_control import (
         set_volume, set_brightness, toggle_wifi, toggle_bluetooth,
         close_app, switch_to_app, toggle_hotspot, toggle_night_light, open_intel_dsa
     )
     return set_volume, set_brightness, toggle_wifi, toggle_bluetooth, close_app, switch_to_app, toggle_hotspot, toggle_night_light, open_intel_dsa
 
 def _get_launcher():
-    from automation.app_launcher import execute_special_command, open_app
+    from voxkage.automation.app_launcher import execute_special_command, open_app
     return execute_special_command, open_app
 
 
@@ -215,7 +215,7 @@ async def close_application(target: str) -> str:
     IMPORTANT: Call one at a time — do not queue alongside other GUI tools.
     """
     def _run():
-        from automation.system_control import safe_close_target
+        from voxkage.automation.system_control import safe_close_target
         return safe_close_target(target)
 
     return await _run_on_worker(_run)

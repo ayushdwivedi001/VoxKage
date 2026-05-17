@@ -1,19 +1,19 @@
 import logging
 logger = logging.getLogger(__name__)
 
-from automation.app_launcher import open_app, execute_special_command
-from automation.browser_control import open_website, search_google
-from automation.system_control import (
+from voxkage.automation.app_launcher import open_app, execute_special_command
+from voxkage.automation.browser_control import open_website, search_google
+from voxkage.automation.system_control import (
     set_volume, set_brightness, toggle_wifi, toggle_bluetooth
 )
-from automation.web_agent import browse_and_extract, search_media_options, play_media_selection, execute_browser_workflow_sync, get_browser_state, agent_step_sync, control_media_web
-from automation.document_parser import analyze_specific_file_sync, find_file
-from automation.spotify_control import search_spotify_app, play_spotify_app, control_spotify_app, USER_PLAYLISTS, browse_spotify_search, browse_spotify_play, control_spotify_web, is_spotify_app_installed
-from automation.gmail_manager import check_gmail, get_email_summary
+from voxkage.automation.web_agent import browse_and_extract, search_media_options, play_media_selection, execute_browser_workflow_sync, get_browser_state, agent_step_sync, control_media_web
+from voxkage.automation.document_parser import analyze_specific_file_sync, find_file
+from voxkage.automation.spotify_control import search_spotify_app, play_spotify_app, control_spotify_app, USER_PLAYLISTS, browse_spotify_search, browse_spotify_play, control_spotify_web, is_spotify_app_installed
+from voxkage.automation.gmail_manager import check_gmail, get_email_summary
 # RAG Knowledge Base — imported lazily (rag_server resolves its own paths at import-time;
 # importing at module level from inside the llm package breaks __file__ resolution)
 def _rag(fn_name: str, **kwargs):
-    from mcp_servers.rag_server import (
+    from voxkage.mcp_servers.rag_server import (
         index_document, check_and_index, query_rag,
         list_indexed_documents, delete_from_rag, index_directory,
     )
@@ -29,7 +29,7 @@ def _rag(fn_name: str, **kwargs):
 
 # Coding Engine (ACE) — imported lazily to share RAG/ChromaDB state
 def _coding(fn_name: str, **kwargs):
-    from mcp_servers.coding_server import (
+    from voxkage.mcp_servers.coding_server import (
         coding_thinking, get_code_skeleton,
         update_coding_plan, get_coding_plan,
     )
@@ -43,7 +43,7 @@ def _coding(fn_name: str, **kwargs):
 
 # GUI Pilot — imported lazily to avoid pyautogui import on headless machines
 def _gui(fn_name: str, **kwargs):
-    from mcp_servers.gui_server import gui_thinking, get_desktop_state, get_open_files, gui_step, read_active_document
+    from voxkage.mcp_servers.gui_server import gui_thinking, get_desktop_state, get_open_files, gui_step, read_active_document
     _fns = {
         "gui_thinking": gui_thinking, "get_desktop_state": get_desktop_state,
         "get_open_files": get_open_files, "gui_step": gui_step,
@@ -101,7 +101,7 @@ def execute_tool_call(tool_name: str, arguments: dict):
                 if opts:
                     log_text = "Found Spotify Tracks:\n" + "\n".join([f"{r['number']}: {r['title']}" for r in opts])
                     try:
-                        from llm.helpers import log_to_hud
+                        from voxkage.llm.helpers import log_to_hud
                         log_to_hud("VoxKage", log_text)
                     except:
                         pass
@@ -115,7 +115,7 @@ def execute_tool_call(tool_name: str, arguments: dict):
         elif tool_name == "play_spotify_selection":
             number = arguments.get("number", 1)
             if is_spotify_app_installed():
-                from automation.spotify_control import play_spotify_selection_api
+                from voxkage.automation.spotify_control import play_spotify_selection_api
                 res = play_spotify_selection_api(number)
                 # If it failed or we don't have API keys, play_spotify_app returns a string starting with "Failed"
                 if not "Failed" in res:
@@ -139,7 +139,7 @@ def execute_tool_call(tool_name: str, arguments: dict):
                 # web fallback won't have a direct URI playlist play easily unless we goto the URI in browser.
                 # Spotify web can handle URIs! Just convert spotify:playlist:123 to open.spotify.com/playlist/123
                 web_url = uri.replace("spotify:playlist:", "https://open.spotify.com/playlist/")
-                from automation.web_agent import _dispatch_task
+                from voxkage.automation.web_agent import _dispatch_task
                 return _dispatch_task("play_spotify_web_url", {"url": web_url}) + " Note to self: Goal Met. Tell the user the playlist is started."
 
         elif tool_name == "media_control":
@@ -337,7 +337,7 @@ def execute_tool_call(tool_name: str, arguments: dict):
             return _coding("get_coding_plan")
                 
         elif tool_name == "take_screenshot":
-            from automation.screenshot import take_screenshot
+            from voxkage.automation.screenshot import take_screenshot
             filepath = take_screenshot()
             if filepath:
                 return f"Successfully took a screenshot and saved it to: {filepath}"
@@ -347,7 +347,7 @@ def execute_tool_call(tool_name: str, arguments: dict):
         elif tool_name == "agent_thinking":
             thought = arguments.get("thought", "")
             next_action = arguments.get("next_action", "")
-            from llm.helpers import log_to_hud
+            from voxkage.llm.helpers import log_to_hud
 
             # Check for GOAL_MET sentinel — signals the loop to exit cleanly
             is_goal_met = thought.upper().startswith("GOAL MET")

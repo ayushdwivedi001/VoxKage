@@ -12,7 +12,7 @@ ARCHITECTURE NOTE (Post-Upgrade):
 """
 
 from datetime import datetime
-from automation.web_agent import load_last_search
+from voxkage.automation.web_agent import load_last_search
 import logging
 
 logger = logging.getLogger(__name__)

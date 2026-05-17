@@ -12,7 +12,7 @@ from typing import Optional
 from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.session import ClientSession
 
-from llm.tool_registry import execute_tool_call as fallback_execute_tool_call
+from voxkage.llm.tool_registry import execute_tool_call as fallback_execute_tool_call
 
 logger = logging.getLogger(__name__)
 

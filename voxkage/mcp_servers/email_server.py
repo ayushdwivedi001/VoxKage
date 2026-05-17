@@ -27,7 +27,7 @@ mcp = FastMCP("voxkage-email")
 
 # ── Gmail service helper ───────────────────────────────────────────────────────
 def _svc():
-    from automation.gmail_manager import _get_gmail_service
+    from voxkage.automation.gmail_manager import _get_gmail_service
     return _get_gmail_service()
 
 
@@ -61,7 +61,7 @@ def check_email(
       "has:attachment"
       "after:2024/01/01"
     """
-    from automation.gmail_manager import check_gmail
+    from voxkage.automation.gmail_manager import check_gmail
     return check_gmail(query=query, label=label, max_results=max_results)
 
 
@@ -71,7 +71,7 @@ def read_email(email_id: str) -> str:
     Get the full text body of a specific email by its ID.
     Email IDs are returned by check_email.
     """
-    from automation.gmail_manager import get_email_summary
+    from voxkage.automation.gmail_manager import get_email_summary
     return get_email_summary(email_id)
 
 

@@ -612,7 +612,7 @@ def edit_file(
     # Resolve path if it's not absolute
     if not os.path.isfile(file_path):
         # Try to find the file using keyword
-        from automation.document_parser import find_file
+        from voxkage.automation.document_parser import find_file
         user_home = os.path.expanduser("~")
         search_dirs = [
             os.path.join(user_home, "Documents"),
@@ -690,7 +690,7 @@ def delete_file(
     WARNING: This is irreversible. Always confirm with the user before deleting.
     """
     if not os.path.isfile(file_path):
-        from automation.document_parser import find_file
+        from voxkage.automation.document_parser import find_file
         user_home = os.path.expanduser("~")
         search_dirs = [
             os.path.join(user_home, "Documents"),
@@ -748,7 +748,7 @@ def convert_file(
     """
     # Resolve source file
     if not os.path.isfile(file_path):
-        from automation.document_parser import find_file
+        from voxkage.automation.document_parser import find_file
         user_home = os.path.expanduser("~")
         search_dirs = [
             os.path.join(user_home, "Documents"),

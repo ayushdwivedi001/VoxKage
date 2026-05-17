@@ -205,7 +205,7 @@ async def get_repl(model: str = None) -> GeminiREPL:
     global _repl
     if _repl is None:
         try:
-            from llm.constants import (
+            from voxkage.llm.constants import (
                 GEMINI_MODEL, GEMINI_CLI_PATH,
                 GEMINI_REPL_MAX_WAIT,
             )

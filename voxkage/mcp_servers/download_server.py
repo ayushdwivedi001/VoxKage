@@ -170,7 +170,7 @@ def download_file(
                 _active_downloads[filename]["status"] = "done"
             # Fire Windows toast notification when download completes
             try:
-                from mcp_servers.notify_server import _toast
+                from voxkage.mcp_servers.notify_server import _toast
                 ext = os.path.splitext(filename)[1].lower()
                 is_exec = ext in (".exe", ".msi", ".pkg", ".deb", ".rpm", ".appimage")
                 final_size = os.path.getsize(save_path)
@@ -278,7 +278,7 @@ def download_images(
 
     # Import browser agent
     try:
-        from automation.web_agent import agent_step_sync
+        from voxkage.automation.web_agent import agent_step_sync
     except Exception as e:
         return f"Browser not available: {e}"
 

@@ -940,7 +940,7 @@ TOOL_DEFINITIONS = [
         "description": (
             "ACE ENTRY POINT — Creates a persistent step-by-step plan with RAG context integration. "
             "Uses 5-phase pipeline: Problem Decomposition → RAG-First Awareness → Knowledge Gap Fill → Plan → Execute/Verify. "
-            "MUST be called BEFORE writing any code. Creates active_plan.md in C:\\VoxKage\\Brain\\."
+            "MUST be called BEFORE writing any code. Creates active_plan.md in ~/.voxkage/data/brain/."
         ),
         "tags": ["coding", "ace", "plan", "reasoning", "code"],
         "example_queries": [
@@ -1003,7 +1003,7 @@ TOOL_DEFINITIONS = [
         "name": "get_coding_plan",
         "description": (
             "ACE TOOL: Read the current active coding plan. "
-            "Returns full contents of C:\\VoxKage\\Brain\\active_plan.md. "
+            "Returns full contents of ~/.voxkage/data/brain/active_plan.md. "
             "Use to recall what steps remain when resuming a task."
         ),
         "tags": ["coding", "plan", "read", "ace"],

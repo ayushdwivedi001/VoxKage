@@ -74,7 +74,7 @@ def _focus_voxkage_after_delay(delay: float = 4.0):
 
 
 def _yt():
-    from automation.web_agent import (
+    from voxkage.automation.web_agent import (
         search_media_options as yt_search,
         play_media_selection as yt_play,
         control_media_web,
@@ -84,7 +84,7 @@ def _yt():
 
 
 def _spotify():
-    from automation.spotify_control import (
+    from voxkage.automation.spotify_control import (
         search_spotify_app, play_spotify_app, control_spotify_app,
         USER_PLAYLISTS, browse_spotify_search, browse_spotify_play,
         control_spotify_web, is_spotify_app_installed,

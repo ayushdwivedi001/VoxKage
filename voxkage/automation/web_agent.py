@@ -12,6 +12,7 @@ import sys
 import logging
 import atexit
 import base64
+from voxkage.paths import data_dir, brain_dir, browser_dir
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ if getattr(sys, 'frozen', False):
 import json as _json
 
 # Path for persistent search memory (cleared on VoxKage full restart)
-_LAST_SEARCH_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "last_search.json")
+_LAST_SEARCH_PATH = os.path.join(data_dir(), "last_search.json")
 
 def save_last_search(items):
     """Save search results to persistent memory file."""
@@ -132,11 +133,11 @@ def clear_last_search():
 
 def clear_session_screenshots():
     """=== PHASE 3: CLEANUP SCREENSHOTS ON STARTUP ===
-    Remove all agent_step screenshots from C:\\VoxKage\\Brain so each session starts fresh.
+    Remove all agent_step screenshots from VoxKage brain directory so each session starts fresh.
     """
     import glob
     try:
-        ss_dir = r"C:\VoxKage\Brain"
+        ss_dir = str(brain_dir())
         if os.path.exists(ss_dir):
             # Remove all agent_step_*.jpg screenshots
             for f in glob.glob(os.path.join(ss_dir, "agent_step_*.jpg")):
@@ -249,7 +250,7 @@ def _pw_worker():
 
         def _ensure_page():
             global _context, _active_page
-            VOXKAGE_HOME = r"C:\VoxKage\BrowserData"
+            VOXKAGE_HOME = str(browser_dir())
 
             args = [
                 "--start-maximized",
@@ -287,7 +288,7 @@ def _pw_worker():
                         ignore_default_args=["--enable-automation"],
                         timeout=60000,
                     )
-                    logger.info("[28e] VoxKage Chrome launched (C:\\VoxKage\\BrowserData)")
+                    logger.info(f"[28e] VoxKage Chrome launched ({VOXKAGE_HOME})")
                 except Exception as e:
                     logger.error(f"[28e] Failed to launch VoxKage browser: {e}")
                     raise
@@ -549,7 +550,7 @@ def _pw_worker():
                     
                 elif action == "search_spotify_web":
                     query = kwargs.get('query')
-                    from automation.spotify_control import GLOBAL_SPOTIFY_OPTIONS
+                    from voxkage.automation.spotify_control import GLOBAL_SPOTIFY_OPTIONS
                     encoded_query = urllib.parse.quote(query)
                     search_url = f"https://open.spotify.com/search/{encoded_query}/tracks"
                     page.goto(search_url)
@@ -583,7 +584,7 @@ def _pw_worker():
 
                 elif action == "play_spotify_web":
                     number = kwargs.get('number')
-                    from automation.spotify_control import GLOBAL_SPOTIFY_OPTIONS
+                    from voxkage.automation.spotify_control import GLOBAL_SPOTIFY_OPTIONS
                     
                     if number < 1 or number > len(GLOBAL_SPOTIFY_OPTIONS):
                         res_q.put(("error", "Invalid selection number."))
@@ -1687,8 +1688,8 @@ def _pw_worker():
                         
                         # Speak to the user via TTS
                         try:
-                            from voice.voice_manager import speak
-                            speak(f"I've reached the {site_name} login page. Please log in or clear the security check so I can continue.")
+                            from voxkage.llm.helpers import log_to_hud
+                            log_to_hud("VoxKage", f"I've reached the {site_name} login page. Please log in or clear the security check so I can continue.")
                         except Exception as tts_err:
                             logger.debug(f"[28] TTS notification failed: {tts_err}")
                         
@@ -1710,8 +1711,8 @@ def _pw_worker():
                             if not still_login:
                                 logger.info(f"[28] Login wall CLEARED after {(wait_cycle+1)*2}s. Resuming workflow...")
                                 try:
-                                    from voice.voice_manager import speak
-                                    speak("Thank you! I can see you're logged in. Let me continue with your task.")
+                                    from voxkage.llm.helpers import log_to_hud
+                                    log_to_hud("VoxKage", "Thank you! I can see you're logged in. Let me continue with your task.")
                                 except:
                                     pass
                                 # Wait for page to settle after login
@@ -2250,7 +2251,7 @@ def get_browser_state():
 
     # Show screenshot in the HUD so the user can see it visually
     try:
-        from voice.voice_manager import log_to_hud
+        from voxkage.llm.helpers import log_to_hud
         hud_msg = f"📸 Browser snapshot — URL: {url}\nTitle: {title}"
         if is_login_wall:
             hud_msg += "\n⚠️ LOGIN WALL DETECTED"
@@ -2316,7 +2317,7 @@ def search_media_options(platform: str, query: str):
         
         # Log to HUD
         try:
-            from voice.voice_manager import log_to_hud
+            from voxkage.llm.helpers import log_to_hud
             log_text = "Found YouTube Videos:\n" + "\n".join([f"{r['number']}: {r['title']}" for r in results])
             log_to_hud("VoxKage", log_text)
         except Exception:

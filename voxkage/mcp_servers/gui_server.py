@@ -499,7 +499,7 @@ def gui_thinking(goal: str, plan: str) -> str:
       plan : numbered step-by-step plan
     """
     try:
-        from voice.voice_manager import log_to_hud
+        from voxkage.llm.helpers import log_to_hud
         log_to_hud("VoxKage", f"🖥️ GUI Plan: {goal}\n{plan}")
     except Exception:
         pass

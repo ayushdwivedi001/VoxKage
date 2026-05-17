@@ -25,12 +25,12 @@ mcp = FastMCP("voxkage-file")
 
 
 def _parsers():
-    from automation.document_parser import analyze_specific_file_sync, find_file
+    from voxkage.automation.document_parser import analyze_specific_file_sync, find_file
     return analyze_specific_file_sync, find_file
 
 
 def _screenshot():
-    from automation.screenshot import take_screenshot as do_screenshot
+    from voxkage.automation.screenshot import take_screenshot as do_screenshot
     return do_screenshot
 
 
@@ -372,7 +372,7 @@ def smart_open(description: str) -> str:
 
     try:
         if kind == "app_config":
-            from automation.app_launcher import open_app
+            from voxkage.automation.app_launcher import open_app
             return open_app(name)
 
         elif kind == "website":

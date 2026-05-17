@@ -50,8 +50,8 @@ async def morning_routine_example() -> dict[str, str]:
     Showcases how to fire multiple Gemini CLI subprocesses concurrently.
     In production, replace prompts with real VoxKage planning queries.
     """
-    from llm.gemini_engine import ask_voxkage_brain
-    from llm.constants import GEMINI_MODEL
+    from voxkage.llm.gemini_engine import ask_voxkage_brain
+    from voxkage.llm.constants import GEMINI_MODEL
 
     tasks = [
         ask_voxkage_brain("Give a one-sentence morning greeting.", model=GEMINI_MODEL),
