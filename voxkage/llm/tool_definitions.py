@@ -1202,21 +1202,355 @@ TOOL_DEFINITIONS = [
             "required": ["repo", "run_id"]
         }
     },
+
+    # ─────────────────────────────────────────────
+    # NEW OS CONTROL TOOLS (v2)
+    # ─────────────────────────────────────────────
     {
-        "name": "get_job_logs",
-        "description": "GITHUB: Downloads the raw logs for a specific GitHub Actions job.",
-        "tags": ["github", "actions", "logs", "job", "ci", "error"],
-        "example_queries": ["get job logs", "show me why the build failed", "github action logs"],
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "repo": {"type": "string", "description": "Repository name with owner"},
-                "job_id": {"type": "string", "description": "Job ID from actions_get"}
-            },
-            "required": ["repo", "job_id"]
-        }
+        "name": "set_volume",
+        "description": "Set the system audio volume to an exact percentage level (0-100). Instantly precise using Windows Core Audio API.",
+        "tags": ["volume", "audio", "sound", "system", "hardware"],
+        "example_queries": ["set volume to 50", "turn volume to 30%", "volume at 80", "make it 60 percent loud"],
+        "parameters": {"type": "object", "properties": {"level": {"type": "integer", "description": "Volume level 0-100"}}, "required": ["level"]}
+    },
+    {
+        "name": "get_volume",
+        "description": "Read the current system volume level and whether audio is muted.",
+        "tags": ["volume", "audio", "system"],
+        "example_queries": ["what is the volume", "how loud is it", "is audio muted", "current volume level"],
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "toggle_mute",
+        "description": "Mute or unmute system audio without changing the volume level.",
+        "tags": ["mute", "audio", "volume", "sound"],
+        "example_queries": ["mute the audio", "unmute", "silence sound", "toggle mute"],
+        "parameters": {"type": "object", "properties": {"mute": {"type": "boolean", "description": "True=mute, False=unmute"}}, "required": ["mute"]}
+    },
+    {
+        "name": "mute_microphone",
+        "description": "Mute or unmute the microphone input device.",
+        "tags": ["microphone", "mute", "audio", "recording"],
+        "example_queries": ["mute mic", "unmute microphone", "disable mic", "enable mic"],
+        "parameters": {"type": "object", "properties": {"mute": {"type": "boolean"}}, "required": ["mute"]}
+    },
+    {
+        "name": "set_audio_output_device",
+        "description": "Switch audio output to a different device (headphones, speakers, HDMI, Bluetooth).",
+        "tags": ["audio", "output", "device", "speakers", "headphones"],
+        "example_queries": ["switch to headphones", "use HDMI audio", "change audio output", "output to speakers"],
+        "parameters": {"type": "object", "properties": {"device_name": {"type": "string", "description": "Partial device name (e.g. 'headphones')"}}, "required": ["device_name"]}
+    },
+    {
+        "name": "set_brightness",
+        "description": "Set monitor brightness to an exact level 0-100. Works on built-in laptop displays; tries DDC/CI for external monitors.",
+        "tags": ["brightness", "display", "screen", "monitor", "hardware"],
+        "example_queries": ["set brightness to 50", "dim the screen", "increase brightness", "brightness 70 percent"],
+        "parameters": {"type": "object", "properties": {"level": {"type": "integer", "description": "Brightness 0-100"}}, "required": ["level"]}
+    },
+    {
+        "name": "get_brightness",
+        "description": "Get the current monitor brightness level (works on built-in laptop displays).",
+        "tags": ["brightness", "screen", "display"],
+        "example_queries": ["what brightness is my screen", "current brightness", "how bright is the screen"],
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "toggle_night_light",
+        "description": "Enable or disable Windows Night Light (blue light filter) directly via registry — no Settings UI needed.",
+        "tags": ["night light", "blue light", "display", "eye strain", "filter"],
+        "example_queries": ["turn on night light", "disable night light", "enable blue light filter", "night mode on"],
+        "parameters": {"type": "object", "properties": {"enable": {"type": "boolean"}}, "required": ["enable"]}
+    },
+    {
+        "name": "toggle_dark_mode",
+        "description": "Switch Windows between Dark mode and Light mode (applies to apps and system UI).",
+        "tags": ["dark mode", "light mode", "theme", "appearance"],
+        "example_queries": ["enable dark mode", "switch to light mode", "dark theme", "windows dark mode"],
+        "parameters": {"type": "object", "properties": {"dark": {"type": "boolean", "description": "True=dark, False=light"}}, "required": ["dark"]}
+    },
+    {
+        "name": "power_action",
+        "description": "Perform a PC power state action: shutdown, restart, sleep, hibernate, or lock screen.",
+        "tags": ["power", "shutdown", "restart", "sleep", "hibernate", "lock"],
+        "example_queries": ["shutdown the PC", "restart", "reboot", "sleep mode", "hibernate", "lock screen", "turn off computer"],
+        "parameters": {"type": "object", "properties": {"action": {"type": "string", "description": "shutdown | restart | sleep | hibernate | lock"}}, "required": ["action"]}
+    },
+    {
+        "name": "schedule_shutdown",
+        "description": "Schedule the PC to automatically shut down after a specified number of minutes.",
+        "tags": ["shutdown", "timer", "schedule", "power"],
+        "example_queries": ["shutdown in 30 minutes", "turn off after 1 hour", "schedule shutdown", "auto off in 20 min"],
+        "parameters": {"type": "object", "properties": {"minutes": {"type": "integer"}}, "required": ["minutes"]}
+    },
+    {
+        "name": "cancel_scheduled_shutdown",
+        "description": "Cancel a previously scheduled shutdown or restart timer.",
+        "tags": ["shutdown", "cancel", "timer"],
+        "example_queries": ["cancel shutdown", "stop scheduled shutdown", "abort restart timer"],
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "set_power_plan",
+        "description": "Set the Windows power plan to control performance vs battery life.",
+        "tags": ["power plan", "performance", "battery", "saver"],
+        "example_queries": ["set power plan to performance", "enable battery saver", "balanced power", "high performance mode"],
+        "parameters": {"type": "object", "properties": {"mode": {"type": "string", "description": "performance | balanced | saver"}}, "required": ["mode"]}
+    },
+    {
+        "name": "get_battery_status",
+        "description": "Get battery percentage, charging state, and estimated time remaining. Returns desktop PC message if no battery.",
+        "tags": ["battery", "charge", "power", "laptop"],
+        "example_queries": ["battery level", "how much battery", "is it charging", "battery percentage", "power status"],
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "get_system_info",
+        "description": "Get a comprehensive system snapshot: OS version, CPU model, RAM usage, GPU, disk usage, and uptime in one call.",
+        "tags": ["system info", "specs", "cpu", "ram", "gpu", "disk", "hardware"],
+        "example_queries": ["system specs", "PC info", "what CPU do I have", "RAM usage", "disk space", "my computer specs"],
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "get_disk_usage",
+        "description": "Show disk usage for all drives: free space, total size, and percent used.",
+        "tags": ["disk", "storage", "space", "drive", "C drive"],
+        "example_queries": ["how much disk space", "storage left", "C drive space", "disk usage", "how full is my hard drive"],
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "get_system_uptime",
+        "description": "Show how long the PC has been running since the last boot.",
+        "tags": ["uptime", "boot", "system"],
+        "example_queries": ["how long has PC been on", "system uptime", "when did it last restart", "uptime"],
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "get_running_processes",
+        "description": "List the top processes consuming the most CPU or RAM.",
+        "tags": ["processes", "cpu", "ram", "task manager", "performance"],
+        "example_queries": ["what's using all the CPU", "RAM hungry apps", "top processes", "task manager", "what's running"],
+        "parameters": {"type": "object", "properties": {"sort_by": {"type": "string", "description": "cpu or ram"}, "top_n": {"type": "integer"}}}
+    },
+    {
+        "name": "kill_process",
+        "description": "Kill a running process by name or PID. System-critical processes are protected.",
+        "tags": ["kill", "process", "close", "terminate", "task"],
+        "example_queries": ["kill chrome", "force close outlook", "terminate process", "kill PID 1234", "end task"],
+        "parameters": {"type": "object", "properties": {"name_or_pid": {"type": "string"}}, "required": ["name_or_pid"]}
+    },
+    {
+        "name": "suspend_process",
+        "description": "Pause (suspend) a running process to free CPU without killing it.",
+        "tags": ["suspend", "pause", "process", "cpu"],
+        "example_queries": ["pause chrome", "suspend outlook", "freeze a process temporarily"],
+        "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}
+    },
+    {
+        "name": "resume_process",
+        "description": "Resume a previously suspended (paused) process.",
+        "tags": ["resume", "process", "unpause"],
+        "example_queries": ["resume chrome", "unpause the process", "continue suspended app"],
+        "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}
+    },
+    {
+        "name": "boost_process_priority",
+        "description": "Set a process to High CPU priority for better performance (e.g. during gaming or rendering).",
+        "tags": ["priority", "performance", "cpu", "process"],
+        "example_queries": ["boost chrome priority", "high priority for game", "make blender faster"],
+        "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}
+    },
+    {
+        "name": "get_startup_programs",
+        "description": "List all programs configured to launch automatically at Windows startup.",
+        "tags": ["startup", "boot", "autostart", "programs"],
+        "example_queries": ["what starts with windows", "startup programs", "which apps autostart", "startup list"],
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "toggle_wifi",
+        "description": "Turn Wi-Fi on or off.",
+        "tags": ["wifi", "network", "internet", "wireless"],
+        "example_queries": ["turn wifi on", "disable wifi", "enable wireless", "wifi off"],
+        "parameters": {"type": "object", "properties": {"enable": {"type": "boolean"}}, "required": ["enable"]}
+    },
+    {
+        "name": "toggle_bluetooth",
+        "description": "Turn Bluetooth on or off using WinRT Radio API (no admin rights needed).",
+        "tags": ["bluetooth", "wireless", "radio"],
+        "example_queries": ["turn on bluetooth", "bluetooth off", "enable bluetooth", "disable BT"],
+        "parameters": {"type": "object", "properties": {"enable": {"type": "boolean"}}, "required": ["enable"]}
+    },
+    {
+        "name": "toggle_hotspot",
+        "description": "Turn the mobile hotspot on or off.",
+        "tags": ["hotspot", "tethering", "mobile data", "wifi"],
+        "example_queries": ["turn on hotspot", "enable mobile hotspot", "disable hotspot"],
+        "parameters": {"type": "object", "properties": {"enable": {"type": "boolean"}}, "required": ["enable"]}
+    },
+    {
+        "name": "toggle_airplane_mode",
+        "description": "Enable or disable Airplane Mode which cuts all wireless radios.",
+        "tags": ["airplane mode", "radios", "wireless", "network"],
+        "example_queries": ["enable airplane mode", "turn on flight mode", "disable all wireless", "airplane mode off"],
+        "parameters": {"type": "object", "properties": {"enable": {"type": "boolean"}}, "required": ["enable"]}
+    },
+    {
+        "name": "get_network_status",
+        "description": "Get current network information: local IP, gateway, DNS servers, and public IP.",
+        "tags": ["network", "ip address", "dns", "gateway", "internet"],
+        "example_queries": ["what's my IP", "network status", "local IP address", "DNS server", "public IP"],
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "get_wifi_networks",
+        "description": "Scan and list all nearby Wi-Fi networks with signal strength.",
+        "tags": ["wifi", "networks", "ssid", "scan", "wireless"],
+        "example_queries": ["show available wifi", "wifi networks nearby", "scan wifi", "list wifi networks"],
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "connect_wifi",
+        "description": "Connect to a Wi-Fi network by SSID and optional password.",
+        "tags": ["wifi", "connect", "network"],
+        "example_queries": ["connect to wifi XYZ", "join wifi network", "connect to HomeNetwork"],
+        "parameters": {"type": "object", "properties": {"ssid": {"type": "string"}, "password": {"type": "string"}}, "required": ["ssid"]}
+    },
+    {
+        "name": "ping_host",
+        "description": "Ping a host to check network latency and packet loss.",
+        "tags": ["ping", "network", "latency", "connectivity"],
+        "example_queries": ["ping google.com", "check if server is reachable", "network latency", "ping 8.8.8.8"],
+        "parameters": {"type": "object", "properties": {"host": {"type": "string"}, "count": {"type": "integer"}}}
+    },
+    {
+        "name": "get_open_ports",
+        "description": "List all open listening TCP ports and the process using each port.",
+        "tags": ["ports", "network", "tcp", "firewall", "listening"],
+        "example_queries": ["what ports are open", "listening ports", "check open ports", "port scan local"],
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "run_network_speed_test",
+        "description": "Run a speed test and return download/upload Mbps and ping. Requires speedtest-cli installed.",
+        "tags": ["speed test", "internet speed", "bandwidth", "network"],
+        "example_queries": ["test internet speed", "how fast is my internet", "run speed test", "check bandwidth"],
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "flush_dns",
+        "description": "Flush the DNS cache to fix domain resolution errors and stale DNS entries.",
+        "tags": ["dns", "network", "flush", "cache"],
+        "example_queries": ["flush dns", "fix dns", "clear dns cache", "dns not resolving"],
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "list_open_windows",
+        "description": "List all currently open and visible application windows on the desktop.",
+        "tags": ["windows", "apps", "desktop", "open"],
+        "example_queries": ["what windows are open", "show open apps", "list all windows", "what's on screen"],
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "minimize_window",
+        "description": "Minimize a window to the taskbar by partial title match.",
+        "tags": ["minimize", "window", "taskbar"],
+        "example_queries": ["minimize chrome", "minimize notepad", "hide the window", "minimize this app"],
+        "parameters": {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}
+    },
+    {
+        "name": "maximize_window",
+        "description": "Maximize a window to full screen by partial title match.",
+        "tags": ["maximize", "window", "fullscreen"],
+        "example_queries": ["maximize chrome", "full screen notepad", "expand the window"],
+        "parameters": {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}
+    },
+    {
+        "name": "tile_windows",
+        "description": "Arrange open windows in a layout: side-by-side, stacked, or cascade.",
+        "tags": ["tile", "windows", "split screen", "arrange", "layout"],
+        "example_queries": ["tile windows side by side", "split screen", "arrange windows", "cascade windows", "stack windows"],
+        "parameters": {"type": "object", "properties": {"layout": {"type": "string", "description": "side_by_side | stack | quad"}}}
+    },
+    {
+        "name": "get_installed_apps",
+        "description": "List all installed applications on the PC with version numbers. Optionally filter by name.",
+        "tags": ["installed apps", "software", "programs", "list"],
+        "example_queries": ["what apps are installed", "list installed software", "is Python installed", "installed programs"],
+        "parameters": {"type": "object", "properties": {"search": {"type": "string", "description": "Optional name filter"}}}
+    },
+    {
+        "name": "get_clipboard",
+        "description": "Read the current text content from the clipboard.",
+        "tags": ["clipboard", "copy", "paste"],
+        "example_queries": ["what's in the clipboard", "read clipboard", "what did I copy", "clipboard content"],
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "set_clipboard",
+        "description": "Write text to the clipboard so the user can paste it anywhere.",
+        "tags": ["clipboard", "copy", "paste"],
+        "example_queries": ["copy this to clipboard", "put this in clipboard", "set clipboard to", "copy text"],
+        "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}
+    },
+    {
+        "name": "type_text",
+        "description": "Type text into the currently focused window by simulating keyboard input.",
+        "tags": ["type", "keyboard", "input", "automation"],
+        "example_queries": ["type this text", "type in the text box", "keyboard input", "auto type"],
+        "parameters": {"type": "object", "properties": {"text": {"type": "string"}, "delay_ms": {"type": "integer"}}, "required": ["text"]}
+    },
+    {
+        "name": "press_hotkey",
+        "description": "Press a keyboard shortcut. Use + to combine keys. Examples: ctrl+c, alt+f4, win+d.",
+        "tags": ["hotkey", "keyboard", "shortcut", "keys"],
+        "example_queries": ["press ctrl+c", "hit alt+f4", "press win+d", "keyboard shortcut ctrl+z"],
+        "parameters": {"type": "object", "properties": {"keys": {"type": "string", "description": "e.g. 'ctrl+c', 'alt+f4', 'win+d'"}}, "required": ["keys"]}
+    },
+    {
+        "name": "clear_temp_files",
+        "description": "Delete temporary files from the system %TEMP% folder to free disk space.",
+        "tags": ["temp files", "cleanup", "storage", "disk space"],
+        "example_queries": ["clear temp files", "delete temp", "free up space", "clean temporary files"],
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "get_largest_files",
+        "description": "Find the top N largest files in a directory tree to identify space hogs.",
+        "tags": ["large files", "disk", "storage", "cleanup", "space"],
+        "example_queries": ["biggest files in downloads", "largest files on desktop", "what's taking up space", "find large files"],
+        "parameters": {"type": "object", "properties": {"directory": {"type": "string"}, "count": {"type": "integer"}}, "required": ["directory"]}
+    },
+    {
+        "name": "get_folder_size",
+        "description": "Calculate the total size of a folder and the number of files inside it.",
+        "tags": ["folder size", "disk", "storage"],
+        "example_queries": ["how big is my downloads folder", "folder size", "how much space does this folder use"],
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}
+    },
+    {
+        "name": "toggle_hidden_files",
+        "description": "Show or hide hidden files and folders in Windows Explorer.",
+        "tags": ["hidden files", "explorer", "show hidden"],
+        "example_queries": ["show hidden files", "hide hidden files", "toggle hidden folders", "reveal hidden files"],
+        "parameters": {"type": "object", "properties": {"show": {"type": "boolean"}}, "required": ["show"]}
+    },
+    {
+        "name": "toggle_focus_mode",
+        "description": "Enable or disable Focus Mode (silences all Windows toast notifications).",
+        "tags": ["focus mode", "notifications", "do not disturb", "silence"],
+        "example_queries": ["enable focus mode", "silence notifications", "do not disturb", "turn off notifications"],
+        "parameters": {"type": "object", "properties": {"enable": {"type": "boolean"}}, "required": ["enable"]}
+    },
+    {
+        "name": "update_all_software",
+        "description": "Trigger silent background updates for all installed apps via winget.",
+        "tags": ["update", "software", "winget", "upgrade"],
+        "example_queries": ["update all software", "upgrade apps", "update everything", "run winget update"],
+        "parameters": {"type": "object", "properties": {}}
     }
 ]
+
 
 # Fast lookup by name — used by tool_rag.py and mcp_dispatcher.py
 TOOL_DEFINITIONS_BY_NAME: dict = {t["name"]: t for t in TOOL_DEFINITIONS}

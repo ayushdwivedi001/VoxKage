@@ -20,7 +20,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 # ── Load environment variables ────────────────────────────────────────────────
-from _env import load_voxkage_env
+from voxkage._env import load_voxkage_env
 load_voxkage_env()
 
 # ── MCP server ────────────────────────────────────────────────────────────────

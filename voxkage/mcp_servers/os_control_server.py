@@ -21,7 +21,7 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from _env import load_voxkage_env
+from voxkage._env import load_voxkage_env
 load_voxkage_env()
 
 from mcp.server.fastmcp import FastMCP
@@ -86,7 +86,7 @@ def _find_file(description: str) -> str | None:
 def _shield_path(path: str, action: str = "access") -> str | None:
     """Shield-check a path. Returns error string if blocked, None if safe."""
     try:
-        from shield import shield_gate_path
+        from voxkage.shield import shield_gate_path
         return shield_gate_path(path, action)
     except ImportError:
         return None  # Shield not installed — allow (graceful degradation)
@@ -884,6 +884,206 @@ def find_files(
     if len(entries) > top_n:
         lines.append(f"\n  ... and {len(entries) - top_n} more. Use top_n={len(entries)} to see all.")
     return "\n".join(lines)
+
+
+
+# ── NEW: Storage & Archive Tools ──────────────────────────────────────────────
+
+@mcp.tool()
+def get_disk_usage() -> str:
+    """Get disk usage for every drive: total size, free space, and percent used."""
+    try:
+        lines = ["Disk Usage:"]
+        for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+            path = f"{letter}:\\"
+            if os.path.exists(path):
+                try:
+                    total, used, free = shutil.disk_usage(path)
+                    pct = round(used / total * 100)
+                    lines.append(
+                        f"  {letter}: {free//1024**3}GB free / "
+                        f"{total//1024**3}GB total ({pct}% used)"
+                    )
+                except Exception:
+                    pass
+        return "\n".join(lines) if len(lines) > 1 else "No drives found."
+    except Exception as e:
+        return f"Disk usage failed: {e}"
+
+
+@mcp.tool()
+def get_largest_files(directory: str, count: int = 10) -> str:
+    """Find the largest files in a directory to identify space hogs.
+    Parameters:
+      directory: folder path (natural language or absolute)
+      count:     number of results to return (default 10)"""
+    dir_path = directory if os.path.isdir(directory) else _resolve_path(directory)
+    if not dir_path:
+        return f"Directory not found: '{directory}'"
+    files = []
+    try:
+        for root, _, fnames in os.walk(dir_path):
+            for fn in fnames:
+                fp = os.path.join(root, fn)
+                try:
+                    files.append((os.path.getsize(fp), fp))
+                except Exception:
+                    pass
+    except Exception as e:
+        return f"Scan failed: {e}"
+    files.sort(reverse=True)
+    lines = [f"Top {count} largest files in {dir_path}:"]
+    for sz, fp in files[:count]:
+        sz_s = f"{sz//1024//1024}MB" if sz > 1024*1024 else f"{sz//1024}KB"
+        lines.append(f"  {sz_s:>8}  {fp}")
+    return "\n".join(lines) if len(lines) > 1 else "No files found."
+
+
+@mcp.tool()
+def get_folder_size(path: str) -> str:
+    """Calculate the total size of a folder and the number of files inside.
+    Parameters: path = folder path (natural language or absolute)"""
+    dir_path = path if os.path.isdir(path) else _resolve_path(path)
+    if not dir_path:
+        return f"Folder not found: '{path}'"
+    total = 0
+    count = 0
+    for root, _, files in os.walk(dir_path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+                count += 1
+            except Exception:
+                pass
+    gb = total / 1024**3
+    mb = total / 1024**2
+    sz_s = f"{gb:.2f} GB" if gb >= 1 else f"{mb:.1f} MB"
+    return f"Folder size: {sz_s} ({count} files)\nPath: {dir_path}"
+
+
+@mcp.tool()
+def empty_recycle_bin(confirmed: bool = False) -> str:
+    """Empty the Windows Recycle Bin and report how much space was freed.
+    CONFIRMATION GATE: call with confirmed=False first, then confirmed=True.
+    Parameters: confirmed = False (preview) | True (execute)"""
+    import winreg
+    try:
+        # Measure bin size first
+        script_size = (
+            "$shell = New-Object -ComObject Shell.Application;"
+            "$rb = $shell.Namespace(10);"  # 10 = Recycle Bin
+            "$size = ($rb.Items() | Measure-Object -Property Size -Sum).Sum;"
+            "$count = ($rb.Items() | Measure-Object).Count;"
+            "Write-Output \"$count|$size\""
+        )
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", script_size],
+                          capture_output=True, text=True, timeout=10)
+        parts = r.stdout.strip().split("|")
+        item_count = parts[0] if len(parts) > 0 else "?"
+        size_bytes = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        size_mb = round(size_bytes / 1024 / 1024, 1)
+    except Exception:
+        item_count, size_mb = "unknown", 0
+
+    if not confirmed:
+        return (
+            f"[CONFIRM] Empty Recycle Bin\n"
+            f"  Items: {item_count}\n"
+            f"  Size:  {size_mb} MB\n\n"
+            f"This will permanently delete all items. Agreed?"
+        )
+    try:
+        import ctypes
+        SHERB_NOCONFIRMATION = 0x00000001
+        SHERB_NOPROGRESSUI   = 0x00000002
+        SHERB_NOSOUND        = 0x00000004
+        ctypes.windll.shell32.SHEmptyRecycleBinW(
+            None, None, SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND
+        )
+        return f"Recycle Bin emptied. Freed approximately {size_mb} MB."
+    except Exception as e:
+        return f"Failed to empty Recycle Bin: {e}"
+
+
+@mcp.tool()
+def compress_folder(
+    source_path: str,
+    output_zip: str = "",
+    confirmed: bool = False,
+) -> str:
+    """Compress a file or folder into a ZIP archive.
+    CONFIRMATION GATE: confirmed=False → preview → confirmed=True.
+    Parameters:
+      source_path: path to file or folder to compress
+      output_zip:  destination ZIP path (auto-generated if empty)
+      confirmed:   False = preview, True = compress"""
+    import zipfile as _zf
+    src = source_path if os.path.exists(source_path) else _resolve_path(source_path) or _find_file(source_path)
+    if not src or not os.path.exists(src):
+        return f"Source not found: '{source_path}'"
+    if not output_zip:
+        output_zip = src.rstrip("/\\") + ".zip"
+    if not confirmed:
+        kind = "folder" if os.path.isdir(src) else "file"
+        return (
+            f"[CONFIRM] Compress {kind}:\n"
+            f"  Source: {src}\n"
+            f"  Output: {output_zip}\n\n"
+            f"Agreed?"
+        )
+    try:
+        if os.path.isdir(src):
+            shutil.make_archive(output_zip.replace(".zip", ""), "zip", src)
+        else:
+            with _zf.ZipFile(output_zip, "w", _zf.ZIP_DEFLATED) as zf:
+                zf.write(src, os.path.basename(src))
+        return f"✓ Compressed → {output_zip}"
+    except Exception as e:
+        return f"Compression failed: {e}"
+
+
+@mcp.tool()
+def extract_archive(
+    archive_path: str,
+    destination: str = "",
+    confirmed: bool = False,
+) -> str:
+    """Extract a ZIP, TAR, or 7Z archive to a destination folder.
+    CONFIRMATION GATE: confirmed=False → preview → confirmed=True.
+    Parameters:
+      archive_path: path to the archive file
+      destination:  where to extract (default: same folder as archive)
+      confirmed:    False = preview, True = extract"""
+    import zipfile as _zf, tarfile as _tf
+    src = archive_path if os.path.exists(archive_path) else _find_file(archive_path)
+    if not src or not os.path.exists(src):
+        return f"Archive not found: '{archive_path}'"
+    if not destination:
+        destination = os.path.dirname(src)
+    if not confirmed:
+        return (
+            f"[CONFIRM] Extract archive:\n"
+            f"  Archive: {src}\n"
+            f"  Into:    {destination}\n\n"
+            f"Agreed?"
+        )
+    try:
+        os.makedirs(destination, exist_ok=True)
+        if src.endswith(".zip"):
+            with _zf.ZipFile(src, "r") as z:
+                z.extractall(destination)
+        elif src.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2")):
+            with _tf.open(src) as t:
+                t.extractall(destination)
+        else:
+            # Try 7zip via shell
+            r = subprocess.run(["7z", "x", src, f"-o{destination}", "-y"],
+                              capture_output=True, timeout=60)
+            if r.returncode != 0:
+                return f"Extraction failed: unsupported format. Try installing 7-Zip."
+        return f"✓ Extracted to {destination}"
+    except Exception as e:
+        return f"Extraction failed: {e}"
 
 
 if __name__ == "__main__":

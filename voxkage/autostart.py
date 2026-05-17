@@ -2,7 +2,7 @@
 import os
 import sys
 import winreg
-from config_loader import get_config_path, APP_NAME
+from voxkage.config_loader import get_config_path, APP_NAME
 
 EXE_NAME = os.path.basename(sys.executable)  # when packaged will be VoxKage.exe
 # Path to exe to run at login:

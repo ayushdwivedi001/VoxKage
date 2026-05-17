@@ -354,7 +354,7 @@ def _pw_worker():
                         screenshot_b64 = ""
                         try:
                             import base64 as _b64
-                            ss_path = os.path.join(r"C:\VoxKage\Brain", "search_result.jpg")
+                            ss_path = os.path.join(str(brain_dir()), "search_result.jpg")
                             os.makedirs(os.path.dirname(ss_path), exist_ok=True)
                             page.screenshot(path=ss_path, type="jpeg", quality=60)
                             with open(ss_path, "rb") as f:
@@ -430,7 +430,7 @@ def _pw_worker():
                         import base64 as _b64
                         screenshot_b64 = ""
                         try:
-                            ss_dir  = r"C:\VoxKage\Brain"
+                            ss_dir  = str(brain_dir())
                             os.makedirs(ss_dir, exist_ok=True)
                             ss_path = os.path.join(ss_dir, "browse_result.jpg")
                             page.screenshot(path=ss_path, type="jpeg", quality=55)
@@ -660,7 +660,7 @@ def _pw_worker():
                     try:
                         # Try preferred location, fall back to system temp dir
                         try:
-                            save_dir = r"C:\VoxKage\Brain"
+                            save_dir = str(brain_dir())
                             os.makedirs(save_dir, exist_ok=True)
                             screenshot_path = os.path.join(save_dir, "latest_browser_state.jpg")
                         except Exception:
@@ -888,7 +888,7 @@ def _pw_worker():
                             """Take screenshot and return base64. Caps at 1280x720 for speed."""
                             try:
                                 try:
-                                    ss_dir = r"C:\VoxKage\Brain"
+                                    ss_dir = str(brain_dir())
                                     os.makedirs(ss_dir, exist_ok=True)
                                 except Exception:
                                     import tempfile
@@ -1743,7 +1743,7 @@ def _pw_worker():
                             try:
                                 step_num[0] += 1
                                 try:
-                                    ss_dir = r"C:\VoxKage\Brain"
+                                    ss_dir = str(brain_dir())
                                     os.makedirs(ss_dir, exist_ok=True)
                                 except Exception:
                                     ss_dir = tempfile.gettempdir()

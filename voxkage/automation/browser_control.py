@@ -1,5 +1,5 @@
 import webbrowser
-from config_loader import load_config
+from voxkage.config_loader import load_config
 
 CONFIG = load_config()
 WEBSITE_COMMANDS = CONFIG.get("website_commands", {})

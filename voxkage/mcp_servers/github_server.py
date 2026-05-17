@@ -1,3 +1,4 @@
+from voxkage.paths import data_dir
 import os
 import subprocess
 import json
@@ -14,7 +15,7 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from _env import load_voxkage_env
+from voxkage._env import load_voxkage_env
 import threading
 from mcp.server.fastmcp import FastMCP
 
@@ -34,7 +35,7 @@ logger = logging.getLogger("github_server")
 
 load_voxkage_env()
 GITHUB_PAT = os.environ.get("GITHUB_PAT", "")
-VOXKAGE_CLONE_ROOT = os.environ.get("VOXKAGE_CLONE_ROOT", r"C:\VoxKage\Clones")
+VOXKAGE_CLONE_ROOT = os.environ.get("VOXKAGE_CLONE_ROOT", str(data_dir() / "clones"))
 
 # Ensure clone root exists
 if not os.path.exists(VOXKAGE_CLONE_ROOT):

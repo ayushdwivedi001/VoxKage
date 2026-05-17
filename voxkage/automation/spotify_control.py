@@ -5,19 +5,30 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 import subprocess
 import time
-from voxkage.config_loader import get_appdata_dir, load_config
+from voxkage.config_loader import load_config
+from voxkage._env import load_voxkage_env
+load_voxkage_env()  # Ensure ~/.voxkage/.env is loaded before reading tokens
+from voxkage.paths import data_dir
 from voxkage.automation.web_agent import _dispatch_task
 
 logger = logging.getLogger(__name__)
 
-# Constants
-SPOTIFY_TOKEN_CACHE = os.path.join(get_appdata_dir(), "spotify_token.json")
+# Constants — token cache lives in ~/.voxkage/data/ (consistent with paths.py)
+SPOTIFY_TOKEN_CACHE = str(data_dir() / "spotify_token.json")
 
-# Fetch from config first, but fallback to environment variables
+# Fetch from config first, then env vars.
+# Env var name is SPOTIFY_CLIENT_ID (consistent with plugin setup).
+# Also accept legacy SPOTIPY_CLIENT_ID for backwards compatibility.
 _cfg = load_config()
-SPOTIPY_CLIENT_ID = _cfg.get("spotify_client_id") or os.getenv("SPOTIPY_CLIENT_ID")
-SPOTIPY_CLIENT_SECRET = _cfg.get("spotify_client_secret") or os.getenv("SPOTIPY_CLIENT_SECRET")
-SPOTIPY_REDIRECT_URI = os.getenv("SPOTIPY_REDIRECT_URI", "http://127.0.0.1:8080")
+SPOTIPY_CLIENT_ID     = (_cfg.get("spotify_client_id")
+                         or os.getenv("SPOTIFY_CLIENT_ID")
+                         or os.getenv("SPOTIPY_CLIENT_ID"))
+SPOTIPY_CLIENT_SECRET = (_cfg.get("spotify_client_secret")
+                         or os.getenv("SPOTIFY_CLIENT_SECRET")
+                         or os.getenv("SPOTIPY_CLIENT_SECRET"))
+SPOTIPY_REDIRECT_URI  = (os.getenv("SPOTIFY_REDIRECT_URI")
+                         or os.getenv("SPOTIPY_REDIRECT_URI")
+                         or "http://127.0.0.1:8080")
 
 GLOBAL_SPOTIFY_OPTIONS = []
 

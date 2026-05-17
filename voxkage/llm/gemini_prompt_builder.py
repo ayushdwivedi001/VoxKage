@@ -28,6 +28,13 @@ _JSON_FORMAT_SUFFIX = (
     "Example: {\"tool\": \"search_web\", \"args\": {\"query\": \"...\"}}"
 )
 
+_TEXT_FORMAT_SUFFIX = (
+    "\n\n[OUTPUT RULE] "
+    "Respond in plain text only. "
+    "No JSON. No markdown fences. Be concise — 1 to 3 JARVIS-style sentences. "
+    "Refer to the user as 'sir'."
+)
+
 # This is appended LAST in every prompt so it overrides everything before it.
 # The final instruction is what Gemini follows — make it a binary decision.
 _DECISION_TREE_SUFFIX = """

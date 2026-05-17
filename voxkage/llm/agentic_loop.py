@@ -1,3 +1,5 @@
+import os
+from voxkage.paths import brain_dir
 """
 Agentic Loop Implementation for VoxKage LLM Client
 Contains the Phase 5: LangGraph Agentic State Machine
@@ -128,11 +130,11 @@ def _extract_screenshot_path(result_text: str) -> Optional[str]:
         if os.path.isfile(path):
             return path
     for fallback in [
-        r"C:\VoxKage\Brain\latest_browser_state.jpg",
-        r"C:\VoxKage\Brain\agent_step_goto.jpg",
-        r"C:\VoxKage\Brain\agent_step_search_on_site.jpg",
-        r"C:\VoxKage\Brain\agent_step_search_on_page.jpg",
-        r"C:\VoxKage\Brain\agent_step_extract_text.jpg",
+        os.path.join(str(brain_dir()), "latest_browser_state.jpg"),
+        os.path.join(str(brain_dir()), "agent_step_goto.jpg"),
+        os.path.join(str(brain_dir()), "agent_step_search_on_site.jpg"),
+        os.path.join(str(brain_dir()), "agent_step_search_on_page.jpg"),
+        os.path.join(str(brain_dir()), "agent_step_extract_text.jpg"),
     ]:
         if os.path.isfile(fallback):
             return fallback

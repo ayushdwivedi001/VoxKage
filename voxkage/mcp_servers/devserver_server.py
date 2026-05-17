@@ -34,14 +34,14 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from _env import load_voxkage_env
+from voxkage._env import load_voxkage_env
 load_voxkage_env()
 
 from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("voxkage-devserver")
 
 # -- Constants -----------------------------------------------------------------
-# Cross-platform screenshot directory (replaces hardcoded C:\VoxKage\Brain)
+# Cross-platform screenshot directory (replaces hardcoded ~/.voxkage/data/brain)
 _VOXKAGE_BRAIN_DIR = os.path.join(os.path.expanduser("~"), ".voxkage", "brain")
 os.makedirs(_VOXKAGE_BRAIN_DIR, exist_ok=True)
 _SCREENSHOT_FILENAME = "latest_browser_state.jpg"

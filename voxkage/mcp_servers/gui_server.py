@@ -1,3 +1,4 @@
+from voxkage.paths import brain_dir
 """
 MCP Server: VoxKage GUI Pilot v2 (voxkage-gui)
 
@@ -33,14 +34,14 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from _env import load_voxkage_env
+from voxkage._env import load_voxkage_env
 load_voxkage_env()
 
 from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("voxkage-gui")
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-_BRAIN_DIR       = r"C:\VoxKage\Brain"
+_BRAIN_DIR       = str(brain_dir())
 _SCREENSHOT_DIR  = os.path.join(_BRAIN_DIR, "screenshots")
 _FOCUS_SETTLE    = 0.35   # seconds after SetForegroundWindow
 _ACTION_SETTLE   = 0.25   # seconds after click/hotkey/type

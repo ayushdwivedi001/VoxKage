@@ -59,7 +59,7 @@ class VoxKagePlugin(ABC):
             self.mcp_server_name: {
                 "command": sys.executable,
                 "args": [os.path.join(str(package_dir()), self.mcp_server_script)],
-                "cwd": str(voxkage_dir()),
+                "cwd": str(package_dir().parent),  # repo root so relative imports work
                 "env": {"VOXKAGE_HOME": str(voxkage_dir())},
                 "trust": True,
             }
@@ -84,6 +84,13 @@ class VoxKagePlugin(ABC):
             lines.append(f"{key}={value}")
 
         env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        # Force-reload env so the new token is available in this process immediately.
+        # This prevents the 'plugin configured but still not working' bug.
+        try:
+            from voxkage._env import load_voxkage_env
+            load_voxkage_env(force=True)
+        except Exception:
+            pass
 
     def _prompt(self, prompt_text: str, secret: bool = False) -> str:
         """Get input from user, optionally hiding the input for secrets."""

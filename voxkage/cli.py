@@ -496,7 +496,6 @@ def cmd_status():
     print(f"  INTEGRATIONS")
     integrations = [
         ("Telegram", "TELEGRAM_BOT_TOKEN"),
-        ("Gmail",    "GOOGLE_APPLICATION_CREDENTIALS"),
         ("Spotify",  "SPOTIFY_CLIENT_ID"),
         ("GitHub",   "GITHUB_PAT"),
     ]
@@ -504,14 +503,20 @@ def cmd_status():
     load_voxkage_env()
     for name, env_var in integrations:
         configured = bool(os.environ.get(env_var, "").strip())
-        if name == "Gmail":
-            # Gmail uses a token file
-            gmail_token = Path(os.path.expanduser("~")) / ".voxkage" / "gmail_token.json"
-            configured = gmail_token.exists()
         if configured:
             print(f"    {_ok}  {name:20s} Connected")
         else:
             print(f"    {_no}  {name:20s} voxkage plugins add {name.lower()}")
+
+    # Gmail uses OAuth credentials.json — check the file, not an env var
+    from voxkage.paths import data_dir
+    gmail_cred = data_dir() / "credentials.json"
+    gmail_token = data_dir() / "gmail_token.json"
+    gmail_ok = gmail_cred.exists() or gmail_token.exists()
+    if gmail_ok:
+        print(f"    {_ok}  {'Gmail':20s} Connected")
+    else:
+        print(f"    {_no}  {'Gmail':20s} voxkage plugins add gmail")
 
     # Community Plugins
     print()

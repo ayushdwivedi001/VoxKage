@@ -283,7 +283,7 @@ def _open_voxkage():
 
 def _open_settings(tray: QSystemTrayIcon):
     global _settings_panel
-    from settings_panel import SettingsPanel
+    from voxkage.tray.settings_panel import SettingsPanel
 
     # If already open, bring to front
     if _settings_panel is not None:

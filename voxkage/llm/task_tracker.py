@@ -1,6 +1,7 @@
+from voxkage.paths import task_logs_dir
 """
 Phase 4: Session Task Tracker
-Manages task files in C:\VoxKage\Brain\tasks\ for agentic loop tracking.
+Manages task files in ~/.voxkage/data/tasks\ for agentic loop tracking.
 Each task file stores: goal, steps, current_step, status, step_count, visited_urls.
 Auto-cleanup on session end.
 """
@@ -12,7 +13,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_TASKS_DIR = r"C:\VoxKage\Brain\tasks"
+_TASKS_DIR = str(task_logs_dir())
 
 def _ensure_dir():
     os.makedirs(_TASKS_DIR, exist_ok=True)

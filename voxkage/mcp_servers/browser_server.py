@@ -1,3 +1,4 @@
+from voxkage.paths import brain_dir
 """
 MCP Server: Browser Automation & Web Agent
 
@@ -16,7 +17,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 # ── Load environment variables ────────────────────────────────────────────────
-from _env import load_voxkage_env
+from voxkage._env import load_voxkage_env
 load_voxkage_env()
 
 # ── MCP server ────────────────────────────────────────────────────────────────
@@ -357,7 +358,7 @@ def find_download_url(
 import json
 import time
 
-MEMORY_FILE = r"C:\VoxKage\Brain\frontend_memory.jsonl"
+MEMORY_FILE = os.path.join(str(brain_dir()), "frontend_memory.jsonl")
 
 def _run_js(js_code: str) -> str:
     """Helper to dispatch JS evaluation to the active Playwright page."""

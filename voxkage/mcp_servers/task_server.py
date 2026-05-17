@@ -28,14 +28,16 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from _env import load_voxkage_env
+from voxkage._env import load_voxkage_env
 load_voxkage_env()
 
 from mcp.server.fastmcp import FastMCP
@@ -47,9 +49,15 @@ _TASK_FILE = os.path.join(_MEM_DIR, "tasks.jsonl")
 _LOG_DIR   = os.path.join(_MEM_DIR, "task_logs")
 os.makedirs(_LOG_DIR, exist_ok=True)
 
+# -- Watchdog config -----------------------------------------------------------
+# Tasks that haven't logged a step in this many seconds are considered stuck
+# and are auto-killed + marked failed.
+_STUCK_TIMEOUT_SECS = 30 * 60   # 30 minutes — generous for slow research tasks
+_HARD_TIMEOUT_SECS  = 90 * 60   # 90 minutes — absolute hard kill regardless
+
 # -- Gemini CLI executable resolution -----------------------------------------
 # Uses the shared paths module for cross-platform resolution.
-from paths import find_gemini_cli as _paths_find_gemini
+from voxkage.paths import find_gemini_cli as _paths_find_gemini
 _GEMINI_EXE = _paths_find_gemini()
 
 # -- Model catalogue & selection ------------------------------------------------
@@ -231,62 +239,188 @@ def _build_sub_agent_prompt(task_id: str, description: str) -> str:
     Builds the full prompt injected into the background gemini CLI session.
     Overrides VoxKage's JARVIS personality and mandates step logging.
     """
-    return f"""[SUB-AGENT MODE  --  TASK {task_id}]
-You are VoxKage Sub-Agent. You are running as a background process.
-The user is interacting with the MAIN VoxKage session simultaneously.
-Do NOT open any browser windows, Chrome, or visible UI  --  you are headless.
+    return f"""[SUB-AGENT MODE — TASK {task_id}]
+You are a VoxKage background sub-agent. You are running HEADLESSLY with NO human present.
+This process WILL BE KILLED if you pause, wait, or ask for any input.
 
 YOUR TASK:
 {description}
 
-=== MANDATORY EXECUTION RULES ===
+=== NON-NEGOTIABLE EXECUTION RULES ===
 
-1. STEP LOGGING  --  Call log_step() BEFORE and AFTER every major action:
-   log_step(task_id="{task_id}", step_num=1, action="Searching web for X", status="started", details="")
-   [do the action]
-   log_step(task_id="{task_id}", step_num=1, action="Searching web for X", status="done", details="Found 5 results from NASA, Wikipedia")
-   Log errors too: log_step(..., status="error", details="Error message + what you will retry")
+**RULE 0 — NEVER PAUSE OR WAIT FOR INPUT**
+You have FULL AUTO-APPROVAL. NEVER ask the user anything. NEVER wait for confirmation.
+If you are unsure, make the most reasonable choice and continue. This is a background process
+with zero human supervision. Pausing = being killed by the watchdog.
 
-2. AUTO-CONFIRM ALL FILE OPERATIONS  --  always pass confirmed=True:
-   create_file(..., confirmed=True)
-   edit_file(..., confirmed=True)
-   delete_file(..., confirmed=True)
-   convert_file(..., confirmed=True)
-   clean_junk_files(..., confirmed=True)
+**RULE 1 — STEP LOGGING every major action (heartbeat to watchdog)**
+  log_step(task_id="{task_id}", step_num=1, action="your action", status="started", details="")
+  [do the action]
+  log_step(task_id="{task_id}", step_num=1, action="your action", status="done", details="results")
+  Log errors too: log_step(..., status="error", details="Error + retry plan")
+  *** Every log_step call resets the 30-minute watchdog timer ***
 
-3. USE HEADLESS TOOLS ONLY  --  you are a background process with no visible window:
-   For web research: search_web(query=...) or browse_and_extract_tool(url=..., query=...)
-   For YouTube: search_media_options(platform="youtube", query=...)
-   Do NOT use agent_step with "goto" that opens a visible Chrome window unless essential.
-   Prefer search_web for quick facts, browse_and_extract_tool for deep page reads.
+**RULE 2 — AUTO-CONFIRM ALL file operations (always pass confirmed=True)**
+  create_file(..., confirmed=True)
+  edit_file(..., confirmed=True)
+  delete_file(..., confirmed=True)
+  move_file(..., confirmed=True)
+  convert_file(..., confirmed=True)
 
-4. COMPLETE THE TASK  --  do not stop until you have:
-   a) Gathered all needed information
-   b) Created/edited all requested files
-   c) Verified the output exists
+**RULE 3 — USE HEADLESS TOOLS ONLY**
+  Web research → search_web(query=...) or browse_and_extract_tool(url=..., query=...)
+  Files → read_file(), create_file(), edit_file() with confirmed=True
+  Do NOT launch visible Chrome windows. Do NOT use interactive OS dialogs.
 
-5. FINISH  --  call these TWO tools in order:
-   a) complete_task():
-      SUCCESS: complete_task(task_id="{task_id}", summary="Created X at path Y", success=True, details="Step-by-step of what was done")
-      FAILURE: complete_task(task_id="{task_id}", summary="Failed because Z", success=False, details="What was attempted")
-   b) THEN immediately notify_task_done():
-      SUCCESS: notify_task_done(task_id="{task_id}", title="Task Complete", message="<1-2 sentence user-friendly summary of what was accomplished>")
-      FAILURE: notify_task_done(task_id="{task_id}", title="Task Failed", message="<brief reason why it failed>")
+**RULE 4 — HANDLE ERRORS, NEVER ABORT**
+  If a tool call fails, log the error and try an alternative approach.
+  If all alternatives fail, complete_task with success=False.
+  NEVER exit silently — always call complete_task.
 
-6. Do NOT call spawn_task  --  you are already a sub-agent.
-7. Do NOT ask the user for any input or confirmation  --  decide and execute.
-8. Do NOT repeat personality rules  --  just execute.
+**RULE 5 — MANDATORY FINISH SEQUENCE**
+  When done (success OR failure), call BOTH in order:
+  1. complete_task(task_id="{task_id}", summary="...", success=True/False, details="...")
+  2. notify_task_done(task_id="{task_id}", title="Task Complete|Task Failed", message="...")
 
-STEP LOG FORMAT REFERENCE:
-  step_num  = sequential number starting from 1
-  action    = short description of what you are doing ("Searching NASA for black hole info")
-  status    = "started" | "done" | "error" | "skipped"
-  details   = relevant output, findings, or error message
+**RULE 6 — FORBIDDEN ACTIONS**
+  - Do NOT call spawn_task (you are already a sub-agent)
+  - Do NOT ask the user anything
+  - Do NOT open visible UI
+  - Do NOT call complete_task more than once
 
-BEGIN EXECUTING NOW. Start with log_step step 1 = your plan."""
+STEP LOG STATUS VALUES: "started" | "done" | "error" | "skipped"
+
+BEGIN NOW. Your first action: log_step step 1 = brief plan, then execute."""
 
 
 # -- MCP Tools -----------------------------------------------------------------
+
+# ── Watchdog: auto-kill tasks that stop making progress ───────────────────────
+
+def _kill_pid_tree(pid: int):
+    """Kill a process and all its children (psutil-based, graceful fallback)."""
+    try:
+        import psutil
+        proc = psutil.Process(pid)
+        for child in proc.children(recursive=True):
+            try: child.kill()
+            except Exception: pass
+        proc.kill()
+    except Exception:
+        try:
+            # Fallback: taskkill on Windows
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True, timeout=5,
+            )
+        except Exception:
+            pass
+
+
+def _task_watchdog(task_id: str, pid: int):
+    """
+    Background watchdog thread for a spawned sub-agent.
+
+    Checks every 60 seconds:
+      - If the process exited cleanly and complete_task was called → OK
+      - If the process is still alive but hasn't logged a step in
+        _STUCK_TIMEOUT_SECS → kill it (stuck)
+      - If the process has been running longer than _HARD_TIMEOUT_SECS
+        regardless of step progress → kill it (hard timeout)
+      - If the process has exited but complete_task was never called
+        → mark as failed (zombie complete)
+    """
+    start_time   = time.monotonic()
+    CHECK_EVERY  = 60   # seconds between watchdog checks
+
+    while True:
+        time.sleep(CHECK_EVERY)
+        elapsed = time.monotonic() - start_time
+
+        # Re-read current task state
+        tasks = _load_tasks()
+        task = next((t for t in tasks if t.get("id") == task_id), None)
+        if not task:
+            return  # Task was cleared — stop watchdog
+
+        status = task.get("status", "")
+        if status not in ("running", "spawning"):
+            return  # Task already completed/failed/cancelled — stop watchdog
+
+        # ── Check 1: Has the process exited without calling complete_task? ──
+        try:
+            import psutil
+            proc_alive = psutil.pid_exists(pid)
+        except ImportError:
+            proc_alive = True  # Can't check — assume alive
+
+        if not proc_alive and status == "running":
+            # Zombie: process exited but complete_task was never called
+            _update_task(task_id, {
+                "status":       "failed",
+                "summary":      "Sub-agent process exited unexpectedly without calling complete_task()",
+                "completed_at": datetime.now().isoformat(),
+            })
+            try:
+                from voxkage.mcp_servers.notify_server import send_notification
+                send_notification(
+                    title="Sub-Agent Crashed",
+                    message=f"Task {task_id} exited without completing. Check task log for details.",
+                    duration=6,
+                )
+            except Exception:
+                pass
+            return
+
+        # ── Check 2: Hard timeout (absolute max runtime) ──────────────────
+        if elapsed > _HARD_TIMEOUT_SECS:
+            _kill_pid_tree(pid)
+            _update_task(task_id, {
+                "status":       "failed",
+                "summary":      f"Hard timeout: sub-agent exceeded {_HARD_TIMEOUT_SECS//60}min absolute limit",
+                "completed_at": datetime.now().isoformat(),
+            })
+            try:
+                from voxkage.mcp_servers.notify_server import send_notification
+                send_notification(
+                    title="Sub-Agent Killed (Hard Timeout)",
+                    message=f"Task {task_id} ran for over {_HARD_TIMEOUT_SECS//60}min and was killed.",
+                    duration=8,
+                )
+            except Exception:
+                pass
+            return
+
+        # ── Check 3: Stuck timeout (no step logged in N minutes) ──────────
+        last_step_at = task.get("last_step_at") or task.get("started_at", "")
+        if last_step_at:
+            try:
+                # Parse ISO timestamp — handle both naive and aware datetimes
+                last_dt = datetime.fromisoformat(last_step_at.replace("Z", "+00:00"))
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                now_utc = datetime.now(timezone.utc)
+                idle_secs = (now_utc - last_dt).total_seconds()
+                if idle_secs > _STUCK_TIMEOUT_SECS:
+                    _kill_pid_tree(pid)
+                    _update_task(task_id, {
+                        "status":       "failed",
+                        "summary":      f"Watchdog killed: no step logged in {int(idle_secs//60)}min (stuck)",
+                        "completed_at": datetime.now().isoformat(),
+                    })
+                    try:
+                        from voxkage.mcp_servers.notify_server import send_notification
+                        send_notification(
+                            title="Sub-Agent Killed (Stuck)",
+                            message=f"Task {task_id} was stuck for {int(idle_secs//60)}min and was killed.",
+                            duration=8,
+                        )
+                    except Exception:
+                        pass
+                    return
+            except Exception:
+                pass
+
 
 @mcp.tool()
 def spawn_task(
@@ -362,19 +496,34 @@ def spawn_task(
     # shell=True is NOT used  --  it causes extra cmd.exe overhead and PID tracking issues.
     log_path = task["log_file"]
     try:
-        # Build env for sub-agent: inherit parent env + set VOXKAGE_SUBAGENT=1
-        # so file-ops MCP tools (create_file, edit_file, etc.) know they are
-        # running inside a sub-agent and can auto-confirm without blocking.
+        # Build env for sub-agent:
+        #   VOXKAGE_SUBAGENT=1  → file-ops tools auto-confirm without blocking
+        #   VOXKAGE_SAFE_MODE=0 → Shield protocol skips confirmation prompts
+        #   VOXKAGE_HOME        → MCP servers find ~/.voxkage correctly
+        #   GEMINI_API_KEY      → Forwarded so the sub-agent can authenticate
         sub_env = os.environ.copy()
-        sub_env["VOXKAGE_SUBAGENT"] = "1"
+        sub_env["VOXKAGE_SUBAGENT"]  = "1"
+        sub_env["VOXKAGE_SAFE_MODE"] = "0"   # No shield prompts in headless mode
+        sub_env["VOXKAGE_HOME"]      = _MEM_DIR
+        # Ensure npm global bin (where gemini.cmd lives) is in PATH
+        if os.name == "nt":
+            npm_bin = os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "npm")
+            if npm_bin not in sub_env.get("PATH", ""):
+                sub_env["PATH"] = npm_bin + os.pathsep + sub_env.get("PATH", "")
 
+        spawn_time = datetime.now().isoformat()
         with open(log_path, "w", encoding="utf-8") as log_f:
+            log_f.write(f"[VoxKage Sub-Agent] Task {task_id} started at {spawn_time}\n")
+            log_f.write(f"[VoxKage Sub-Agent] Model: {model}\n")
+            log_f.write(f"[VoxKage Sub-Agent] Gemini exe: {_GEMINI_EXE}\n")
+            log_f.write("=" * 60 + "\n")
+            log_f.flush()
             proc = subprocess.Popen(
                 [
                     _GEMINI_EXE,
-                    "--model", model,
+                    "--model",         model,
                     "--approval-mode", "yolo",
-                    "--prompt", prompt,
+                    "--prompt",        prompt,
                 ],
                 cwd=_ROOT,
                 env=sub_env,
@@ -388,10 +537,19 @@ def spawn_task(
             )
 
         _update_task(task_id, {
-            "status":     "running",
-            "started_at": datetime.now().isoformat(),
-            "pid":        proc.pid,
+            "status":       "running",
+            "started_at":   spawn_time,
+            "pid":          proc.pid,
+            "last_step_at": spawn_time,   # watchdog heartbeat
         })
+
+        # Launch per-task hard-timeout watchdog thread
+        threading.Thread(
+            target=_task_watchdog,
+            args=(task_id, proc.pid),
+            daemon=True,
+            name=f"watchdog-{task_id}",
+        ).start()
 
         return (
             f"[TASK SPAWNED]\n"
@@ -400,15 +558,15 @@ def spawn_task(
             f"Status   : Running in background (PID {proc.pid})\n"
             f"Task     : {description[:120]}{'...' if len(description) > 120 else ''}\n"
             f"Log      : {log_path}\n\n"
-            f"The sub-agent is executing this autonomously. "
-            f"Call check_tasks() at any time to see progress, or ask me to check when you want an update."
+            f"The sub-agent is executing autonomously (watchdog active, auto-kills after {_HARD_TIMEOUT_SECS//60}min).\n"
+            f"Call check_tasks() at any time to see progress."
         )
 
     except FileNotFoundError:
         _update_task(task_id, {"status": "failed", "summary": "gemini CLI not found in PATH"})
         return (
             f"[ERROR] Could not spawn sub-agent  --  'gemini' command not found in PATH.\n"
-            f"Make sure the Gemini CLI is installed and accessible from this terminal."
+            f"Make sure the Gemini CLI is installed: npm install -g @google/gemini-cli"
         )
     except Exception as e:
         _update_task(task_id, {"status": "failed", "summary": str(e)})
@@ -513,6 +671,18 @@ def check_tasks(status_filter: str = "all") -> str:
                 lines.append(f"   Progress : Step {step_count} - {current_step}")
                 if step_time:
                     lines.append(f"   Updated  : {step_time}")
+
+                # Zombie PID detection: if the PID is dead but status=running, warn
+                pid = t.get("pid")
+                if pid:
+                    try:
+                        import psutil
+                        if not psutil.pid_exists(pid):
+                            lines.append(f"   WARNING  : PID {pid} is no longer alive! Sub-agent may have crashed.")
+                            lines.append(f"              Call cancel_task('{task_id}') to reset, then check the log.")
+                    except ImportError:
+                        pass
+
                 # Show last line of log for live feedback
                 log_file = t.get("log_file")
                 if log_file and os.path.exists(log_file):
@@ -655,6 +825,8 @@ def log_step(
     except Exception as e:
         return f"[log_step WARNING] Could not write step (non-fatal): {e}. Continuing."
     icon = {"done": "OK", "started": "->", "error": "!!", "skipped": "--"}.get(status, "?")
+    # Update last_step_at heartbeat so watchdog knows we're still alive
+    _update_task(task_id, {"last_step_at": datetime.now().isoformat()})
     return f"{icon} Step {step_num} [{status}] logged for task {task_id}: {action}"
 
 
@@ -1140,9 +1312,21 @@ def spawn_evolution_task(
 
     try:
         sub_env = os.environ.copy()
-        sub_env["VOXKAGE_SUBAGENT"] = "1"
+        sub_env["VOXKAGE_SUBAGENT"]  = "1"
+        sub_env["VOXKAGE_SAFE_MODE"] = "0"   # No shield prompts — headless
+        sub_env["VOXKAGE_HOME"]      = _MEM_DIR
+        if os.name == "nt":
+            npm_bin = os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "npm")
+            if npm_bin not in sub_env.get("PATH", ""):
+                sub_env["PATH"] = npm_bin + os.pathsep + sub_env.get("PATH", "")
 
+        spawn_time = datetime.now().isoformat()
         with open(log_path, "w", encoding="utf-8") as log_f:
+            log_f.write(f"[VoxKage Evolution Sub-Agent] Task {task_id} started at {spawn_time}\n")
+            log_f.write(f"[VoxKage Evolution Sub-Agent] Model: {model}\n")
+            log_f.write(f"[VoxKage Evolution Sub-Agent] Project: {project_dir}\n")
+            log_f.write("=" * 60 + "\n")
+            log_f.flush()
             proc = subprocess.Popen(
                 [_GEMINI_EXE, "--model", model, "--approval-mode", "yolo", "--prompt", prompt],
                 cwd=project_dir,
@@ -1154,10 +1338,19 @@ def spawn_evolution_task(
             )
 
         _update_task(task_id, {
-            "status":     "running",
-            "started_at": datetime.now().isoformat(),
-            "pid":        proc.pid,
+            "status":       "running",
+            "started_at":   spawn_time,
+            "pid":          proc.pid,
+            "last_step_at": spawn_time,
         })
+
+        # Launch watchdog thread
+        threading.Thread(
+            target=_task_watchdog,
+            args=(task_id, proc.pid),
+            daemon=True,
+            name=f"watchdog-{task_id}",
+        ).start()
 
         cp_method = checkpoint["method"]
         cp_id     = checkpoint["checkpoint_id"]
@@ -1173,6 +1366,7 @@ def spawn_evolution_task(
             f"Goal        : {description[:120]}{'...' if len(description) > 120 else ''}\n\n"
             f"The sub-agent will write tests, implement the feature, and deploy only if tests pass.\n"
             f"If anything fails, the checkpoint will be automatically restored.\n"
+            f"Watchdog active — auto-kills after {_HARD_TIMEOUT_SECS//60}min.\n"
             f"Call check_tasks() at any time to see progress."
         )
 

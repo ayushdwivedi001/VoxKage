@@ -191,7 +191,7 @@ def analyze_specific_file_sync(file_path: str, query: str) -> str:
 def open_file_picker_sync() -> str:
     """Opens a native Windows file dialog to pick a file via Qt Main Thread Signal."""
     try:
-        from tray.tray_app import tray_bridge, picker_queue
+        from voxkage.tray.tray_app import tray_bridge, picker_queue
         
         # Clear queue just in case
         while not picker_queue.empty():

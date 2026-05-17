@@ -3,6 +3,7 @@ VoxKage Shield Protocol — Three-Layer Safety System
 
 Layer 1: Hard-blocked system paths (never overridable)
 Layer 2: Safe Mode confirmation gate (default ON, user can disable)
+         Override: set VOXKAGE_SAFE_MODE=0 in ~/.voxkage/.env
 Layer 3: Audit log (every destructive action logged with timestamp)
 
 Used by: os_control_server.py, file_ops_server.py, system_server.py
@@ -14,11 +15,13 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from voxkage.paths import brain_dir
+
 
 # ── Load blocklist ────────────────────────────────────────────────────────────
 
 _SHIELD_FILE = os.path.join(os.path.dirname(__file__), "data", "shield_blocklist.json")
-_AUDIT_LOG   = os.path.join(os.path.expandvars(r"C:\VoxKage\Brain"), "audit.log")
+_AUDIT_LOG   = os.path.join(str(brain_dir()), "audit.log")
 
 
 def _load_blocklist() -> dict:

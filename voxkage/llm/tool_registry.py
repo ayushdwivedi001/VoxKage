@@ -247,7 +247,6 @@ def execute_tool_call(tool_name: str, arguments: dict):
         elif tool_name == "system_control":
             action = arguments.get("action", "").lower()
             lvl = arguments.get("level")
-            
             if action == 'volume' and lvl is not None:
                 return set_volume(lvl)
             elif action == 'brightness' and lvl is not None:
@@ -261,11 +260,221 @@ def execute_tool_call(tool_name: str, arguments: dict):
             elif action == 'bluetooth_off':
                 return toggle_bluetooth(False)
             elif action == 'wallpaper':
-                return change_wallpaper_from_folder()
+                from voxkage.mcp_servers.os_control_server import set_wallpaper
+                import os
+                pics = os.path.join(os.path.expanduser("~"), "Pictures")
+                return set_wallpaper(pics)
             elif action in ['shutdown', 'restart', 'sleep']:
                 return execute_special_command(action)
             else:
                 return f"Unsupported system control action: {action}"
+
+        # ── New atomic OS control tools ──────────────────────────────────────
+        elif tool_name == "set_volume":
+            from voxkage.automation.system_control import set_volume as _sv
+            return _sv(arguments.get("level", 50))
+
+        elif tool_name == "get_volume":
+            from voxkage.automation.system_control import get_volume as _gv
+            return _gv()
+
+        elif tool_name == "toggle_mute":
+            from voxkage.automation.system_control import mute_microphone
+            # toggle system audio mute via pycaw directly
+            try:
+                from voxkage.automation.system_control import _PYCAW_AVAILABLE, _AudioUtilities, _IAudioEndpointVolume, _CLSCTX_ALL, _ctypes_cast, _POINTER
+                if _PYCAW_AVAILABLE:
+                    devices = _AudioUtilities.GetSpeakers()
+                    interface = devices.Activate(_IAudioEndpointVolume._iid_, _CLSCTX_ALL, None)
+                    vol = _ctypes_cast(interface, _POINTER(_IAudioEndpointVolume))
+                    vol.SetMute(1 if arguments.get("mute", True) else 0, None)
+                    return f"Audio {'muted' if arguments.get('mute') else 'unmuted'}."
+            except Exception:
+                pass
+            import pyautogui; pyautogui.press("volumemute")
+            return "Audio muted/unmuted (keypress fallback)."
+
+        elif tool_name == "set_brightness":
+            from voxkage.automation.system_control import set_brightness as _sb
+            return _sb(arguments.get("level", 70))
+
+        elif tool_name == "get_brightness":
+            from voxkage.automation.system_control import get_brightness as _gb
+            return _gb()
+
+        elif tool_name == "toggle_night_light":
+            from voxkage.automation.system_control import toggle_night_light as _tnl
+            return _tnl(arguments.get("enable", True))
+
+        elif tool_name == "toggle_dark_mode":
+            from voxkage.automation.system_control import toggle_dark_mode as _tdm
+            return _tdm(arguments.get("dark", True))
+
+        elif tool_name == "power_action":
+            return execute_special_command(arguments.get("action", "lock"))
+
+        elif tool_name == "schedule_shutdown":
+            from voxkage.automation.system_control import schedule_shutdown as _ss
+            return _ss(arguments.get("minutes", 30))
+
+        elif tool_name == "cancel_scheduled_shutdown":
+            from voxkage.automation.system_control import cancel_scheduled_shutdown as _css
+            return _css()
+
+        elif tool_name == "set_power_plan":
+            from voxkage.automation.system_control import set_power_profile
+            return set_power_profile(arguments.get("mode", "balanced"))
+
+        elif tool_name == "get_battery_status":
+            from voxkage.automation.system_control import get_battery_status as _gbs
+            return _gbs()
+
+        elif tool_name == "get_system_info":
+            from voxkage.automation.system_control import get_system_info as _gsi
+            return _gsi()
+
+        elif tool_name == "get_disk_usage":
+            from voxkage.automation.system_control import get_disk_usage as _gdu
+            return _gdu()
+
+        elif tool_name == "get_system_uptime":
+            from voxkage.automation.system_control import system_uptime
+            return system_uptime()
+
+        elif tool_name == "get_running_processes":
+            from voxkage.automation.system_control import get_running_processes as _grp
+            return _grp(arguments.get("sort_by", "cpu"), arguments.get("top_n", 15))
+
+        elif tool_name == "kill_process":
+            from voxkage.automation.system_control import kill_process_by_name
+            return kill_process_by_name(arguments.get("name_or_pid", ""))
+
+        elif tool_name == "suspend_process":
+            from voxkage.automation.system_control import suspend_process as _sp
+            return _sp(arguments.get("name", ""))
+
+        elif tool_name == "resume_process":
+            from voxkage.automation.system_control import resume_process as _rp
+            return _rp(arguments.get("name", ""))
+
+        elif tool_name == "boost_process_priority":
+            from voxkage.automation.system_control import boost_process
+            return boost_process(arguments.get("name", ""))
+
+        elif tool_name == "get_startup_programs":
+            from voxkage.automation.system_control import get_startup_programs as _gsp
+            return _gsp()
+
+        elif tool_name == "toggle_wifi":
+            return toggle_wifi(arguments.get("enable", True))
+
+        elif tool_name == "toggle_bluetooth":
+            return toggle_bluetooth(arguments.get("enable", True))
+
+        elif tool_name == "toggle_hotspot":
+            from voxkage.automation.system_control import toggle_hotspot
+            return toggle_hotspot(arguments.get("enable", True))
+
+        elif tool_name == "toggle_airplane_mode":
+            from voxkage.automation.system_control import toggle_airplane_mode as _tam
+            return _tam(arguments.get("enable", True))
+
+        elif tool_name == "get_network_status":
+            from voxkage.automation.system_control import get_network_status as _gns
+            return _gns()
+
+        elif tool_name == "get_wifi_networks":
+            from voxkage.automation.system_control import get_wifi_networks as _gwn
+            return _gwn()
+
+        elif tool_name == "connect_wifi":
+            from voxkage.automation.system_control import connect_wifi as _cw
+            return _cw(arguments.get("ssid", ""), arguments.get("password", ""))
+
+        elif tool_name == "ping_host":
+            from voxkage.automation.system_control import ping_host as _ph
+            return _ph(arguments.get("host", "8.8.8.8"), arguments.get("count", 4))
+
+        elif tool_name == "get_open_ports":
+            from voxkage.automation.system_control import get_open_ports as _gop
+            return _gop()
+
+        elif tool_name == "run_network_speed_test":
+            from voxkage.automation.system_control import run_speed_test
+            return run_speed_test()
+
+        elif tool_name == "flush_dns":
+            from voxkage.automation.system_control import flush_dns
+            return flush_dns()
+
+        elif tool_name == "list_open_windows":
+            from voxkage.automation.system_control import list_open_windows as _low
+            return _low()
+
+        elif tool_name == "minimize_window":
+            from voxkage.automation.system_control import minimize_window as _mw
+            return _mw(arguments.get("title", ""))
+
+        elif tool_name == "maximize_window":
+            from voxkage.automation.system_control import maximize_window as _mxw
+            return _mxw(arguments.get("title", ""))
+
+        elif tool_name == "tile_windows":
+            from voxkage.automation.system_control import tile_windows as _tw
+            return _tw(arguments.get("layout", "side_by_side"))
+
+        elif tool_name == "get_installed_apps":
+            from voxkage.automation.system_control import get_installed_apps as _gia
+            return _gia(arguments.get("search", ""))
+
+        elif tool_name == "get_clipboard":
+            from voxkage.automation.system_control import get_clipboard_content
+            return get_clipboard_content()
+
+        elif tool_name == "set_clipboard":
+            from voxkage.automation.system_control import set_clipboard_content
+            return set_clipboard_content(arguments.get("text", ""))
+
+        elif tool_name == "type_text":
+            from voxkage.automation.system_control import type_text_input
+            return type_text_input(arguments.get("text", ""), arguments.get("delay_ms", 30))
+
+        elif tool_name == "press_hotkey":
+            from voxkage.automation.system_control import press_keyboard_hotkey
+            return press_keyboard_hotkey(arguments.get("keys", ""))
+
+        elif tool_name == "clear_temp_files":
+            from voxkage.automation.system_control import clear_temp_files as _ctf
+            return _ctf()
+
+        elif tool_name == "get_largest_files":
+            from voxkage.automation.system_control import get_largest_files as _glf
+            return _glf(arguments.get("directory", "~/Downloads"), arguments.get("count", 10))
+
+        elif tool_name == "get_folder_size":
+            from voxkage.automation.system_control import get_folder_size as _gfs
+            return _gfs(arguments.get("path", ""))
+
+        elif tool_name == "toggle_hidden_files":
+            from voxkage.automation.system_control import toggle_hidden_files as _thf
+            return _thf(arguments.get("show", True))
+
+        elif tool_name == "toggle_focus_mode":
+            from voxkage.automation.system_control import toggle_focus_mode
+            return toggle_focus_mode(arguments.get("enable", True))
+
+        elif tool_name == "update_all_software":
+            from voxkage.automation.system_control import update_all_software
+            return update_all_software()
+
+        elif tool_name == "mute_microphone":
+            from voxkage.automation.system_control import mute_microphone as _mm
+            return _mm(arguments.get("mute", True))
+
+        elif tool_name == "set_audio_output_device":
+            from voxkage.automation.system_control import set_audio_output
+            return set_audio_output(arguments.get("device_name", ""))
+
                 
         elif tool_name == "analyze_specific_file":
             file_path = arguments.get("file_path", "")

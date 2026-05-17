@@ -15,7 +15,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 # ── Load environment variables ────────────────────────────────────────────────
-from _env import load_voxkage_env
+from voxkage._env import load_voxkage_env
 load_voxkage_env()
 
 # ── MCP server ────────────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ def _list_dir_brief(path: str, max_items: int = 50) -> str:
 
 def _get_config_dirs() -> list:
     """Extract all real folder paths defined in config.json."""
-    from config_loader import load_config
+    from voxkage.config_loader import load_config
     config = load_config()
     dirs = []
     for cmd in config.get("app_launch_commands", {}).values():
@@ -139,7 +139,7 @@ def _find_best_match(description: str, threshold: float = 0.5):
 
     Returns (kind, display_name, path_or_cmd) or None.
     """
-    from config_loader import load_config
+    from voxkage.config_loader import load_config
     config = load_config()
     user_home = os.path.expanduser("~")
 
@@ -459,7 +459,7 @@ def find_and_analyze_file(filename_keyword: str, query: str = "") -> str:
 
     Use when user says: 'read my resume', 'find my invoice', 'open my japanese book pdf'.
     """
-    from config_loader import load_config
+    from voxkage.config_loader import load_config
     config = load_config()
 
     user_home = os.path.expanduser("~")
