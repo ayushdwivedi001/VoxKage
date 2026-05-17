@@ -698,53 +698,104 @@ def cmd_init():
     print(f"  {_c(34,211,238)}[2/3] Integrations (Optional){RST}")
     print(f"  Connect your services to unlock VoxKage's full powers:")
     print()
-    print(f"  [ ] Telegram — Bidirectional phone ↔ VoxKage bridge")
-    print(f"  [ ] Gmail    — Read, compose, send emails hands-free")
-    print(f"  [ ] Spotify  — Control music by text")
-    print(f"  [ ] GitHub   — Clone, commit, push repositories")
+
+    # Live scan — show tick state from actual .env
+    from voxkage.plugins.registry import _load_all_plugins
+    all_plugins = _load_all_plugins()
+    configured_count = sum(1 for p in all_plugins if p.is_configured())
+
+    for p in all_plugins:
+        if p.is_configured():
+            tick = f"{_c(34,197,94)}[✓]{RST}"
+            label = f"{p.display_name:8s} — {_c(71,85,105)}{p.description}{RST}"
+        else:
+            tick = f"{_c(71,85,105)}[ ]{RST}"
+            label = f"{p.display_name:8s} — {_c(71,85,105)}{p.description}{RST}"
+        print(f"  {tick} {label}")
     print()
 
+    if configured_count == len(all_plugins):
+        prompt_label = "Reconfigure any? (y/N)"
+    elif configured_count > 0:
+        prompt_label = f"Configure missing ones? (y/N)"
+    else:
+        prompt_label = "Configure now? (y/N)"
+
     try:
-        configure = input(f"  Configure now? (y/N): ").strip().lower()
+        configure = input(f"  {prompt_label}: ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         configure = "n"
 
     if configure == "y":
-        from voxkage.plugins.registry import list_plugins, add_plugin
-        for plugin_name in ["telegram", "gmail", "spotify", "github"]:
+        from voxkage.plugins.registry import add_plugin
+        for p in all_plugins:
+            already = p.is_configured()
+            label = f"{_c(34,197,94)}(already configured){RST}" if already else ""
             try:
-                setup_yn = input(f"  Set up {plugin_name}? (y/N): ").strip().lower()
+                setup_yn = input(
+                    f"  {'Reconfigure' if already else 'Set up'} {p.display_name}? (y/N): "
+                ).strip().lower()
                 if setup_yn == "y":
-                    add_plugin(plugin_name)
+                    add_plugin(p.name)
             except (EOFError, KeyboardInterrupt):
                 pass
     print()
 
     # ── [3/3] Auto-start ──────────────────────────────────────────────────────
     print(f"  {_c(34,211,238)}[3/3] Auto-start on Boot{RST}")
-    print(f"  Start VoxKage system tray automatically on Windows login.")
-    print(f"  Keeps the Telegram bridge alive in the background.")
+    print(f"  Keeps the VoxKage tray and Telegram bridge alive after every reboot.")
     print()
 
     try:
-        autostart = input(f"  Enable autostart? (y/N): ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        autostart = "n"
+        _autostart_currently_on = False
+        if sys.platform == "win32":
+            from voxkage.autostart import is_autostart_enabled
+            _autostart_currently_on = is_autostart_enabled()
+    except Exception:
+        _autostart_currently_on = False
 
-    if autostart == "y":
+    if _autostart_currently_on:
+        print(f"  {_c(34,197,94)}[✓]{RST} Autostart is {_c(34,197,94)}already enabled{RST} — VoxKage tray starts on login.")
+        print()
         try:
-            from voxkage.autostart import enable_autostart
-            enable_autostart()
-            print(f"  {_c(34,197,94)}✓{RST}  Autostart enabled")
-            # Update config
+            toggle = input(f"  Disable autostart? (y/N): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            toggle = "n"
+        if toggle == "y":
             try:
-                cfg = json.loads(config_path().read_text(encoding="utf-8"))
-                cfg["autostart"] = True
-                config_path().write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-            except Exception:
-                pass
-        except Exception as e:
-            print(f"  {_c(255,180,84)}⚠{RST}  Autostart setup failed: {e}")
+                from voxkage.autostart import disable_autostart
+                disable_autostart()
+                print(f"  {_c(255,180,84)}○{RST}  Autostart disabled.")
+                try:
+                    cfg = json.loads(config_path().read_text(encoding="utf-8"))
+                    cfg["autostart"] = False
+                    config_path().write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
+            except Exception as e:
+                print(f"  {_c(255,80,80)}✗{RST}  Failed to disable autostart: {e}")
+        else:
+            print(f"  {_c(34,197,94)}✓{RST}  Autostart unchanged — still enabled.")
+    else:
+        print(f"  {_c(71,85,105)}[ ]{RST} Autostart is {_c(71,85,105)}not enabled{RST}.")
+        print()
+        try:
+            autostart = input(f"  Enable autostart? (y/N): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            autostart = "n"
+        if autostart == "y":
+            try:
+                from voxkage.autostart import enable_autostart
+                enable_autostart()
+                print(f"  {_c(34,197,94)}✓{RST}  Autostart enabled — VoxKage tray will start on next login.")
+                try:
+                    cfg = json.loads(config_path().read_text(encoding="utf-8"))
+                    cfg["autostart"] = True
+                    config_path().write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
+            except Exception as e:
+                print(f"  {_c(255,180,84)}⚠{RST}  Autostart setup failed: {e}")
 
     # Generate settings & GEMINI.md
     _generate_settings_json()
