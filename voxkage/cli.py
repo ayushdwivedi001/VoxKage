@@ -820,6 +820,35 @@ def _generate_gemini_md():
     content = content.replace("{{PLATFORM}}", "windows" if is_windows() else "darwin")
     content = content.replace("{{PACKAGE_DIR}}", str(package_dir()))
 
+    # ── INJECT SOUL MEMORY ────────────────────────────────────────────────────
+    soul_text = "*No user profile data available yet. Profile will grow as we interact.*"
+    profile_path = voxkage_dir() / "user_profile.json"
+    if profile_path.exists():
+        try:
+            import json
+            profile = json.loads(profile_path.read_text(encoding="utf-8"))
+            lines = []
+            
+            if profile.get("identity"):
+                for k, v in profile["identity"].items():
+                    lines.append(f"- **Identity ({k})**: {v}")
+            
+            if profile.get("preferences"):
+                for k, v in profile["preferences"].items():
+                    lines.append(f"- **Prefers ({k})**: {v}")
+                    
+            if profile.get("habits"):
+                for h in profile["habits"]:
+                    lines.append(f"- **Habit**: {h}")
+
+            if lines:
+                soul_text = "\n".join(lines)
+        except Exception as e:
+            soul_text = f"*Error loading soul memory: {e}*"
+
+    content = content.replace("{{USER_SOUL_INJECTION}}", soul_text)
+    # ──────────────────────────────────────────────────────────────────────────
+
     gemini_md_path().write_text(content, encoding="utf-8")
 
 
