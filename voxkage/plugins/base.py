@@ -93,8 +93,10 @@ class VoxKagePlugin(ABC):
             pass
 
     def _prompt(self, prompt_text: str, secret: bool = False) -> str:
-        """Get input from user, optionally hiding the input for secrets."""
-        if secret:
-            import getpass
-            return getpass.getpass(f"  {prompt_text}: ").strip()
+        """Get input from user. Always shows input visibly so paste operations
+        are clearly confirmed — hidden input caused users to paste tokens
+        multiple times thinking nothing was received."""
+        # NOTE: 'secret' flag is intentionally no longer used for hiding.
+        # Tokens and API keys are pasted values, not typed — hiding them
+        # causes confusion (user sees blank, pastes again, corrupts the value).
         return input(f"  {prompt_text}: ").strip()
