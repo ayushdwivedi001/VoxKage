@@ -81,6 +81,18 @@ def _open_settings(icon=None, item=None):
 
 def _quit_app(icon=None, item=None):
     print("[Tray] Exiting...")
+    
+    # Close the settings window if it is currently open
+    if sys.platform == "win32":
+        try:
+            import win32gui
+            import win32con
+            hwnd = win32gui.FindWindow(None, "VoxKage Settings")
+            if hwnd:
+                win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+        except Exception:
+            pass
+            
     if icon is not None:
         icon.stop()
     os._exit(0)

@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 import sys
 import json
-import importlib
 import tkinter as tk
 from tkinter import ttk
 
@@ -33,31 +32,30 @@ def _save_config(data: dict):
     except Exception as e:
         print(f"[Settings] Save error: {e}", file=sys.stderr)
 
-def _has_module(mod: str) -> bool:
-    try:
-        importlib.import_module(mod)
-        return True
-    except ImportError:
-        return False
 
-def _get_integrations() -> dict:
-    from voxkage._env import load_voxkage_env
-    from voxkage.paths import data_dir
-    load_voxkage_env()
-    
-    gmail_ok = (data_dir() / "credentials.json").exists() or \
-               (data_dir() / "gmail_token.json").exists()
-               
-    return {
-        "Telegram": bool(os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()),
-        "Spotify":  bool(os.environ.get("SPOTIFY_CLIENT_ID", "").strip()),
-        "GitHub":   bool(os.environ.get("GITHUB_PAT", "").strip()),
-        "Gmail":    gmail_ok,
-    }
 
 # ── GUI Application ───────────────────────────────────────────────────────────
 
 def run_gui():
+    # ── Single Instance Check (Windows) ──
+    if sys.platform == "win32":
+        try:
+            import win32gui
+            import win32con
+            import ctypes
+            
+            hwnd = win32gui.FindWindow(None, "VoxKage Settings")
+            if hwnd:
+                # Window already exists. Restore and bring to front, then exit.
+                if win32gui.IsIconic(hwnd):
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                ctypes.windll.user32.AllowSetForegroundWindow(-1)
+                win32gui.SetForegroundWindow(hwnd)
+                win32gui.BringWindowToTop(hwnd)
+                return  # Exit this new process
+        except Exception:
+            pass
+
     # Attempt to apply DPI awareness on Windows so it doesn't look blurry
     if sys.platform == "win32":
         try:
@@ -70,7 +68,7 @@ def run_gui():
     root.title("VoxKage Settings")
     
     # ── Geometry & Positioning (Bottom Right)
-    w, h = 380, 560
+    w, h = 380, 450
     
     # Get actual screen width/height (with DPI awareness if applicable)
     sw = root.winfo_screenwidth()
@@ -212,44 +210,7 @@ def run_gui():
     cb_sub.set(_model_to_display(cfg.get("subagent_model", "gemini-2.5-flash-lite")))
     cb_sub.pack(fill="x")
     
-    tk.Frame(content, bg=BORDER, height=1).pack(fill="x", pady=(4, 14))
-    
-    # ── Capability Packs ──
-    tk.Label(content, text="Capability Packs", fg="#f59e0b", bg=BG, font=FONT_B).pack(anchor="w", pady=(0,6))
-    
-    packs = {
-        "RAG Memory": _has_module("chromadb"),
-        "Vision & OCR": _has_module("cv2"),
-        "PDF Conversion": _has_module("docx2pdf")
-    }
-    
-    for name, is_ok in packs.items():
-        pf = tk.Frame(content, bg=PANEL, padx=12, pady=6)
-        pf.pack(fill="x", pady=(0,4))
-        
-        # Fake border radius using a colored background
-        tk.Label(pf, text=name, fg=FG, bg=PANEL, font=FONT_B).pack(side="left")
-        
-        status_text = "Installed" if is_ok else "Not installed"
-        status_color = OK_COLOR if is_ok else ERR_COLOR
-        tk.Label(pf, text=status_text, fg=status_color, bg=PANEL, font=FONT).pack(side="right")
-        
-    tk.Frame(content, bg=BORDER, height=1).pack(fill="x", pady=(10, 14))
-    
-    # ── Integrations ──
-    tk.Label(content, text="Integrations", fg=OK_COLOR, bg=BG, font=FONT_B).pack(anchor="w", pady=(0,6))
-    
-    ints = _get_integrations()
-    for name, is_ok in ints.items():
-        inf = tk.Frame(content, bg=PANEL, padx=12, pady=6)
-        inf.pack(fill="x", pady=(0,4))
-        
-        tk.Label(inf, text=name, fg=FG, bg=PANEL, font=FONT_B).pack(side="left")
-        
-        # Status dot
-        c = tk.Canvas(inf, width=12, height=12, bg=PANEL, highlightthickness=0)
-        c.create_oval(2, 2, 10, 10, fill=(OK_COLOR if is_ok else SUB), outline="")
-        c.pack(side="right")
+
         
     # ── Footer ──
     tk.Frame(root, bg=BORDER, height=1).pack(fill="x")
