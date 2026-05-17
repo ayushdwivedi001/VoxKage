@@ -1467,6 +1467,7 @@ def cmd_launch(extra_args: list[str] | None = None):
     _generate_gemini_md()           # regenerate with latest soul memory
     _inject_global_gemini_md()      # copy to the path Gemini CLI actually reads
 
+    _run_first_time_setup()          # One-time post-install: playwright install chromium, etc.
     _ensure_tray_running()
     _ensure_telegram_watcher_running()  # Start Telegram background watcher
 
@@ -1592,6 +1593,52 @@ def _start_ipc_server():
         server.start()
     except Exception:
         pass  # IPC unavailable — watcher will fall back to pyautogui directly
+
+
+def _run_first_time_setup():
+    """
+    One-time post-install wizard. Runs on first `voxkage` launch after install.
+    Handles steps that `pip install` cannot do on its own:
+
+      1. playwright install chromium  — downloads the Chromium binary needed by
+                                        browser_server.py / search_web tool.
+
+    Marks completion with a stamp file at ~/.voxkage/.setup_done so it NEVER
+    runs again on subsequent launches (instant startup for all future sessions).
+    """
+    stamp = _VOXKAGE_DIR / ".setup_done"
+    if stamp.exists():
+        return  # Already done — skip immediately
+
+    print(f"\n  {_c(56,189,248)}✨{RST}  First-time VoxKage setup (this only happens once)...")
+
+    # ── Step 1: playwright install chromium ───────────────────────────────────
+    print(f"  {_c(71,85,105)}  → Installing Chromium browser for web automation...{RST}")
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode == 0:
+            print(f"  {_c(34,197,94)}✓{RST}  Chromium ready.")
+        else:
+            # Non-fatal — browser tools won't work but everything else will
+            print(f"  {_c(255,180,84)}⚠{RST}  Chromium install failed (search_web may not work).")
+            print(f"  {_c(71,85,105)}  Fix: run `playwright install chromium` manually.{RST}")
+    except Exception as e:
+        print(f"  {_c(255,180,84)}⚠{RST}  Playwright setup skipped: {e}")
+
+    # ── Mark setup as complete ─────────────────────────────────────────────────
+    try:
+        _VOXKAGE_DIR.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(__import__('voxkage').__version__, encoding="utf-8")
+        print(f"  {_c(34,197,94)}✓{RST}  Setup complete. Starting VoxKage...\n")
+    except Exception:
+        pass  # Non-critical — will re-run next launch but that's fine
+
+
+# ── VoxKage state dir (used by _run_first_time_setup) ─────────────────────────
+_VOXKAGE_DIR = Path.home() / ".voxkage"
 
 
 def _ensure_tray_running():

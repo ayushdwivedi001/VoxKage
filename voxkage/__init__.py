@@ -5,6 +5,6 @@ Autonomous · Persistent · Aware
 pip install voxkage
 """
 
-__version__ = "1.0.7"
+__version__ = "1.0.8"
 __author__ = "Ayush Dwivedi"
 __all__ = ["__version__", "__author__"]

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "voxkage"
-version = "1.0.7"
+version = "1.0.8"
 description = "VoxKage — OS-level Agentic AI Assistant. Autonomous · Persistent · Aware."
 readme = "README.md"
 license = {text = "MIT"}
@@ -26,9 +26,9 @@ classifiers = [
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CORE — always installed (~80 MB download).
-# This is what makes VoxKage an OS-living agentic AI from the first run.
-# Deliberately more complete than a bare CLI to deliver an instant WOW factor.
+# CORE — always installed.
+# Every package here maps directly to an import in an MCP server or cli.py.
+# Nothing here is "nice to have" — if it's listed, something breaks without it.
 # ─────────────────────────────────────────────────────────────────────────────
 dependencies = [
     # Runtime & wiring
@@ -42,22 +42,37 @@ dependencies = [
     "pywin32>=306; sys_platform=='win32'",
     "winshell>=0.6; sys_platform=='win32'",
     "winotify>=1.1; sys_platform=='win32'",
-    "pyautogui>=0.9",              # Screen automation core — small (~3 MB)
-    "pywinauto>=0.6; sys_platform=='win32'",  # Window/app control
-    "pygetwindow>=0.0.9",          # Window focus management
-    "pycaw>=20240210; sys_platform=='win32'",  # Windows Core Audio API — precise volume control
-    "comtypes>=1.3; sys_platform=='win32'",    # COM interop for pycaw and audio device switching
+    "pyautogui>=0.9",
+    "pywinauto>=0.6; sys_platform=='win32'",
+    "pygetwindow>=0.0.9",
+    "pycaw>=20240210; sys_platform=='win32'",
+    "comtypes>=1.3; sys_platform=='win32'",
+    "pyperclip>=1.8",                  # Clipboard paste used by IPC injection
 
-    # Office document read/write (lightweight — ships in core, ~15 MB total)
-    # These are small enough to justify being in core — users expect an OS AI
-    # to be able to open a Word doc or edit a spreadsheet without extra installs.
+    # Office documents (lightweight, ~15 MB)
     "python-docx>=1.1",
     "openpyxl>=3.1",
     "python-pptx>=0.6",
-    "Pillow>=10.0",                # Image handling — used across many servers
-    "pystray>=0.19",               # System tray icon (native Win32 Shell_NotifyIcon, ~50 KB)
+    "Pillow>=10.0",
+    "pystray>=0.19",                   # System tray (native Win32 Shell_NotifyIcon)
 
-    # Plugin API credentials (tiny — ship in core so plugins work immediately)
+    # Web automation — browser_server uses these unconditionally
+    # playwright requires a one-time `playwright install chromium` post-install
+    # which VoxKage's first-run wizard handles automatically.
+    "playwright>=1.40",
+
+    # Document processing — rag_server and file_ops_server import these
+    "PyMuPDF>=1.23",                   # fitz — PDF reading (rag_server, file_ops_server)
+    "numpy>=1.24",                     # Used by rag_server and sentence-transformers
+
+    # RAG / Semantic Memory — rag_server unconditionally imports all three
+    "chromadb>=1.5",
+    "sentence-transformers>=3.0",
+
+    # GitHub server
+    "gitpython>=3.1",                  # git module (github_server)
+
+    # Plugin API credentials (tiny — ship in core)
     "spotipy>=2.23",
     "PyGithub>=2.1",
     "google-auth>=2.22",
@@ -67,40 +82,20 @@ dependencies = [
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# OPTIONAL CAPABILITY PACKS — installed on-demand via `voxkage install <pack>`
-# These are intentionally separated because they are large and not needed
-# by every user on every machine.
+# OPTIONAL EXTRAS — for advanced users or specific add-ons
+# These are NOT needed for normal VoxKage operation.
 # ─────────────────────────────────────────────────────────────────────────────
 [project.optional-dependencies]
-rag = [
-    # Semantic search, codebase indexing, cross-session memory
-    "chromadb>=1.5",
-    "sentence-transformers>=3.0",
-    "fastembed>=0.8",
-    "lancedb>=0.10",
-    "numpy>=1.24",
-    "pyarrow>=14.0",
-    # Total: ~450 MB download
-]
 vision = [
-    # Image/screenshot analysis, OCR
+    # Image/screenshot OCR (not used by default servers)
     "opencv-python>=4.8",
     "rapidocr-onnxruntime>=1.3",
     # Total: ~250 MB download
 ]
-browser = [
-    # Full web automation + Chromium browser download
-    "playwright>=1.40",
-    "selenium>=4.15",
-    # Note: playwright requires `playwright install chromium` post-install
-    # Total: ~500 MB download (mostly the Chromium binary)
-]
 docs_plus = [
-    # Heavy document conversion libs (PDF reading, docx↔pdf, etc.)
-    # Lightweight read/write (python-docx, openpyxl) already ship in core.
-    "PyMuPDF>=1.23",      # PDF reading/extraction
-    "docx2pdf>=0.1",      # Word → PDF conversion
-    "pdf2docx>=0.5",      # PDF → Word conversion
+    # Heavy document conversion (Word↔PDF)
+    "docx2pdf>=0.1",
+    "pdf2docx>=0.5",
     # Total: ~80 MB download
 ]
 tray = [
