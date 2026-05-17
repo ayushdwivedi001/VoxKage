@@ -129,4 +129,10 @@ github   = "voxkage.plugins.github:GitHubPlugin"
 include = ["voxkage*"]
 
 [tool.setuptools.package-data]
-voxkage = ["icons/*", "data/*", "templates/*"]
+voxkage = [
+    "icons/*.png",
+    "icons/*.ico",
+    "data/shield_blocklist.json",
+    "data/.env.example",
+    "templates/*",
+]
