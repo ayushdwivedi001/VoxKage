@@ -142,6 +142,11 @@ def icon_path(name: str = "icon.png") -> Path:
     return package_dir() / "icons" / name
 
 def template_path(name: str) -> Path:
+    """Find a bundled template file.
+    Checks data/ first (canonical location), then templates/ as fallback."""
+    in_data = package_dir() / "data" / name
+    if in_data.exists():
+        return in_data
     return package_dir() / "templates" / name
 
 
