@@ -1,21 +1,37 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# VoxKage v1.0.0 — Core Dependencies
-# These are installed with `pip install voxkage`
-# For optional packs: pip install voxkage[rag,vision,browser,docs_plus,tray,full]
+# VoxKage — Developer Requirements
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# For END USERS:  pipx install voxkage         (handles everything automatically)
+# For DEVELOPERS: pip install -e ".[browser]"  (editable install + browser pack)
+#                 pip install -e ".[full]"      (all optional packs)
+#
+# Optional capability packs (install any/all via pip install voxkage[<pack>]):
+#   browser    Playwright web automation + PDF support       (~80 MB + ~150 MB Chromium)
+#   rag        ChromaDB semantic memory + doc indexing       (~500 MB, pulls PyTorch)
+#   vision     OpenCV + RapidOCR screen reading              (~250 MB)
+#   docs_plus  Word/PDF/Excel format conversion              (~80 MB)
+#   full       All of the above                              (~910 MB)
+#
+# After cloning:
+#   pip install -e ".[browser]"       <- recommended dev baseline
+#   playwright install chromium       <- required for web automation tools
+#   voxkage init                      <- scaffold config, inject MCP servers
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Runtime & wiring
+# ── Core: Runtime & Wiring ───────────────────────────────────────────────────
 mcp>=1.0
 httpx>=0.27
 requests>=2.31
 python-dotenv>=1.0
 
-# OS integration
+# ── Core: OS Integration (Cross-Platform) ────────────────────────────────────
 psutil>=5.9
 pyautogui>=0.9
 pygetwindow>=0.0.9
+Pillow>=10.0
 
-# Windows-only (auto-skipped on macOS)
+# ── Core: OS Integration (Windows-Only) ──────────────────────────────────────
 pywin32>=306; sys_platform=='win32'
 winshell>=0.6; sys_platform=='win32'
 winotify>=1.1; sys_platform=='win32'
@@ -23,16 +39,37 @@ pywinauto>=0.6; sys_platform=='win32'
 pycaw>=20240210; sys_platform=='win32'
 comtypes>=1.3; sys_platform=='win32'
 
-# Office document read/write (lightweight core)
+# ── Core: Office Document Read/Write ─────────────────────────────────────────
 python-docx>=1.1
 openpyxl>=3.1
 python-pptx>=0.6
-Pillow>=10.0
 
-# Plugin API credentials
+# ── Core: System Tray Icon ───────────────────────────────────────────────────
+pystray>=0.19
+
+# ── Core: Plugin API Integrations ────────────────────────────────────────────
 spotipy>=2.23
 PyGithub>=2.1
 google-auth>=2.22
 google-auth-oauthlib>=1.1
 google-api-python-client>=2.100
 python-telegram-bot>=20.0
+
+# ── Optional Pack: browser (recommended for dev) ─────────────────────────────
+# Enables: web search, DOM automation, Playwright browser control, PDF reading
+# After install: playwright install chromium
+playwright>=1.40
+PyMuPDF>=1.23
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The following packs are NOT included here to keep dev setup fast.
+# Install individually when needed:
+#
+#   pip install chromadb sentence-transformers numpy pyarrow   <- rag
+#   pip install opencv-python rapidocr-onnxruntime             <- vision
+#   pip install docx2pdf pdf2docx                              <- docs_plus
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Build & Dev Tools (not shipped in the package) ───────────────────────────
+build
+twine

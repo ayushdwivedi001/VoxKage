@@ -68,21 +68,15 @@ def _open_voxkage(icon=None, item=None):
 
 
 def _open_settings(icon=None, item=None):
-    """Open the settings panel (requires PySide6 optional extra)."""
-    import threading
-    def _run():
-        try:
-            from PySide6.QtWidgets import QApplication
-            from voxkage.tray.settings_panel import SettingsPanel
-            app = QApplication.instance() or QApplication(sys.argv)
-            panel = SettingsPanel()
-            panel.show()
-            app.exec()
-        except ImportError:
-            print("[Tray] Settings requires PySide6: pipx inject voxkage PySide6")
-        except Exception as e:
-            print(f"[Tray] Settings error: {e}")
-    threading.Thread(target=_run, daemon=True).start()
+    """Open the native tkinter settings panel in an isolated process."""
+    try:
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        subprocess.Popen(
+            [sys.executable, "-m", "voxkage.tray.settings_window"],
+            creationflags=flags
+        )
+    except Exception as e:
+        print(f"[Tray] Settings error: {e}")
 
 
 def _quit_app(icon=None, item=None):

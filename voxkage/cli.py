@@ -401,7 +401,6 @@ _INSTALL_GROUPS = {
     "vision":    ("voxkage[vision]",     None,                                  "Vision & OCR"),
     "browser":   ("voxkage[browser]",    "playwright install chromium",          "Browser Engine"),
     "docs_plus": ("voxkage[docs_plus]",  None,                                  "PDF Conversion"),
-    "tray":      ("voxkage[tray]",       None,                                  "System Tray"),
     "full":      ("voxkage[full]",       "playwright install chromium",          "Full Suite"),
 }
 
@@ -482,7 +481,6 @@ def cmd_status():
         ("Vision & OCR",     "cv2",                   "vision"),
         ("Browser Engine",   "playwright",            "browser"),
         ("PDF Conversion",   "fitz",                  "docs_plus"),
-        ("System Tray",      "PySide6",               "tray"),
     ]
     for label, module, group in pack_checks:
         try:
@@ -631,32 +629,69 @@ def cmd_init():
     print(f"    {_c(34,197,94)}✓{RST}  Plugin credentials (Telegram, Gmail, Spotify, GitHub)")
     print(f"    {_c(34,197,94)}✓{RST}  Live internet access via agentic web search")
     print()
-    print(f"  Optional packs add heavier capabilities:")
-    print()
-    print(f"  {_c(56,189,248)}[B]{RST} RAG Memory       Semantic codebase + document search  (~450 MB)")
-    print(f"  {_c(56,189,248)}[C]{RST} Browser Engine   Full web automation in Chrome         (~500 MB)")
-    print(f"  {_c(56,189,248)}[D]{RST} Vision           Screenshot analysis, OCR              (~250 MB)")
-    print(f"  {_c(56,189,248)}[E]{RST} PDF Conversion   Convert between PDF ↔ Word ↔ other   (~80 MB)")
-    print(f"  {_c(56,189,248)}[F]{RST} System Tray      VoxKage lives in your taskbar         (~200 MB)")
-    print(f"  {_c(56,189,248)}[G]{RST} Install Everything (Full Suite — ~1.1 GB)")
-    print(f"  {_c(56,189,248)}[S]{RST} Skip — install later with `voxkage install <pack>`")
-    print()
 
-    pack_map = {
-        "b": "rag", "c": "browser", "d": "vision",
-        "e": "docs_plus", "f": "tray", "g": "full",
-    }
+    # Scan which optional packs are already installed
+    import importlib as _il
+    def _has(mod):
+        try:
+            _il.import_module(mod)
+            return True
+        except ImportError:
+            return False
 
-    try:
-        choice = input(f"  Choose packs to install (e.g. B,C or G or S): ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        choice = "s"
+    pack_defs = [
+        # (letter, pack_key, label, sentinel_module, size_note)
+        ("B", "rag",       "RAG Memory     ", "chromadb",             "~450 MB"),
+        ("C", "vision",    "Vision & OCR   ", "cv2",                  "~250 MB"),
+        ("D", "docs_plus", "PDF Conversion ", "docx2pdf",             " ~80 MB"),
+    ]
 
-    if choice != "s" and choice:
-        for letter in choice.replace(",", " ").split():
-            letter = letter.strip()
-            if letter in pack_map:
-                cmd_install(pack_map[letter])
+    _ok = f"{_c(34,197,94)}✓{RST}"
+    _no = f"{_c(255,80,80)}✗{RST}"
+
+    missing_packs = []
+    letter_map    = {}
+
+    all_done = True
+    for letter, key, label, sentinel, size in pack_defs:
+        installed = _has(sentinel)
+        if installed:
+            print(f"    {_ok}  [{letter}] {label}  {_c(71,85,105)}already installed{RST}")
+        else:
+            all_done = False
+            missing_packs.append((letter, key, label, size))
+            letter_map[letter.lower()] = key
+
+    if all_done:
+        print(f"  {_c(34,197,94)}✓  All capability packs are installed.{RST}")
+        print()
+    else:
+        print()
+        print(f"  Optional packs not yet installed:")
+        print()
+        for letter, key, label, size in missing_packs:
+            print(f"  {_c(56,189,248)}[{letter}]{RST} {label}  ({size})")
+        # Full suite only if at least 2 missing
+        if len(missing_packs) >= 2:
+            remaining_keys = [k for _, k, _, _ in missing_packs]
+            print(f"  {_c(56,189,248)}[G]{RST} Install all missing ({', '.join(remaining_keys)})")
+            letter_map["g"] = "__missing__"
+        print(f"  {_c(56,189,248)}[S]{RST} Skip — install later with `voxkage install <pack>`")
+        print()
+
+        try:
+            choice = input(f"  Choose packs to install (e.g. B,C or G or S): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            choice = "s"
+
+        if choice and choice != "s":
+            for letter in choice.replace(",", " ").split():
+                letter = letter.strip()
+                if letter == "g":
+                    for _, key, _, _ in missing_packs:
+                        cmd_install(key)
+                elif letter in letter_map:
+                    cmd_install(letter_map[letter])
     print()
 
     # ── [2/3] Integrations ────────────────────────────────────────────────────
