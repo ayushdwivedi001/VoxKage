@@ -11,8 +11,8 @@
   <br>
 
   <p align="center">
-    <a href="https://pypi.org/project/voxkage/">
-      <img src="https://img.shields.io/pypi/v/voxkage?style=for-the-badge&logo=pypi&logoColor=white&label=PyPI&color=0ea5e9" alt="PyPI Version">
+    <a href="https://pypi.org/project/voxkage/" target="_blank">
+      <img src="https://img.shields.io/pypi/v/voxkage?style=for-the-badge&logo=pypi&logoColor=white&label=PyPI&color=0ea5e9&cacheSeconds=3600" alt="PyPI Version">
     </a>
     <img src="https://img.shields.io/badge/Engine-ACE_System-3b82f6?style=for-the-badge&logo=gnubash&logoColor=white" alt="Engine">
     <img src="https://img.shields.io/badge/Capabilities-Honeycomb_MCP_Web-8b5cf6?style=for-the-badge&logo=server&logoColor=white" alt="Capabilities">
