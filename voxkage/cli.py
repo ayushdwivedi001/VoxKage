@@ -1161,7 +1161,10 @@ def _patch_gemini_bundle():
                 content = gate_pattern.sub(bypassed_gate, content, count=1)
                 patched = True
 
-            # ── Patch 2: Replace logo text variable ────────────────────────────────
+            # ── Patch 2: Replace logo text variable — CONDITIONAL on VOXKAGE_ACTIVE ─
+            # We wrap the variable in a JS ternary so that:
+            #   - VOXKAGE_ACTIVE=1  → VoxKage ASCII art (used by our renderLogo)
+            #   - plain `gemini`    → original Gemini ASCII art (fallback in renderLogo)
             logo_marker = "var longAsciiLogoCompactText = "
             logo_start = content.find(logo_marker)
             if logo_start != -1:
@@ -1177,9 +1180,17 @@ def _patch_gemini_bundle():
                             continue
                         pos += 1
                     if depth == 0:
-                        original_logo = content[logo_start:pos]
-                        replacement_logo = logo_marker + "`\n" + "\n".join(_VOXKAGE_RAW_ART) + "\n`;"
-                        content = content.replace(original_logo, replacement_logo, 1)
+                        # Keep original Gemini logo literal in _vk_gemini_logo, then
+                        # make the public variable conditionally select which art to show.
+                        original_literal = content[open_bt:pos]  # the `...` backtick literal
+                        voxkage_art_literal = "`\n" + "\n".join(_VOXKAGE_RAW_ART) + "\n`"
+                        replacement_logo = (
+                            f"var _vk_gemini_logo = {original_literal}; "
+                            f"var longAsciiLogoCompactText = process.env.VOXKAGE_ACTIVE ? {voxkage_art_literal} : _vk_gemini_logo;"
+                        )
+                        # Replace from logo_marker start to closing semicolon
+                        original_block = content[logo_start:pos]
+                        content = content.replace(original_block, replacement_logo, 1)
                         patched = True
 
             # ── Patch 3: Replace renderLogo
