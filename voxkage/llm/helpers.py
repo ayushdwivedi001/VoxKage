@@ -10,7 +10,8 @@ logger = logging.getLogger(__name__)
 def log_to_hud(sender: str, text: str):
     """Universal helper to append chat strings to Settings GUI HUD log."""
     try:
-        log_path = os.path.join(os.path.abspath("."), ".hud_log")
+        from voxkage.paths import voxkage_dir
+        log_path = os.path.join(voxkage_dir(), ".hud_log")
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps({"sender": sender, "text": text, "timestamp": datetime.now().isoformat()}) + "\n")
     except Exception as e:
@@ -228,7 +229,8 @@ def clear_session_memory():
     # Wipe last_search.json so stale results don't corrupt new sessions
     try:
         import os
-        search_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'last_search.json')
+        from voxkage.paths import data_dir
+        search_file = os.path.join(data_dir(), 'last_search.json')
         if os.path.exists(search_file):
             with open(search_file, 'w', encoding='utf-8') as f:
                 f.write('{"items": [], "timestamp": 0}')
