@@ -55,7 +55,7 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from _env import load_voxkage_env
+from voxkage._env import load_voxkage_env
 load_voxkage_env()
 
 from mcp.server.fastmcp import FastMCP
@@ -116,14 +116,15 @@ def _get_collection():
 def _get_embedder():
     """Return a sentence-transformer model (lazy-initialized, cached)."""
     if not hasattr(_get_embedder, "_model"):
-        with suppress_all_output():  # must suppress stdout AND stderr — both corrupt MCP stdio
-            import warnings
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                from sentence_transformers import SentenceTransformer
-                # "all-MiniLM-L6-v2" — fast, 384-dim, good quality for local RAG
-                # Downloads ~90MB on first run, then cached locally forever
-                _get_embedder._model = SentenceTransformer("all-MiniLM-L6-v2")
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            from sentence_transformers import SentenceTransformer
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            # Load model outside of strict suppress so downloads don't silently block forever
+            with suppress_stdout():
+                _get_embedder._model = SentenceTransformer("all-MiniLM-L6-v2", device=device)
     return _get_embedder._model
 
 
@@ -188,8 +189,8 @@ def _extract_text(file_path: str) -> str:
             with fitz.open(file_path) as doc:
                 for i, page in enumerate(doc):
                     page_text = page.get_text().strip()
-                    # If page is mostly images / no text, perform OCR
-                    if len(page_text) < 20:
+                    # Only do OCR if strictly no text is found, to avoid hanging
+                    if len(page_text) < 10:
                         try:
                             import numpy as np
                             ocr = _get_ocr()
@@ -227,7 +228,6 @@ def _extract_text(file_path: str) -> str:
             for para in doc.paragraphs:
                 if para.text.strip():
                     parts.append(para.text)
-            # Also extract tables
             for table in doc.tables:
                 for row in table.rows:
                     row_text = " | ".join(
@@ -286,9 +286,7 @@ def _smart_chunk(text: str, file_path: str, chunk_size: int = 800, overlap: int 
     if not text or not text.strip():
         return []
 
-    # For code files: try to chunk at function/class definitions
     if ext in {".py", ".js", ".ts", ".java", ".cpp", ".c", ".cs", ".go", ".rs", ".rb", ".php"}:
-        # Split on top-level function/class definitions
         pattern = r"(?m)(?=^(?:def |class |function |async def |export function |func |fn ))"
         logical_blocks = re.split(pattern, text)
         chunks = []
@@ -305,7 +303,6 @@ def _smart_chunk(text: str, file_path: str, chunk_size: int = 800, overlap: int 
         if chunks:
             return chunks
 
-    # For prose/documents: split on double newlines (paragraphs)
     paragraphs = re.split(r"\n{2,}", text)
     chunks = []
     current = ""
@@ -313,14 +310,12 @@ def _smart_chunk(text: str, file_path: str, chunk_size: int = 800, overlap: int 
         if len(current) + len(para) > chunk_size:
             if current.strip():
                 chunks.append(current.strip())
-            # Start new chunk with overlap from previous chunk tail
             current = current[-overlap:] + "\n\n" + para if current else para
         else:
             current += ("\n\n" if current else "") + para
     if current.strip():
         chunks.append(current.strip())
 
-    # Final fallback: hard split
     if not chunks:
         chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size - overlap)]
 
@@ -347,7 +342,6 @@ def _do_index(file_path: str, force: bool = False) -> dict:
     if ext not in _ALL_EXTS:
         return {"status": "skipped", "message": f"Unsupported extension: {ext}"}
 
-    # Check hash for change detection
     current_hash = _sha256(file_path)
     meta = _load_meta()
     existing = meta.get(file_path, {})
@@ -360,26 +354,25 @@ def _do_index(file_path: str, force: bool = False) -> dict:
             "file": os.path.basename(file_path),
         }
 
-    # Extract text
     text = _extract_text(file_path)
     if not text or "Error extracting" in text or "Unsupported file" in text:
         return {"status": "error", "message": text}
 
-    # Chunk the content
     chunks = _smart_chunk(text, file_path)
     if not chunks:
         return {"status": "error", "message": "No content extracted from file"}
 
-    # Build embeddings — MUST suppress all output to avoid MCP stdio corruption
+    # Time tracking to avoid timeout issues
+    start_time = time.time()
+    
     embedder = _get_embedder()
     with suppress_all_output():
         embeddings = embedder.encode(
             chunks,
-            show_progress_bar=False,  # NEVER use progress bar — it writes to stdout/stderr
+            show_progress_bar=False,
             batch_size=32,
         ).tolist()
 
-    # Get collection and remove old chunks for this file
     collection = _get_collection()
     old_chunk_count = existing.get("chunks", 0)
     if old_chunk_count > 0:
@@ -389,7 +382,6 @@ def _do_index(file_path: str, force: bool = False) -> dict:
         except Exception:
             pass
 
-    # Build metadata for each chunk
     file_name = os.path.basename(file_path)
     file_size = os.path.getsize(file_path)
     now = datetime.now().isoformat()
@@ -410,7 +402,6 @@ def _do_index(file_path: str, force: bool = False) -> dict:
             "file_size_kb": round(file_size / 1024, 1),
         })
 
-    # Upsert into ChromaDB
     collection.upsert(
         ids=chunk_ids,
         embeddings=embeddings,
@@ -418,7 +409,6 @@ def _do_index(file_path: str, force: bool = False) -> dict:
         metadatas=metadatas,
     )
 
-    # Update metadata registry
     action = "reindexed" if existing else "indexed"
     meta[file_path] = {
         "hash": current_hash,
@@ -430,13 +420,14 @@ def _do_index(file_path: str, force: bool = False) -> dict:
     }
     _save_meta(meta)
 
+    duration = round(time.time() - start_time, 2)
     return {
         "status": "success",
         "action": action,
         "file": file_name,
         "chunks": len(chunks),
         "characters": len(text),
-        "message": f"[OK] {action.capitalize()} '{file_name}' into RAG ({len(chunks)} chunks from {len(text):,} characters)",
+        "message": f"[OK] {action.capitalize()} '{file_name}' into RAG ({len(chunks)} chunks from {len(text):,} chars) in {duration}s",
     }
 
 
@@ -519,12 +510,11 @@ def query_rag(
 
         where_filter = None
         if file_filter:
-            # ChromaDB 'where' on metadata — use $contains logic via Python post-filter
             pass
 
         results = collection.query(
             query_embeddings=[query_embedding],
-            n_results=min(top_k * 2, count),  # over-fetch if filtering
+            n_results=min(top_k * 2, count),
             include=["documents", "metadatas", "distances"],
         )
 
@@ -535,7 +525,6 @@ def query_rag(
         if not docs:
             return "[RAG] No relevant results found for that query."
 
-        # Apply file_filter post-query if given
         filtered = []
         for doc, meta, dist in zip(docs, metas, distances):
             if file_filter:
@@ -588,7 +577,6 @@ def list_indexed_documents() -> str:
         size_kb = info.get("file_size_kb", "?")
         indexed_at = info.get("indexed_at", "unknown")[:19]
 
-        # Check if file has changed
         status = "[OK] current"
         if not os.path.exists(file_path):
             status = "[!!] FILE MISSING"
@@ -615,7 +603,6 @@ def delete_from_rag(file_path: str) -> str:
     info = meta[file_path]
     chunk_count = info.get("chunks", 0)
 
-    # Delete chunks from ChromaDB
     try:
         collection = _get_collection()
         ids_to_delete = [_safe_id(file_path, i) for i in range(chunk_count + 10)]
@@ -623,7 +610,6 @@ def delete_from_rag(file_path: str) -> str:
     except Exception as e:
         logger.warning(f"ChromaDB delete error: {e}")
 
-    # Remove from metadata
     del meta[file_path]
     _save_meta(meta)
 
@@ -652,16 +638,13 @@ def index_directory(
     if not os.path.isdir(directory):
         return f"[RAG ERROR] Not a directory: {directory}"
 
-    # Parse extension filter
     if extensions:
         target_exts = {e.strip().lower() if e.strip().startswith(".") else f".{e.strip().lower()}"
                        for e in extensions.split(",")}
         target_exts = target_exts & _ALL_EXTS
     else:
-        # Default to TEXT extensions ONLY to avoid massive OCR hangs on codebase images
         target_exts = _TEXT_EXTS
 
-    # ── Phase 1: Quick scan to count files (before heavy work) ─────────────────────
     all_target_files = []
     walker = os.walk(directory) if recursive else [(directory, [], os.listdir(directory))]
     for root, dirs, files in walker:
@@ -680,11 +663,9 @@ def index_directory(
     processed = []
     progress_log = [f"[RAG] Starting index of {total_files} files..."]
 
-    # ── Phase 2: Index with progress tracking ────────────────────────────────────
     for idx, fpath in enumerate(all_target_files, 1):
         fname = os.path.basename(fpath)
         
-        # Emit progress every 10 files or on first/last
         if idx == 1 or idx % 10 == 0 or idx == total_files:
             progress_log.append(f"[RAG] Indexing {idx}/{total_files} files... ({int(idx/total_files*100)}%)")
         
@@ -721,11 +702,10 @@ def index_directory(
     ]
     if processed:
         summary_lines.append("Changes:")
-        summary_lines.extend(processed[:30])  # cap output
+        summary_lines.extend(processed[:30])
         if len(processed) > 30:
             summary_lines.append(f"  ... and {len(processed) - 30} more")
 
-    # ── Stamp the index cache so coding_thinking skips re-scan within 10 min ──
     try:
         _BRAIN_DIR = Path(r"C:\VoxKage\Brain")
         _cache_file = _BRAIN_DIR / "index_cache.json"
