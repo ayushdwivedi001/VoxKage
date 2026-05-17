@@ -236,17 +236,40 @@ def _find_gemini_hwnd():
     try:
         import win32gui, win32process
 
-        # Strategy A — title keyword match (VoxKage windows ONLY)
+        # Strategy A — title keyword match (VoxKage terminal windows ONLY)
         title_hits = []
         def _cb_title(hwnd, _):
             if not win32gui.IsWindowVisible(hwnd):
                 return
             title = win32gui.GetWindowText(hwnd).lower()
             if any(t in title for t in _VOXKAGE_WINDOW_TITLES):
-                title_hits.append(hwnd)
+                # CRITICAL: only accept terminal/console window classes.
+                # This prevents browser tabs (e.g. Vivaldi showing the VoxKage
+                # GitHub repo page) from being mistaken for the VoxKage terminal
+                # and receiving the clipboard paste instead.
+                try:
+                    cls = win32gui.GetClassName(hwnd).lower()
+                    _TERMINAL_CLASSES = {
+                        "consolewindowclass",  # classic cmd.exe / powershell
+                        "pseudoconsolewindow", # Windows Terminal (conhost backend)
+                        "windowsterminal",     # Windows Terminal top-level
+                        "wezterm_gui",
+                        "alacrittywindow",
+                        "mintty",
+                    }
+                    is_terminal = (
+                        cls in _TERMINAL_CLASSES or
+                        any(t in cls for t in ("console", "terminal", "wezterm", "alacritty", "mintty"))
+                    )
+                    if is_terminal:
+                        title_hits.append(hwnd)
+                    else:
+                        log.debug(f"[inject] Skipping non-terminal window '{win32gui.GetWindowText(hwnd)}' (class={cls})")
+                except Exception:
+                    title_hits.append(hwnd)  # fail open if GetClassName errors
         win32gui.EnumWindows(_cb_title, None)
         if title_hits:
-            log.debug(f"[inject] Found VoxKage window: {win32gui.GetWindowText(title_hits[0])}")
+            log.debug(f"[inject] Found VoxKage terminal window: {win32gui.GetWindowText(title_hits[0])}")
             return title_hits[0]
 
         # Strategy B — find node.exe process running gemini, get its console hwnd
@@ -681,29 +704,29 @@ def run():
                     # Acknowledgement
                     _send_telegram("⚙️ Delivering to VoxKage terminal...")
 
-                    # Injection chain - NO HEADLESS MODE
-                    # P1: Named Pipe IPC (IPCServer inside VoxKage types it visibly)
+                    # Injection chain:
+                    # P1: Named Pipe IPC (zero UI interference — preferred)
                     injected = _inject_via_ipc(prompt)
 
-                    # P2: pyautogui direct (ONLY VoxKage-titled window)
+                    # P2: pyautogui — only if a confirmed TERMINAL hwnd was found.
+                    # The terminal class filter ensures browsers with 'voxkage' in
+                    # their tab title are never targeted.
                     if not injected:
                         hwnd_check = _find_gemini_hwnd()
                         if hwnd_check:
                             injected = _inject_via_pyautogui(prompt)
 
-                    # P3: VoxKage not open - notify, save inbox, no headless
+                    # P3: Headless Gemini — VoxKage terminal is not open.
+                    # Spawn a background Gemini process that processes the message
+                    # and replies directly via telegram_send_message.
                     if not injected:
-                        _send_telegram(
-                            "⚠️ *VoxKage is not open on your PC.*\n"
-                            "Please run voxkage in a terminal and try again.\n\n"
-                            "📝 Message saved - will appear when you open VoxKage."
-                        )
+                        _process_via_headless_gemini(prompt)
 
                     _inject_via_inbox_file({
                         "update_id": uid,
                         "prompt": prompt,
                         "injected": injected,
-                        "method": "ipc" if injected else "failed",
+                        "method": "ipc" if injected else "headless",
                         "timestamp": time.time(),
                     })
 

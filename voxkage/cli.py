@@ -1751,7 +1751,7 @@ def main():
             "  voxkage                  Launch VoxKage interactive session\n"
             "  voxkage init             First-time setup wizard\n"
             "  voxkage status           Show system health & installed packs\n"
-            "  voxkage install <pack>   Install a capability pack (rag, vision, browser, docs_plus, tray, full)\n"
+            "  voxkage install <pack>   Install a capability pack (browser, rag, vision, docs_plus, full)\n"
             "  voxkage plugins          List or configure integrations\n"
             "  voxkage tray             Launch system tray icon\n"
         ),
@@ -1768,7 +1768,7 @@ def main():
     subparsers.add_parser("status", help="Show system health & installed packs")
 
     install_parser = subparsers.add_parser("install", help="Install a capability pack")
-    install_parser.add_argument("pack", help="Pack name: rag, vision, browser, docs_plus, tray, full")
+    install_parser.add_argument("pack", help="Pack name: browser, rag, vision, docs_plus, full")
 
     plugins_parser = subparsers.add_parser("plugins", help="List or configure plugins")
     plugins_parser.add_argument("plugin_action", nargs="?", default=None, help="Action: 'add'")
