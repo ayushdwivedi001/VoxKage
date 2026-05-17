@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "voxkage"
-version = "1.0.0"
+version = "1.0.7"
 description = "VoxKage — OS-level Agentic AI Assistant. Autonomous · Persistent · Aware."
 readme = "README.md"
 license = {text = "MIT"}
@@ -55,6 +55,7 @@ dependencies = [
     "openpyxl>=3.1",
     "python-pptx>=0.6",
     "Pillow>=10.0",                # Image handling — used across many servers
+    "pystray>=0.19",               # System tray icon (native Win32 Shell_NotifyIcon, ~50 KB)
 
     # Plugin API credentials (tiny — ship in core so plugins work immediately)
     "spotipy>=2.23",
@@ -103,7 +104,9 @@ docs_plus = [
     # Total: ~80 MB download
 ]
 tray = [
-    # System tray icon + background daemon UI
+    # Optional: rich settings panel UI (PySide6 is NOT needed for the tray icon itself;
+    # pystray in core handles that natively). Install this only if you want the
+    # graphical settings panel accessible from the tray right-click menu.
     "PySide6>=6.6",
     # Total: ~200 MB download
 ]

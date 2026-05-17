@@ -1386,6 +1386,53 @@ def _cleanup_global_settings():
     )
 
 
+def _inject_global_gemini_md():
+    """
+    Copy VoxKage's GEMINI.md into ~/.gemini/GEMINI.md so Gemini CLI reads it
+    as the user-level system prompt.
+
+    Gemini CLI only reads GEMINI.md from two places:
+      1. The current working directory (and parents)
+      2. ~/.gemini/GEMINI.md  ← this is the one we target
+
+    Backs up any existing ~/.gemini/GEMINI.md so _cleanup can restore it.
+    """
+    import shutil as _shutil
+    src = gemini_md_path()          # ~/.voxkage/.gemini/GEMINI.md
+    dst = Path.home() / ".gemini" / "GEMINI.md"
+    bak = Path.home() / ".gemini" / "GEMINI.md.pre_voxkage"
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    if not src.exists():
+        return
+
+    # Back up the user's original GEMINI.md (if any and not already backed up)
+    if dst.exists() and not bak.exists():
+        _shutil.copy2(dst, bak)
+
+    _shutil.copy2(src, dst)
+
+
+def _cleanup_global_gemini_md():
+    """
+    Restore ~/.gemini/GEMINI.md to whatever it was before VoxKage ran.
+    If the user had no GEMINI.md before, the file is removed.
+    """
+    dst = Path.home() / ".gemini" / "GEMINI.md"
+    bak = Path.home() / ".gemini" / "GEMINI.md.pre_voxkage"
+
+    try:
+        if bak.exists():
+            import shutil as _shutil
+            _shutil.copy2(bak, dst)
+            bak.unlink()
+        elif dst.exists():
+            dst.unlink()  # We created it, remove it cleanly
+    except Exception:
+        pass
+
+
 def cmd_launch(extra_args: list[str] | None = None):
     # Set window title
     if is_windows():
@@ -1413,6 +1460,13 @@ def cmd_launch(extra_args: list[str] | None = None):
     # Inject VoxKage MCP servers into global ~/.gemini/settings.json for this session
     _inject_global_settings()
 
+    # ── CRITICAL: Copy VoxKage GEMINI.md → ~/.gemini/GEMINI.md ───────────────
+    # Gemini CLI reads its user-level system prompt ONLY from ~/.gemini/GEMINI.md.
+    # --include-directories does NOT load GEMINI.md — it only adds code context.
+    # Without this copy, VoxKage has no personality and responds as plain Gemini.
+    _generate_gemini_md()           # regenerate with latest soul memory
+    _inject_global_gemini_md()      # copy to the path Gemini CLI actually reads
+
     _ensure_tray_running()
     _ensure_telegram_watcher_running()  # Start Telegram background watcher
 
@@ -1435,7 +1489,6 @@ def cmd_launch(extra_args: list[str] | None = None):
     cmd = [
         gemini,
         "-m", model,
-        "--include-directories", vk_gemini_home,
         "--skip-trust",
     ]
 
@@ -1444,6 +1497,13 @@ def cmd_launch(extra_args: list[str] | None = None):
 
     env = os.environ.copy()
     env["VOXKAGE_ACTIVE"] = "1"
+
+    # ── Start IPC Named Pipe server (Telegram → VoxKage terminal bridge) ─────────
+    # This runs in a background daemon thread. When the Telegram watcher
+    # delivers a message via the Named Pipe, the on_message callback uses
+    # pyautogui to type the prompt directly into THIS terminal window —
+    # making it visible to the user exactly as if they typed it themselves.
+    _start_ipc_server()
 
     try:
         proc = subprocess.run(cmd, cwd=os.getcwd(), env=env)
@@ -1455,24 +1515,143 @@ def cmd_launch(extra_args: list[str] | None = None):
     except KeyboardInterrupt:
         pass
     finally:
-        # Always clean up: remove VoxKage servers from global settings on exit
+        # Always clean up: remove VoxKage servers + GEMINI.md on exit
         _cleanup_global_settings()
+        _cleanup_global_gemini_md()
 
     sys.exit(proc.returncode if 'proc' in dir() else 0)
 
 
-def _ensure_tray_running():
-    import socket
+def _start_ipc_server():
+    """
+    Start the Named Pipe IPC server in a daemon thread.
+
+    When the Telegram watcher delivers a message via \\.\pipe\voxkage_ipc,
+    the on_message callback is fired. It uses pyautogui to type the prompt
+    into the VoxKage terminal window — exactly as if the user typed it —
+    so VoxKage processes it visibly in front of the user.
+
+    The server dies automatically when the VoxKage process exits (daemon).
+    """
+    def _on_telegram_message(source: str, text: str):
+        """
+        Called by IPCServer when a Telegram message arrives.
+        Types the message into the VoxKage terminal window via pyautogui.
+        """
+        import time as _t
+        try:
+            import pyautogui
+            import win32gui, win32con
+            import ctypes
+
+            # Find the VoxKage terminal window (title set by cmd_launch)
+            hwnd = 0
+            def _find_vk(h, _):
+                nonlocal hwnd
+                if win32gui.IsWindowVisible(h):
+                    title = win32gui.GetWindowText(h).lower()
+                    if "voxkage" in title:
+                        hwnd = h
+            win32gui.EnumWindows(_find_vk, None)
+
+            if hwnd:
+                # Restore if minimised
+                if win32gui.IsIconic(hwnd):
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                    _t.sleep(0.3)
+                # Bring to foreground
+                ctypes.windll.user32.AllowSetForegroundWindow(-1)
+                win32gui.SetForegroundWindow(hwnd)
+                win32gui.BringWindowToTop(hwnd)
+                _t.sleep(0.6)  # let window paint and accept input
+
+            # Paste via clipboard for reliable unicode support
+            try:
+                import win32clipboard
+                win32clipboard.OpenClipboard()
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
+                win32clipboard.CloseClipboard()
+                pyautogui.hotkey("ctrl", "v")
+            except Exception:
+                # Fallback: typewrite (ASCII safe)
+                safe = text.encode("ascii", "replace").decode("ascii")
+                pyautogui.typewrite(safe, interval=0.015)
+
+            _t.sleep(0.2)
+            pyautogui.press("enter")
+
+        except ImportError:
+            pass  # pyautogui / win32 not available — IPC delivered but couldn't inject
+        except Exception as e:
+            pass  # Non-critical — VoxKage still works
+
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        from voxkage.ipc import IPCServer
+        server = IPCServer(on_message=_on_telegram_message)
+        server.start()
+    except Exception:
+        pass  # IPC unavailable — watcher will fall back to pyautogui directly
+
+
+def _ensure_tray_running():
+    import socket as _socket
+    try:
+        s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
         s.settimeout(0.1)
         s.connect(("127.0.0.1", 49998))
         s.close()
-    except (ConnectionRefusedError, OSError, socket.timeout):
-        try:
-            cmd_tray()
-        except Exception:
-            pass
+        return  # Tray already running — do nothing
+    except (_socket.timeout, ConnectionRefusedError, OSError):
+        pass  # Not running yet — launch it
+
+    tray_script = package_dir() / "tray" / "tray_app.py"
+    if not tray_script.exists():
+        return
+
+    try:
+        if is_windows():
+            pythonw = sys.executable.replace("python.exe", "pythonw.exe")
+            if not os.path.exists(pythonw):
+                pythonw = sys.executable
+
+            # Capture stderr to a temp log so we can detect crashes
+            log_path = voxkage_dir() / "tray_launch.log"
+            with open(log_path, "w") as log_f:
+                proc = subprocess.Popen(
+                    [pythonw, str(tray_script)],
+                    creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+                    stdout=log_f,
+                    stderr=log_f,
+                )
+            # Give it 1.5s to start and bind its singleton socket
+            import time as _time
+            _time.sleep(1.5)
+
+            # Confirm it actually started by trying the socket again
+            try:
+                s2 = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+                s2.settimeout(0.5)
+                s2.connect(("127.0.0.1", 49998))
+                s2.close()
+            except Exception:
+                # Failed — read the log for the real error
+                try:
+                    err = log_path.read_text(encoding="utf-8", errors="replace").strip()
+                    if err:
+                        print(f"  {_c(255,180,84)}⚠{RST}  Tray failed to start: {err[:200]}")
+                except Exception:
+                    pass
+        else:
+            subprocess.Popen(
+                [sys.executable, str(tray_script)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+    except Exception as e:
+        pass  # Non-critical — VoxKage still works without the tray
+
 
 
 # ── Main Entry Point ─────────────────────────────────────────────────────────

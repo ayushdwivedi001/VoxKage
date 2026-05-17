@@ -215,8 +215,11 @@ def _process_via_headless_gemini(prompt: str) -> bool:
         return False
 
 
-_GEMINI_WINDOW_TITLES = [
-    "gemini", "voxkage", "vision-assistant"
+_VOXKAGE_WINDOW_TITLES = [
+    "voxkage",   # set by `os.system("title VoxKage")` in cmd_launch
+    # NOTE: Do NOT add "gemini" or "vision-assistant" here.
+    # Those match IDEs, Antigravity sessions, and other unrelated tools,
+    # causing Telegram messages to paste into the wrong window.
 ]
 
 
@@ -233,17 +236,17 @@ def _find_gemini_hwnd():
     try:
         import win32gui, win32process
 
-        # Strategy A — title keyword match
+        # Strategy A — title keyword match (VoxKage windows ONLY)
         title_hits = []
         def _cb_title(hwnd, _):
             if not win32gui.IsWindowVisible(hwnd):
                 return
             title = win32gui.GetWindowText(hwnd).lower()
-            if any(t in title for t in _GEMINI_WINDOW_TITLES):
+            if any(t in title for t in _VOXKAGE_WINDOW_TITLES):
                 title_hits.append(hwnd)
         win32gui.EnumWindows(_cb_title, None)
         if title_hits:
-            log.debug(f"[inject] Found window by title: {win32gui.GetWindowText(title_hits[0])}")
+            log.debug(f"[inject] Found VoxKage window: {win32gui.GetWindowText(title_hits[0])}")
             return title_hits[0]
 
         # Strategy B — find node.exe process running gemini, get its console hwnd
@@ -673,44 +676,37 @@ def run():
                     if not prompt:
                         continue
 
-                    log.info(f"New Telegram message → injecting into VoxKage")
+                    log.info("New Telegram message: delivering to VoxKage terminal")
 
-                    # Immediate acknowledgement — user sees something is happening
-                    _send_telegram("🤔 Thinking...")
+                    # Acknowledgement
+                    _send_telegram("⚙️ Delivering to VoxKage terminal...")
 
-                    # ── Injection chain ────────────────────────────────────
-                    # Priority 1: Named Pipe IPC (if IPC server thread is running)
+                    # Injection chain - NO HEADLESS MODE
+                    # P1: Named Pipe IPC (IPCServer inside VoxKage types it visibly)
                     injected = _inject_via_ipc(prompt)
 
-                    # Priority 2: pyautogui keyboard injection (VoxKage window is open)
+                    # P2: pyautogui direct (ONLY VoxKage-titled window)
                     if not injected:
-                        injected = _inject_via_pyautogui(prompt)
+                        hwnd_check = _find_gemini_hwnd()
+                        if hwnd_check:
+                            injected = _inject_via_pyautogui(prompt)
 
-                    # Priority 3: Headless Gemini subprocess (VoxKage is closed)
-                    # This is the REMOTE CONTROL path — full MCP toolset, sends reply via Telegram
+                    # P3: VoxKage not open - notify, save inbox, no headless
                     if not injected:
-                        injected = _process_via_headless_gemini(prompt)
+                        _send_telegram(
+                            "⚠️ *VoxKage is not open on your PC.*\n"
+                            "Please run voxkage in a terminal and try again.\n\n"
+                            "📝 Message saved - will appear when you open VoxKage."
+                        )
 
-                    # Always write to inbox as a persistent log record
                     _inject_via_inbox_file({
                         "update_id": uid,
                         "prompt": prompt,
                         "injected": injected,
-                        "method": (
-                            "ipc" if injected and _inject_via_ipc.__name__ else
-                            "pyautogui" if injected else
-                            "headless" if injected else
-                            "failed"
-                        ),
+                        "method": "ipc" if injected else "failed",
                         "timestamp": time.time(),
                     })
 
-                    if not injected:
-                        _send_telegram(
-                            "❌ VoxKage could not process your request.\n"
-                            "The terminal is closed and the headless processor is unavailable.\n"
-                            "Please open VoxKage on your PC and try again."
-                        )
                 except Exception as ex:
                     log.error(f"Error processing update {update.get('update_id')}: {ex}")
                     continue
@@ -718,7 +714,7 @@ def run():
         except Exception as e:
             consecutive_errors += 1
             wait = min(30, POLL_SEC * (2 ** consecutive_errors))
-            log.error(f"Poll error ({consecutive_errors}): {e} — retrying in {wait}s")
+            log.error(f"Poll error ({consecutive_errors}): {e} - retrying in {wait}s")
             time.sleep(wait)
             continue
 

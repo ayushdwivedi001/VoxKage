@@ -143,11 +143,11 @@ def icon_path(name: str = "icon.png") -> Path:
 
 def template_path(name: str) -> Path:
     """Find a bundled template file.
-    Checks data/ first (canonical location), then templates/ as fallback."""
-    in_data = package_dir() / "data" / name
-    if in_data.exists():
-        return in_data
-    return package_dir() / "templates" / name
+    Checks templates/ first (canonical), then data/ as fallback."""
+    in_templates = package_dir() / "templates" / name
+    if in_templates.exists():
+        return in_templates
+    return package_dir() / "data" / name
 
 
 # ── Python & tool executables ────────────────────────────────────────────────
