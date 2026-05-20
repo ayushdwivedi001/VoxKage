@@ -35,8 +35,9 @@ from voxkage.paths import (
     is_windows, is_mac, is_supported_platform,
     voxkage_dir, package_dir, config_path, env_path,
     gemini_dir, settings_json_path, gemini_md_path,
-    data_dir, task_logs_dir, find_gemini_cli, find_npm,
+    data_dir, task_logs_dir, find_agy_cli, find_npm,
     python_exe, icon_path, template_path, output_dir,
+    agy_mcp_dir,
 )
 
 
@@ -62,7 +63,7 @@ RST = "\033[0m" if _supports_color() else ""
 
 
 # ── Theme palettes ────────────────────────────────────────────────────────────
-# Each palette is keyed to the exact string Gemini CLI stores in settings.json.
+# Each palette is keyed to a theme name string.
 # logo: 6 colors — rows 1-5 of the ASCII art + the dim bottom row.
 # All colors sampled directly from each theme's actual syntax palette.
 
@@ -443,14 +444,14 @@ def cmd_status():
     print()
 
     # Core
-    gemini = find_gemini_cli()
-    gemini_ok = False
+    agy = find_agy_cli()
+    agy_ok = False
     try:
         result = subprocess.run(
-            [gemini, "--version"], capture_output=True, text=True, timeout=10,
+            [agy, "--version"], capture_output=True, text=True, timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW if is_windows() else 0,
         )
-        gemini_ok = result.returncode == 0
+        agy_ok = result.returncode == 0
     except Exception:
         pass
 
@@ -458,7 +459,7 @@ def cmd_status():
     _no = f"{_c(255,80,80)}✗{RST}"
 
     print(f"  CORE")
-    print(f"    {_ok if gemini_ok else _no}  Gemini CLI          {'found' if gemini_ok else 'not found — run: npm i -g @google/gemini-cli'}")
+    print(f"    {_ok if agy_ok else _no}  Antigravity CLI     {'found — v' + result.stdout.strip() if agy_ok else 'not found — install from antigravity.dev'}")
     print(f"    {_ok}  Brain directory     {voxkage_dir()}")
 
     # Count active MCP servers from settings
@@ -541,7 +542,7 @@ def cmd_init():
     print(f"  {_c(14,165,233)}┌{'─' * 60}┐{RST}")
     print(f"  {_c(14,165,233)}│{RST}  {_c(34,211,238)}✦  VoxKage v{__version__} — First-Time Setup{RST}{' ' * 22}{_c(14,165,233)}│{RST}")
     print(f"  {_c(14,165,233)}│{RST}  {_c(71,85,105)}{'─' * 56}{RST}  {_c(14,165,233)}│{RST}")
-    print(f"  {_c(14,165,233)}│{RST}  VoxKage supercharges your Gemini CLI into a living OS AI.{_c(14,165,233)}│{RST}")
+    print(f"  {_c(14,165,233)}│{RST}  VoxKage supercharges your Antigravity CLI into a living OS AI.{_c(14,165,233)}│{RST}")
     print(f"  {_c(14,165,233)}│{RST}  This takes about 2 minutes.{' ' * 30}{_c(14,165,233)}│{RST}")
     print(f"  {_c(14,165,233)}└{'─' * 60}┘{RST}")
     print()
@@ -593,28 +594,27 @@ def cmd_init():
     else:
         print(f"  {_c(34,197,94)}✓{RST}  Config already exists")
 
-    # Check Gemini CLI
-    gemini_ok = False
-    gemini = find_gemini_cli()
+    # Check Antigravity CLI
+    agy_ok = False
+    agy = find_agy_cli()
     try:
         result = subprocess.run(
-            [gemini, "--version"], capture_output=True, text=True, timeout=10,
+            [agy, "--version"], capture_output=True, text=True, timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW if is_windows() else 0,
         )
-        gemini_ok = result.returncode == 0
+        agy_ok = result.returncode == 0
     except Exception:
         pass
 
-    if gemini_ok:
-        print(f"  {_c(34,197,94)}✓{RST}  Gemini CLI found: {gemini}")
+    if agy_ok:
+        print(f"  {_c(34,197,94)}✓{RST}  Antigravity CLI found: {agy}")
     else:
-        print(f"  {_c(255,180,84)}⚠  Gemini CLI not found.{RST}")
-        print(f"     Install: {_c(56,189,248)}npm install -g @google/gemini-cli{RST}")
-        print(f"     Then authenticate: {_c(56,189,248)}gemini{RST}")
+        print(f"  {_c(255,180,84)}⚠  Antigravity CLI not found.{RST}")
+        print(f"     Install from: {_c(56,189,248)}https://antigravity.dev{RST}")
 
     print()
-    print(f"  {_c(71,85,105)}Note: Gemini authentication is managed by the Gemini CLI.{RST}")
-    print(f"  {_c(71,85,105)}Run `gemini` if you haven't set that up yet.{RST}")
+    print(f"  {_c(71,85,105)}Note: Authentication is managed by the Antigravity CLI.{RST}")
+    print(f"  {_c(71,85,105)}Run `agy` if you haven't set that up yet.{RST}")
     print()
 
     # ── [1/3] Capability Packs ────────────────────────────────────────────────
@@ -797,9 +797,9 @@ def cmd_init():
             except Exception as e:
                 print(f"  {_c(255,180,84)}⚠{RST}  Autostart setup failed: {e}")
 
-    # Generate settings & GEMINI.md
-    _generate_settings_json()
-    print(f"  {_c(34,197,94)}✓{RST}  Generated MCP settings")
+    # Scaffold agy MCP servers
+    _scaffold_agy_mcp_servers()
+    print(f"  {_c(34,197,94)}✓{RST}  Registered MCP servers in Antigravity")
 
     _generate_gemini_md()
     print(f"  {_c(34,197,94)}✓{RST}  Generated agent instructions")
@@ -835,6 +835,148 @@ def _sanitize_settings(settings: dict) -> dict:
     return settings
 
 
+def _scaffold_agy_mcp_servers():
+    """
+    Register all VoxKage MCP servers with Antigravity CLI.
+
+    agy reads MCP servers from ~/.gemini/antigravity-cli/mcp/<server-name>/
+    Each server folder contains:
+      - _server.json  — launch config (command, args, env, cwd)
+      - <tool>.json   — one schema file per @mcp.tool() decorated function
+    """
+    import json as _json
+    import ast as _ast
+    py = python_exe()
+    pkg = str(package_dir())
+    mcp_base = agy_mcp_dir()  # ~/.gemini/antigravity-cli/mcp/
+
+    core_servers = [
+        ("voxkage-system",    "mcp_servers/system_server.py"),
+        ("voxkage-browser",   "mcp_servers/browser_server.py"),
+        ("voxkage-media",     "mcp_servers/media_server.py"),
+        ("voxkage-download",  "mcp_servers/download_server.py"),
+        ("voxkage-oscontrol", "mcp_servers/os_control_server.py"),
+        ("voxkage-file",      "mcp_servers/file_server.py"),
+        ("voxkage-fileops",   "mcp_servers/file_ops_server.py"),
+        ("voxkage-gui",       "mcp_servers/gui_server.py"),
+        ("voxkage-health",    "mcp_servers/health_server.py"),
+        ("voxkage-notify",    "mcp_servers/notify_server.py"),
+        ("voxkage-memory",    "mcp_servers/memory_server.py"),
+        ("voxkage-tasks",     "mcp_servers/task_server.py"),
+        ("voxkage-rag",       "mcp_servers/rag_server.py"),
+        ("voxkage-devserver", "mcp_servers/devserver_server.py"),
+        ("voxkage-coding",    "mcp_servers/coding_server.py"),
+    ]
+
+    # Add configured plugin servers (telegram, github, spotify, gmail)
+    try:
+        from voxkage.plugins.registry import get_configured_plugin_servers
+        plugin_cfgs = get_configured_plugin_servers()
+        for name, cfg in plugin_cfgs.items():
+            script = cfg.get("args", [None])[0]
+            if script:
+                script_rel = os.path.relpath(script, pkg) if os.path.isabs(script) else script
+                core_servers.append((name, script_rel))
+    except Exception:
+        pass
+
+    vk_home = str(voxkage_dir())
+
+    for server_name, script_rel in core_servers:
+        script_abs = os.path.join(pkg, script_rel)
+        if not os.path.exists(script_abs):
+            continue
+
+        server_dir = mcp_base / server_name
+        server_dir.mkdir(parents=True, exist_ok=True)
+
+        # _server.json is no longer used by Antigravity CLI; we register servers directly in mcp_config.json via _generate_settings_json
+
+        # Extract per-tool JSON schemas via AST (no subprocess required)
+        try:
+            src = Path(script_abs).read_text(encoding="utf-8", errors="ignore")
+            tree = _ast.parse(src)
+
+            for node in _ast.walk(tree):
+                if not isinstance(node, _ast.FunctionDef):
+                    continue
+
+                # Only @mcp.tool() decorated functions
+                is_mcp_tool = any(
+                    (isinstance(d, _ast.Call) and
+                     isinstance(d.func, _ast.Attribute) and
+                     d.func.attr == "tool")
+                    or
+                    (isinstance(d, _ast.Attribute) and d.attr == "tool")
+                    for d in node.decorator_list
+                )
+                if not is_mcp_tool:
+                    continue
+
+                tool_name = node.name
+
+                # Docstring → description
+                description = ""
+                if (node.body and isinstance(node.body[0], _ast.Expr) and
+                        isinstance(node.body[0].value, _ast.Constant)):
+                    description = node.body[0].value.s.strip()
+                if not description:
+                    description = f"VoxKage tool: {tool_name}"
+
+                # Build parameter schema from function signature
+                fn_args = node.args
+                properties = {}
+                required = []
+                n_args = len(fn_args.args)
+                n_defaults = len(fn_args.defaults)
+                default_offset = n_args - n_defaults
+
+                for i, arg in enumerate(fn_args.args):
+                    if arg.arg in ("self", "return"):
+                        continue
+                    param_type = "string"
+                    if arg.annotation:
+                        try:
+                            ann = _ast.unparse(arg.annotation)
+                        except AttributeError:
+                            ann = ""
+                        if "int" in ann:
+                            param_type = "integer"
+                        elif "float" in ann:
+                            param_type = "number"
+                        elif "bool" in ann:
+                            param_type = "boolean"
+                        elif "list" in ann.lower():
+                            param_type = "array"
+
+                    properties[arg.arg] = {"type": param_type, "description": arg.arg}
+                    if i < default_offset:
+                        required.append(arg.arg)
+
+                schema = {
+                    "name": tool_name,
+                    "description": description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                    }
+                }
+                if required:
+                    schema["parameters"]["required"] = required
+
+                (server_dir / f"{tool_name}.json").write_text(
+                    _json.dumps(schema, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+        except Exception:
+            pass  # Non-critical: agy can still launch the server
+
+    # Finally, write all servers to the central mcp_config.json for Antigravity CLI
+    _generate_settings_json()
+
+
+# Keep _generate_settings_json for internal use (coding_server, rag_server may reference it)
+
 def _generate_settings_json():
     py = python_exe()
     pkg = str(package_dir())
@@ -860,6 +1002,7 @@ def _generate_settings_json():
     servers = {}
     for name, script in core_servers:
         servers[name] = {
+            "$typeName": "exa.cascade_plugins_pb.CascadePluginCommandTemplate",
             "command": py,
             "args": [os.path.join(pkg, script)],
             "cwd": str(voxkage_dir()),
@@ -870,11 +1013,17 @@ def _generate_settings_json():
     try:
         from voxkage.plugins.registry import get_configured_plugin_servers
         plugin_servers = get_configured_plugin_servers()
+        for k, v in plugin_servers.items():
+            if "$typeName" not in v:
+                v["$typeName"] = "exa.cascade_plugins_pb.CascadePluginCommandTemplate"
         servers.update(plugin_servers)
-    except Exception:
-        pass
+    except Exception as e:
+        print("ERROR in registry:", e)
+        import traceback
+        traceback.print_exc()
 
-    vk_settings = settings_json_path()
+    from voxkage.paths import mcp_config_json_path
+    vk_settings = mcp_config_json_path()
     vk_settings.parent.mkdir(parents=True, exist_ok=True)
 
     settings = {}
@@ -1044,8 +1193,9 @@ def _ensure_telegram_watcher_running():
         pass  # Non-critical — VoxKage still works, just no auto-injection
 
 
-# ── Gemini CLI Bundle Patch ──────────────────────────────────────────────────
+# ── GEMINI.md injection (system prompt for agy) ──────────────────────────────
 
+# Sentinel kept for any old patched bundles that may still exist — harmless
 SENTINEL = "// __VOXKAGE_PATCHED_v5__"
 
 _VOXKAGE_RAW_ART = [
@@ -1113,375 +1263,33 @@ def _js_stmt_end(content, start):
 
 
 def _patch_gemini_bundle():
-    """Inject VoxKage logo into Gemini CLI's React-Ink component tree.
-
-    Uses REGEX-based patching for version-agnostic resilience. Every Gemini CLI
-    update that changes import version numbers (import_jsx_runtime63 vs 59 vs 64)
-    or minor code restructuring will still be patched correctly because we match
-    on structural patterns rather than exact strings.
-
-    Patches applied:
-      1. Gate bypass — logo always shows regardless of loggedOut / terminal width
-      2. Logo text — replaces Gemini ASCII art with VoxKage art
-      3. renderLogo — completely replaces to show ONLY VoxKage art (no Gemini icon)
-      4. renderMetadata — completely replaces to return null (hides "Gemini CLI" text)
-      5. Settings path — isolates VoxKage settings from Gemini settings
-
-    Idempotent: skips if already patched with current sentinel.
-    Creates .voxkage_orig backup on first patch.
-    Safe to call on every launch.
-    """
-    import re
-    import shutil as _shutil
-
-    try:
-        npm_global = Path.home() / "AppData" / "Roaming" / "npm"
-        bundle_dir = npm_global / "node_modules" / "@google" / "gemini-cli" / "bundle"
-        if not bundle_dir.exists():
-            return
-
-        for bundle_file in sorted(bundle_dir.glob("interactiveCli-*.js")):
-            content = bundle_file.read_text(encoding="utf-8", errors="ignore")
-
-            if SENTINEL in content:
-                continue
-
-            backup = bundle_file.with_suffix(".js.voxkage_orig")
-            if backup.exists():
-                # Always restore from original to clear any broken previous patch
-                content = backup.read_text(encoding="utf-8", errors="ignore")
-            else:
-                _shutil.copy2(bundle_file, backup)
-
-            patched = False
-
-            # Detect the actual import version used in this bundle (e.g. import_jsx_runtime59)
-            # Search for the pattern used IN renderLogo (it references jsx/jsxs right after the comma)
-            # The JSX runtime imports use numbers >= 10; filenames use single digits (e.g. runtime2, runtime3)
-            # We find the jsx/jsxs call pattern near renderLogo function
-            rl_start = content.find("const renderLogo = ")
-            search_window = content[rl_start:rl_start + 5000] if rl_start != -1 else content
-            _import_ver_match = re.search(r"\(0,\s*import_jsx_runtime(\d+)\.(?:jsx|jsxs)\)", search_window)
-            import_ver = _import_ver_match.group(1) if _import_ver_match else "63"
-            jsx = f"import_jsx_runtime{import_ver}"
-
-            raw_art_js = "[" + ", ".join(json.dumps(line) for line in _VOXKAGE_RAW_ART) + "]"
-
-            # ── Dark theme palettes (6 colours = one per logo row) ─────────────────
-            # Key format: ALL lowercase letters only (spaces/punctuation stripped)
-            # Also include short-name aliases because Gemini settings sometimes
-            # stores abbreviated names e.g. "Dracula" instead of "Dracula Dark".
-            # Detection JS does substring matching so "dracula" matches "draculadark".
-            _def  = [_c(14,165,233),  _c(34,211,238),  _c(103,232,249), _c(147,197,253), _c(186,230,253), _c(30,58,138)]
-            _ansi = [_c(0,229,255),   _c(0,207,207),   _c(0,180,255),   _c(0,144,255),   _c(0,110,255),   _c(0,51,128)]
-            _atom = [_c(97,175,239),  _c(86,182,194),  _c(198,120,221), _c(224,108,117), _c(229,192,123), _c(75,82,99)]
-            _ayu  = [_c(57,186,230),  _c(89,194,255),  _c(115,208,255), _c(255,180,84),  _c(255,213,128), _c(45,54,64)]
-            _drac = [_c(255,121,198), _c(189,147,249), _c(139,233,253), _c(80,250,123),  _c(241,250,140), _c(98,114,164)]
-            _ghd  = [_c(121,192,255), _c(88,166,255),  _c(56,139,253),  _c(31,111,235),  _c(88,166,255),  _c(28,42,58)]
-            _ghcb = [_c(121,192,255), _c(88,166,255),  _c(227,179,65),  _c(255,166,87),  _c(210,168,255), _c(28,42,58)]
-            _holy = [_c(255,77,77),   _c(255,140,0),   _c(255,215,0),   _c(127,255,0),   _c(0,250,154),   _c(26,26,58)]
-            _sop  = [_c(250,208,0),   _c(255,98,140),  _c(165,255,144), _c(158,255,255), _c(251,148,255), _c(61,59,110)]
-            _sol  = [_c(38,139,210),  _c(42,161,152),  _c(133,153,0),   _c(181,137,0),   _c(203,75,22),   _c(7,54,66)]
-            _tok  = [_c(122,162,247), _c(187,154,247), _c(158,206,106), _c(224,175,104), _c(247,118,142), _c(59,66,97)]
-            # ── Light theme palettes (darker/saturated so art is visible on white bg) ─
-            _ansiL  = [_c(0,102,204),   _c(0,128,128),   _c(0,102,51),    _c(153,51,0),    _c(153,0,51),    _c(180,180,200)]
-            _ayuL   = [_c(0,100,168),   _c(64,132,166),  _c(255,155,0),   _c(230,100,0),   _c(118,190,30),  _c(200,200,210)]
-            _defL   = [_c(9,105,218),   _c(5,80,174),    _c(26,127,55),   _c(130,80,223),  _c(207,34,46),   _c(192,200,210)]
-            _ghL    = [_c(3,102,214),   _c(0,92,197),    _c(22,111,52),   _c(148,73,227),  _c(203,36,49),   _c(210,215,220)]
-            _ghcbL  = [_c(3,102,214),   _c(0,92,197),    _c(148,73,227),  _c(204,88,10),   _c(203,36,49),   _c(210,215,220)]
-            _gcL    = [_c(0,0,128),     _c(0,100,0),     _c(136,0,0),     _c(100,0,100),   _c(0,100,136),   _c(200,200,210)]
-            _solL   = [_c(38,139,210),  _c(42,161,152),  _c(133,153,0),   _c(181,137,0),   _c(203,75,22),   _c(220,218,207)]
-            _xcL    = [_c(21,126,251),  _c(180,57,175),  _c(37,126,40),   _c(167,84,0),    _c(204,52,45),   _c(210,215,220)]
-
-            # json.dumps encodes ESC (\x1b) as \u001b which JS interprets correctly
-            def _aj(arr):
-                return "[" + ", ".join(json.dumps(s) for s in arr) + "]"
-
-            palettes_js = (
-                # ── Dark themes (keys = full display name, lowercased, no spaces)
-                '{"defaultdark":'             + _aj(_def)  + ','
-                '"ansidark":'                 + _aj(_ansi) + ','
-                '"atomonedark":'              + _aj(_atom) + ','
-                '"ayudark":'                  + _aj(_ayu)  + ','
-                '"draculadark":'              + _aj(_drac) + ','
-                '"githubdark":'               + _aj(_ghd)  + ','
-                '"githubdarkcolorblinddark":' + _aj(_ghcb) + ','
-                '"holidaydark":'              + _aj(_holy) + ','
-                '"shadesofpurpledark":'       + _aj(_sop)  + ','
-                '"solarizeddark":'            + _aj(_sol)  + ','
-                '"tokyonightdark":'           + _aj(_tok)  + ','
-                # ── Short-name aliases (Gemini sometimes stores abbreviated names)
-                '"default":'                  + _aj(_def)  + ','
-                '"ansi":'                     + _aj(_ansi) + ','
-                '"atomone":'                  + _aj(_atom) + ','
-                '"ayu":'                      + _aj(_ayu)  + ','
-                '"dracula":'                  + _aj(_drac) + ','
-                '"github":'                   + _aj(_ghd)  + ','
-                '"githubcolorblind":'         + _aj(_ghcb) + ','
-                '"holiday":'                  + _aj(_holy) + ','
-                '"shadesofpurple":'           + _aj(_sop)  + ','
-                '"solarized":'                + _aj(_sol)  + ','
-                '"tokyonight":'               + _aj(_tok)  + ','
-                # ── Light themes
-                '"ansilight":'                + _aj(_ansiL) + ','
-                '"ayulight":'                 + _aj(_ayuL)  + ','
-                '"defaultlight":'             + _aj(_defL)  + ','
-                '"githublight":'              + _aj(_ghL)   + ','
-                '"githublightcolorblindlight":' + _aj(_ghcbL) + ','
-                '"googlecodelight":'          + _aj(_gcL)   + ','
-                '"solarizedlight":'           + _aj(_solL)  + ','
-                '"xcodelight":'               + _aj(_xcL)   + '}'
-            )
-
-            # ── Patch 1: Gate bypass (loggedOut + terminal width check) ────────────
-            gate_pattern = re.compile(
-                r"if\s*\(\s*loggedOut\s*\)\s*\{[\s\S]*?if\s*\(\s*terminalWidth\s*>=\s*widthOfLongLogo\s*\)\s*\{",
-                re.MULTILINE
-            )
-            bypassed_gate = (
-                "if (process.env.VOXKAGE_ACTIVE || loggedOut) {\n"
-                "    const widthOfLongLogo = process.env.VOXKAGE_ACTIVE ? 0 : (getAsciiArtWidth(longAsciiLogoCompactText) + LOGO_METADATA_PADDING);\n"
-                "    if (process.env.VOXKAGE_ACTIVE || terminalWidth >= widthOfLongLogo) {"
-            )
-            if gate_pattern.search(content):
-                content = gate_pattern.sub(bypassed_gate, content, count=1)
-                patched = True
-
-            # ── Patch 2: Replace logo text variable — CONDITIONAL on VOXKAGE_ACTIVE ─
-            # We wrap the variable in a JS ternary so that:
-            #   - VOXKAGE_ACTIVE=1  → VoxKage ASCII art (used by our renderLogo)
-            #   - plain `gemini`    → original Gemini ASCII art (fallback in renderLogo)
-            logo_marker = "var longAsciiLogoCompactText = "
-            logo_start = content.find(logo_marker)
-            if logo_start != -1:
-                open_bt = content.find("`", logo_start + len(logo_marker))
-                if open_bt != -1:
-                    depth = 1
-                    pos = open_bt + 1
-                    while depth > 0 and pos < len(content):
-                        if content[pos] == "`":
-                            depth -= 1
-                        elif content[pos] == "\\":
-                            pos += 2
-                            continue
-                        pos += 1
-                    if depth == 0:
-                        # Keep original Gemini logo literal in _vk_gemini_logo, then
-                        # make the public variable conditionally select which art to show.
-                        original_literal = content[open_bt:pos]  # the `...` backtick literal
-                        voxkage_art_literal = "`\n" + "\n".join(_VOXKAGE_RAW_ART) + "\n`"
-                        replacement_logo = (
-                            f"var _vk_gemini_logo = {original_literal}; "
-                            f"var longAsciiLogoCompactText = process.env.VOXKAGE_ACTIVE ? {voxkage_art_literal} : _vk_gemini_logo;"
-                        )
-                        # Replace from logo_marker start to closing semicolon
-                        original_block = content[logo_start:pos]
-                        content = content.replace(original_block, replacement_logo, 1)
-                        patched = True
-
-            # ── Patch 3: Replace renderLogo
-            # Match the ENTIRE renderLogo function regardless of import version number
-            # Pattern: const renderLogo = () => ... function body ... };
-            rl_kw_pos = content.find("const renderLogo = ")
-            m3_start, m3_end = -1, -1
-            if rl_kw_pos != -1:
-                arrow3 = content.find("=>", rl_kw_pos)
-                if arrow3 != -1:
-                    _end3 = _js_stmt_end(content, arrow3 + 2)
-                    if _end3 != -1:
-                        m3_start, m3_end = rl_kw_pos, _end3
-            if m3_start != -1:
-                new_render_logo = (
-                    f"const renderLogo = () => {{ "
-                    # When VoxKage is active: render ONLY VoxKage art in full-width box
-                    # No Gemini icon, no "Gemini CLI" text — pure themed ASCII art
-                    f"if (process.env.VOXKAGE_ACTIVE) {{ "
-                    f"let tName = ((theme && theme.name) || (settings && settings.merged && settings.merged.ui && settings.merged.ui.theme) || 'default').toLowerCase().replace(/[^a-z]/g, ''); "
-                    f"const palettes = {palettes_js}; "
-                    f"let p = palettes['defaultdark']; "
-                    f"if (palettes[tName]) {{ p = palettes[tName]; }} "
-                    f"else {{ for (const k of Object.keys(palettes)) {{ if (k.includes(tName) || tName.includes(k)) {{ p = palettes[k]; break; }} }} }} "
-                    f"const rawArt = {raw_art_js}; "
-                    f"const pad = Math.max(0, Math.floor((terminalWidth - 61) / 2)); "
-                    f"const dyn = '\\n' + rawArt.map((l, i) => ' '.repeat(pad) + p[i] + l + '\\x1b[0m').join('\\n') + '\\n'; "
-                    f"return /* @__PURE__ */ (0, {jsx}.jsx)(Box_default, {{ width: '100%', children: /* @__PURE__ */ (0, {jsx}.jsx)(Box_default, {{ children: /* @__PURE__ */ (0, {jsx}.jsx)(Text, {{ children: dyn }}) }}) }}); "
-                    f"}} "
-                    # When VoxKage is NOT active: show Gemini's normal header
-                    f"const logoTextArt = typeof longAsciiLogoCompactText !== 'undefined' ? longAsciiLogoCompactText.trim() : ''; "
-                    f"return /* @__PURE__ */ (0, {jsx}.jsxs)(Box_default, {{ flexDirection: 'row', children: [/* @__PURE__ */ (0, {jsx}.jsx)(Box_default, {{ flexShrink: 0, children: /* @__PURE__ */ (0, {jsx}.jsx)(ThemedGradient, {{ children: ICON }}) }}), logoTextArt && /* @__PURE__ */ (0, {jsx}.jsx)(Box_default, {{ marginLeft: 3, children: /* @__PURE__ */ (0, {jsx}.jsx)(Text, {{ color: theme.text.primary, children: logoTextArt }}) }}) ] }}); "
-                    f"}};"
-                )
-                content = content[:m3_start] + new_render_logo + content[m3_end:]
-                patched = True
-
-            # ── Patch 4: Replace renderMetadata — return null when VoxKage is active ─
-            rm_kw_pos = content.find("const renderMetadata = ")
-            m4_start, m4_end = -1, -1
-            if rm_kw_pos != -1:
-                arrow4 = content.find("=>", rm_kw_pos)
-                if arrow4 != -1:
-                    _end4 = _js_stmt_end(content, arrow4 + 2)
-                    if _end4 != -1:
-                        m4_start, m4_end = rm_kw_pos, _end4
-            if m4_start != -1:
-                new_render_metadata = (
-                    f"const renderMetadata = (isBelow = false) => {{ "
-                    # When VoxKage active: show nothing (null)
-                    f"if (process.env.VOXKAGE_ACTIVE) return null; "
-                    # When not active: normal Gemini metadata
-                    f"return /* @__PURE__ */ (0, {jsx}.jsxs)(Box_default, {{ marginLeft: isBelow ? 0 : 2, flexDirection: 'column', children: [/* @__PURE__ */ (0, {jsx}.jsxs)(Box_default, {{ children: [/* @__PURE__ */ (0, {jsx}.jsx)(Text, {{ bold: true, color: theme.text.primary, children: 'Gemini CLI' }}), /* @__PURE__ */ (0, {jsx}.jsxs)(Text, {{ color: theme.text.secondary, children: [' v', version] }}), updateInfo && updateInfo.isUpdating && /* @__PURE__ */ (0, {jsx}.jsx)(Box_default, {{ marginLeft: 2, children: /* @__PURE__ */ (0, {jsx}.jsxs)(Text, {{ color: theme.text.secondary, children: [' ', 'Updating'] }}) }}) ] }}), showDetails && /* @__PURE__ */ (0, {jsx}.jsxs)({jsx}.Fragment, {{ children: [/* @__PURE__ */ (0, {jsx}.jsx)(Box_default, {{ height: 1 }}), settings.merged && settings.merged.ui && settings.merged.ui.showUserIdentity !== false && /* @__PURE__ */ (0, {jsx}.jsx)(UserIdentity, {{ config: config }})] }}) ] }}); "
-                    f"}};"
-                )
-                content = content[:m4_start] + new_render_metadata + content[m4_end:]
-                patched = True
-
-            # ── Patch 5: Settings path isolation ───────────────────────────────────
-            settings_path_pattern = re.compile(
-                r'var\s+settingsPath\s*=\s*path4\.join\s*\(\s*homedir\s*\(\s*\)\s*,\s*GEMINI_DIR\s*,\s*["\']settings\.json["\']\s*\)\s*;'
-            )
-            new_settings_path = (
-                'var settingsPath = process.env.VOXKAGE_ACTIVE ? path4.join(homedir(), ".voxkage", ".gemini", "settings.json") : path4.join(homedir(), GEMINI_DIR, "settings.json");'
-            )
-            if settings_path_pattern.search(content):
-                content = settings_path_pattern.sub(new_settings_path, content, count=1)
-                patched = True
-
-            if patched:
-                content += "\n" + SENTINEL + "\n"
-                bundle_file.write_text(content, encoding="utf-8")
-
-    except Exception:
-        pass
+    """[DEPRECATED] Kept as a no-op stub for compatibility. agy does not use React-Ink bundles."""
+    pass
 
 
-# ── Gemini CLI Settings Patch ─────────────────────────────────────────────────
 def _patch_gemini_settings():
-    """Patch Gemini CLI settings to hide banner and tips for clean VoxKage experience."""
-    import pathlib
-    
-    gemini_settings = settings_json_path()
-    
-    # Ensure directory exists
-    gemini_settings.parent.mkdir(parents=True, exist_ok=True)
-    
-    # Load existing or create new
-    settings = {}
-    if gemini_settings.exists():
-        try:
-            settings = json.loads(gemini_settings.read_text(encoding="utf-8"))
-        except Exception:
-            settings = {}
-    
-    # Add/hide banner settings if not present
-    need_update = False
-    if "ui" not in settings:
-        settings["ui"] = {}
-    
-    # hideBanner=False: we want the header to show since we patched it to show
-    # VoxKage art instead of Gemini's logo via _patch_gemini_bundle()
-    if settings.get("ui", {}).get("hideBanner") != False:
-        settings["ui"]["hideBanner"] = False
-        need_update = True
-
-    if settings.get("ui", {}).get("hideTips") != True:
-        settings["ui"]["hideTips"] = True
-        need_update = True
-
-    # Sync top-level keys
-    if settings.get("hideBanner") != False:
-        settings["hideBanner"] = False
-        need_update = True
-
-    if settings.get("hideTips") != True:
-        settings["hideTips"] = True
-        need_update = True
-    
-    if need_update:
-        try:
-            gemini_settings.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding="utf-8")
-        except Exception:
-            pass  # Non-critical
+    """[DEPRECATED] Kept as a no-op stub for compatibility. agy does not require setting tweaks."""
+    pass
 
 
 def _inject_global_settings():
-    """Merge VoxKage MCP servers into ~/.gemini/settings.json for the session."""
-    global_path = Path.home() / ".gemini" / "settings.json"
-    global_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Read VoxKage's isolated settings (has 18 MCP servers)
-    vk_settings = settings_json_path()
-    if not vk_settings.exists():
-        return
-    try:
-        vk_data = json.loads(vk_settings.read_text(encoding="utf-8"))
-    except Exception:
-        return
-    vk_servers = vk_data.get("mcpServers", {})
-    if not vk_servers:
-        return
-
-    # Read existing global settings (preserve user's own config)
-    global_data = {}
-    if global_path.exists():
-        try:
-            global_data = json.loads(global_path.read_text(encoding="utf-8"))
-        except Exception:
-            global_data = {}
-
-    if "mcpServers" not in global_data:
-        global_data["mcpServers"] = {}
-
-    # Merge VoxKage servers in
-    global_data["mcpServers"].update(vk_servers)
-
-    # Copy over VoxKage UI settings (hideBanner, hideTips)
-    vk_ui = vk_data.get("ui", {})
-    if vk_ui:
-        if "ui" not in global_data:
-            global_data["ui"] = {}
-        global_data["ui"].update(vk_ui)
-
-    global_path.write_text(
-        json.dumps(global_data, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    """[DEPRECATED] Kept as a no-op stub. VoxKage now uses agy's MCP directory
+    structure (~/.gemini/antigravity-cli/mcp/) via _scaffold_agy_mcp_servers()."""
+    pass
 
 
 def _cleanup_global_settings():
-    """Remove VoxKage MCP servers from ~/.gemini/settings.json after session ends."""
-    global_path = Path.home() / ".gemini" / "settings.json"
-    if not global_path.exists():
-        return
-
-    try:
-        global_data = json.loads(global_path.read_text(encoding="utf-8"))
-    except Exception:
-        return
-
-    servers = global_data.get("mcpServers", {})
-    vk_keys = [k for k in servers if k.startswith("voxkage-")]
-    if not vk_keys:
-        return
-
-    for k in vk_keys:
-        del servers[k]
-
-    global_path.write_text(
-        json.dumps(global_data, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    """[DEPRECATED] Kept as a no-op stub. No global settings to clean up with agy."""
+    pass
 
 
 def _inject_global_gemini_md():
     """
-    Copy VoxKage's GEMINI.md into ~/.gemini/GEMINI.md so Gemini CLI reads it
+    Copy VoxKage's GEMINI.md into ~/.gemini/GEMINI.md so agy reads it
     as the user-level system prompt.
 
-    Gemini CLI only reads GEMINI.md from two places:
-      1. The current working directory (and parents)
-      2. ~/.gemini/GEMINI.md  ← this is the one we target
-
-    Backs up any existing ~/.gemini/GEMINI.md so _cleanup can restore it.
+    agy reads GEMINI.md from ~/.gemini/GEMINI.md — same path as the old
+    Gemini CLI. We back up any existing file so _cleanup can restore it.
     """
     import shutil as _shutil
     src = gemini_md_path()          # ~/.voxkage/.gemini/GEMINI.md
@@ -1525,85 +1333,63 @@ def cmd_launch(extra_args: list[str] | None = None):
         os.system("title VoxKage")
     else:
         os.system("echo -e \"\\033]0;VoxKage\\a\"")
-    
+
     if not config_path().exists():
         print(f"  {_c(56,189,248)}First run detected — running setup...{RST}")
         print()
         cmd_init()
 
+    # ── Refresh MCP server registrations in agy ───────────────────────────────
+    # Lightweight (AST parsing only, no subprocess) so safe every launch.
+    # Picks up new plugins and updated tool signatures automatically.
     try:
-        _generate_settings_json()
+        _scaffold_agy_mcp_servers()
     except Exception:
         pass
 
-    # Patch Gemini CLI bundle to inject VoxKage logo into React-Ink component tree
-    # (idempotent - skips instantly if already patched)
-    _patch_gemini_bundle()
+    # ── Regenerate GEMINI.md with latest soul memory + inject into agy ────────
+    # agy reads its global system prompt from ~/.gemini/GEMINI.md —
+    # same location as the old Gemini CLI. Regenerating every launch
+    # ensures personality and soul memory are always live.
+    try:
+        _generate_gemini_md()
+        _inject_global_gemini_md()
+    except Exception:
+        pass
 
-    # Patch Gemini CLI settings (hideBanner=False so our patched header shows)
-    _patch_gemini_settings()
-
-    # Inject VoxKage MCP servers into global ~/.gemini/settings.json for this session
-    _inject_global_settings()
-
-    # ── CRITICAL: Copy VoxKage GEMINI.md → ~/.gemini/GEMINI.md ───────────────
-    # Gemini CLI reads its user-level system prompt ONLY from ~/.gemini/GEMINI.md.
-    # --include-directories does NOT load GEMINI.md — it only adds code context.
-    # Without this copy, VoxKage has no personality and responds as plain Gemini.
-    _generate_gemini_md()           # regenerate with latest soul memory
-    _inject_global_gemini_md()      # copy to the path Gemini CLI actually reads
-
-    _run_first_time_setup()          # One-time post-install: playwright install chromium, etc.
+    _run_first_time_setup()                  # one-time: playwright install chromium
     _ensure_tray_running()
-    _ensure_telegram_watcher_running()  # Start Telegram background watcher
+    _ensure_telegram_watcher_running()       # start Telegram background watcher
+    _start_ipc_server()                      # Telegram → VoxKage terminal bridge
 
-    # Clean slate before handing over to Gemini CLI
+    # ── Print VoxKage ASCII banner, then launch agy ───────────────────────────
+    # VoxKage branding appears first; agy prints its own header below.
     if is_windows():
         os.system("cls")
     else:
         os.system("clear")
 
-    model = "gemini-2.5-flash"
-    try:
-        cfg = json.loads(config_path().read_text(encoding="utf-8"))
-        model = cfg.get("main_model", model)
-    except Exception:
-        pass
+    print_banner()
 
-    gemini = find_gemini_cli()
-    vk_gemini_home = str(gemini_dir())
-
-    cmd = [
-        gemini,
-        "-m", model,
-        "--skip-trust",
-    ]
-
+    agy = find_agy_cli()
+    cmd = [agy]
     if extra_args:
         cmd.extend(extra_args)
 
     env = os.environ.copy()
     env["VOXKAGE_ACTIVE"] = "1"
 
-    # ── Start IPC Named Pipe server (Telegram → VoxKage terminal bridge) ─────────
-    # This runs in a background daemon thread. When the Telegram watcher
-    # delivers a message via the Named Pipe, the on_message callback uses
-    # pyautogui to type the prompt directly into THIS terminal window —
-    # making it visible to the user exactly as if they typed it themselves.
-    _start_ipc_server()
-
     try:
         proc = subprocess.run(cmd, cwd=os.getcwd(), env=env)
     except FileNotFoundError:
-        print(f"\n  {_c(255,80,80)}✗  Gemini CLI not found.{RST}")
-        print(f"     Run {_c(56,189,248)}voxkage init{RST} to install it.\n")
-        _cleanup_global_settings()
+        print(f"\n  {_c(255,80,80)}✗  Antigravity CLI not found.{RST}")
+        print(f"     Install agy first, then run {_c(56,189,248)}voxkage init{RST} to configure.\n")
+        _cleanup_global_gemini_md()
         sys.exit(1)
     except KeyboardInterrupt:
         pass
     finally:
-        # Always clean up: remove VoxKage servers + GEMINI.md on exit
-        _cleanup_global_settings()
+        # Restore ~/.gemini/GEMINI.md to its original state on exit
         _cleanup_global_gemini_md()
 
     sys.exit(proc.returncode if 'proc' in dir() else 0)

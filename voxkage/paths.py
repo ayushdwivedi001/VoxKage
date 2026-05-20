@@ -132,6 +132,9 @@ def gemini_dir() -> Path:
 def settings_json_path() -> Path:
     return gemini_dir() / "settings.json"
 
+def mcp_config_json_path() -> Path:
+    return home_dir() / ".gemini" / "config" / "mcp_config.json"
+
 def gemini_md_path() -> Path:
     return gemini_dir() / "GEMINI.md"
 
@@ -157,40 +160,58 @@ def python_exe() -> str:
     return sys.executable
 
 def find_gemini_cli() -> str:
-    """Find the gemini CLI executable across platforms."""
-    # 1. Check PATH first (works if npm global bin is in PATH)
+    """Find the gemini CLI executable (legacy — kept for reference)."""
     found = shutil.which("gemini") or shutil.which("gemini.cmd")
     if found:
         return found
-
-    # 2. Platform-specific npm global locations
-    candidates: list[Path] = []
     if is_windows():
         npm_global = home_dir() / "AppData" / "Roaming" / "npm"
+        for c in [npm_global / "gemini.cmd", Path(r"C:\Program Files\nodejs\gemini.cmd")]:
+            if c.exists():
+                return str(c)
+    return "gemini"
+
+
+def find_agy_cli() -> str:
+    """Find the Antigravity CLI (agy) executable across platforms."""
+    # 1. Check PATH first
+    found = shutil.which("agy") or shutil.which("agy.exe")
+    if found:
+        return found
+
+    # 2. Platform-specific locations
+    candidates: list[Path] = []
+    if is_windows():
         candidates = [
-            npm_global / "gemini.cmd",
-            Path(r"C:\Program Files\nodejs\gemini.cmd"),
-            Path(r"C:\Program Files (x86)\nodejs\gemini.cmd"),
+            home_dir() / "AppData" / "Local" / "agy" / "bin" / "agy.exe",
+            Path(r"C:\Program Files\agy\bin\agy.exe"),
+            Path(r"C:\Program Files (x86)\agy\bin\agy.exe"),
+            home_dir() / "AppData" / "Roaming" / "agy" / "bin" / "agy.exe",
         ]
     elif is_mac():
         candidates = [
-            Path("/usr/local/bin/gemini"),
-            Path("/opt/homebrew/bin/gemini"),
-            home_dir() / ".npm-global" / "bin" / "gemini",
+            Path("/usr/local/bin/agy"),
+            Path("/opt/homebrew/bin/agy"),
+            home_dir() / ".local" / "bin" / "agy",
         ]
-        # Check nvm versions
-        nvm_dir = home_dir() / ".nvm" / "versions" / "node"
-        if nvm_dir.exists():
-            for node_ver in sorted(nvm_dir.iterdir(), reverse=True):
-                candidates.append(node_ver / "bin" / "gemini")
 
     for c in candidates:
         if c.exists():
             return str(c)
 
-    return "gemini"  # fallback — hope it's in PATH
+    return "agy"  # fallback — hope it's in PATH
+
 
 def find_npm() -> str | None:
     """Find npm executable. Returns None if not installed."""
     found = shutil.which("npm") or shutil.which("npm.cmd")
     return found
+
+
+def agy_mcp_dir() -> Path:
+    """~/.gemini/antigravity-cli/mcp/ — where agy reads its MCP server tool schemas."""
+    d = home_dir() / ".gemini" / "antigravity-cli" / "mcp"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
