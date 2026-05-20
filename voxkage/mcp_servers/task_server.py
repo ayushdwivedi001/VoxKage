@@ -1,11 +1,11 @@
 """
 MCP Server: VoxKage Parallel Task Manager
 
-Enables VoxKage to spawn background Gemini CLI sub-agents for long-running
+Enables VoxKage to spawn background agy CLI sub-agents for long-running
 multi-step tasks, keeping the main session free for continued interaction.
 
 Architecture:
-  Main VoxKage session  ->  spawn_task()  ->  Hidden gemini CLI sub-agent
+  Main VoxKage session  ->  spawn_task()  ->  Hidden agy CLI sub-agent
                                               (runs autonomously with full MCP access)
                                               calls complete_task() when done
   Main session          ->  check_tasks()  ->  Sees completed results
@@ -16,7 +16,7 @@ Tools for Main Agent:
   get_task_result(task_id)         --  Read full sub-agent output
   cancel_task(task_id)             --  Kill a running sub-agent
 
-Tools for Sub-Agent (called by background gemini CLI):
+Tools for Sub-Agent (called by background agy CLI):
   complete_task(task_id, summary, success, details)  --  Sub-agent reports completion
 
 Run standalone: python mcp_servers/task_server.py
@@ -55,10 +55,10 @@ os.makedirs(_LOG_DIR, exist_ok=True)
 _STUCK_TIMEOUT_SECS = 30 * 60   # 30 minutes — generous for slow research tasks
 _HARD_TIMEOUT_SECS  = 90 * 60   # 90 minutes — absolute hard kill regardless
 
-# -- Gemini CLI executable resolution -----------------------------------------
+# -- Antigravity CLI executable resolution ------------------------------------
 # Uses the shared paths module for cross-platform resolution.
-from voxkage.paths import find_gemini_cli as _paths_find_gemini
-_GEMINI_EXE = _paths_find_gemini()
+from voxkage.paths import find_agy_cli as _paths_find_agy
+_AGY_EXE = _paths_find_agy()
 
 # -- Model catalogue & selection ------------------------------------------------
 # Ordered by capability (most capable first within each tier)
@@ -236,7 +236,7 @@ def _append_step(task_id: str, step: dict) -> bool:
 
 def _build_sub_agent_prompt(task_id: str, description: str) -> str:
     """
-    Builds the full prompt injected into the background gemini CLI session.
+    Builds the full prompt injected into the background agy CLI session.
     Overrides VoxKage's JARVIS personality and mandates step logging.
     """
     return f"""[SUB-AGENT MODE — TASK {task_id}]
@@ -428,7 +428,7 @@ def spawn_task(
     model_override: str = "",
 ) -> str:
     """
-    Spawn a background Gemini CLI sub-agent to execute a long-running or complex task.
+    Spawn a background agy CLI sub-agent to execute a long-running or complex task.
 
     Use for ANY task that requires multi-step execution and would block the main session:
     - Research + file creation (e.g. "research X and write a Word doc")
@@ -451,11 +451,13 @@ def spawn_task(
     # Model resolution  --  alias -> canonical model ID from the 6-model catalogue
     vk_config_path = os.path.join(_MEM_DIR, "config.json")
     subagent_model = _MODEL_STANDARD
+    sandbox_mode = True
     try:
         if os.path.exists(vk_config_path):
             with open(vk_config_path, encoding="utf-8") as f:
                 cfg = json.loads(f.read())
                 subagent_model = cfg.get("subagent_model", _MODEL_STANDARD)
+                sandbox_mode = cfg.get("sandbox_mode", True)
     except Exception:
         pass
 
@@ -491,7 +493,7 @@ def spawn_task(
     # Build the sub-agent prompt
     prompt = _build_sub_agent_prompt(task_id, description)
 
-    # Launch background gemini CLI process
+    # Launch background agy CLI process
     # On Windows we must use the .cmd wrapper path directly.
     # shell=True is NOT used  --  it causes extra cmd.exe overhead and PID tracking issues.
     log_path = task["log_file"]
@@ -500,12 +502,11 @@ def spawn_task(
         #   VOXKAGE_SUBAGENT=1  → file-ops tools auto-confirm without blocking
         #   VOXKAGE_SAFE_MODE=0 → Shield protocol skips confirmation prompts
         #   VOXKAGE_HOME        → MCP servers find ~/.voxkage correctly
-        #   GEMINI_API_KEY      → Forwarded so the sub-agent can authenticate
         sub_env = os.environ.copy()
         sub_env["VOXKAGE_SUBAGENT"]  = "1"
         sub_env["VOXKAGE_SAFE_MODE"] = "0"   # No shield prompts in headless mode
         sub_env["VOXKAGE_HOME"]      = _MEM_DIR
-        # Ensure npm global bin (where gemini.cmd lives) is in PATH
+        # Ensure npm global bin (where agy lives) is in PATH
         if os.name == "nt":
             npm_bin = os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "npm")
             if npm_bin not in sub_env.get("PATH", ""):
@@ -515,16 +516,20 @@ def spawn_task(
         with open(log_path, "w", encoding="utf-8") as log_f:
             log_f.write(f"[VoxKage Sub-Agent] Task {task_id} started at {spawn_time}\n")
             log_f.write(f"[VoxKage Sub-Agent] Model: {model}\n")
-            log_f.write(f"[VoxKage Sub-Agent] Gemini exe: {_GEMINI_EXE}\n")
+            log_f.write(f"[VoxKage Sub-Agent] Agy exe: {_AGY_EXE}\n")
             log_f.write("=" * 60 + "\n")
             log_f.flush()
+
+            cmd_args = [
+                _AGY_EXE,
+                "--dangerously-skip-permissions",
+                "--prompt", prompt,
+            ]
+            if sandbox_mode:
+                cmd_args.append("--sandbox")
+
             proc = subprocess.Popen(
-                [
-                    _GEMINI_EXE,
-                    "--model",         model,
-                    "--approval-mode", "yolo",
-                    "--prompt",        prompt,
-                ],
+                cmd_args,
                 cwd=_ROOT,
                 env=sub_env,
                 stdout=log_f,
@@ -563,10 +568,10 @@ def spawn_task(
         )
 
     except FileNotFoundError:
-        _update_task(task_id, {"status": "failed", "summary": "gemini CLI not found in PATH"})
+        _update_task(task_id, {"status": "failed", "summary": "agy CLI not found in PATH"})
         return (
-            f"[ERROR] Could not spawn sub-agent  --  'gemini' command not found in PATH.\n"
-            f"Make sure the Gemini CLI is installed: npm install -g @google/gemini-cli"
+            f"[ERROR] Could not spawn sub-agent  --  'agy' command not found in PATH.\n"
+            f"Make sure the Antigravity CLI is installed."
         )
     except Exception as e:
         _update_task(task_id, {"status": "failed", "summary": str(e)})
@@ -1257,10 +1262,12 @@ def spawn_evolution_task(
     # Check ~/.voxkage/config.json first, then fall back to auto-select
     vk_config_path = os.path.join(_MEM_DIR, "config.json")
     subagent_model = _MODEL_STANDARD
+    sandbox_mode = True
     try:
         if os.path.exists(vk_config_path):
             cfg = json.loads(open(vk_config_path, encoding="utf-8").read())
             subagent_model = cfg.get("subagent_model", _MODEL_STANDARD)
+            sandbox_mode = cfg.get("sandbox_mode", True)
     except Exception:
         pass
 
@@ -1327,8 +1334,17 @@ def spawn_evolution_task(
             log_f.write(f"[VoxKage Evolution Sub-Agent] Project: {project_dir}\n")
             log_f.write("=" * 60 + "\n")
             log_f.flush()
+
+            cmd_args = [
+                _AGY_EXE,
+                "--dangerously-skip-permissions",
+                "--prompt", prompt,
+            ]
+            if sandbox_mode:
+                cmd_args.append("--sandbox")
+
             proc = subprocess.Popen(
-                [_GEMINI_EXE, "--model", model, "--approval-mode", "yolo", "--prompt", prompt],
+                cmd_args,
                 cwd=project_dir,
                 env=sub_env,
                 stdout=log_f,
@@ -1371,8 +1387,8 @@ def spawn_evolution_task(
         )
 
     except FileNotFoundError:
-        _update_task(task_id, {"status": "failed", "summary": "gemini CLI not found"})
-        return "[ERROR] 'gemini' command not found in PATH. Cannot spawn evolution sub-agent."
+        _update_task(task_id, {"status": "failed", "summary": "agy CLI not found"})
+        return "[ERROR] 'agy' command not found in PATH. Cannot spawn evolution sub-agent."
     except Exception as e:
         _update_task(task_id, {"status": "failed", "summary": str(e)})
         return f"[ERROR] Failed to spawn evolution sub-agent: {e}"

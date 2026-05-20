@@ -5,7 +5,7 @@ Replaces the Windows-only voxkage.cmd with a pure Python equivalent
 that works identically on Windows and macOS.
 
 Commands:
-    voxkage              Launch VoxKage (ASCII banner + Gemini CLI session)
+    voxkage              Launch VoxKage (ASCII banner + Antigravity CLI session)
     voxkage init         First-time setup wizard
     voxkage tray         Launch/restore system tray icon
     voxkage plugins      List all plugins and their status
@@ -290,7 +290,7 @@ _LIGHT_KEYWORDS = ("light", "xcode", "google code")
 
 
 def _get_palette(theme: str) -> dict:
-    """Return the best-matching palette for a given Gemini CLI theme name."""
+    """Return the best-matching palette for a given Antigravity CLI theme name."""
     # Exact match first
     if theme in THEME_PALETTES:
         return THEME_PALETTES[theme]
@@ -325,7 +325,7 @@ def print_banner():
     """Print the VoxKage ASCII art banner — dynamically centered, no ANSI clears.
 
     IMPORTANT: Do NOT use any ANSI escape sequences (\x1b[2J, \x1b[3J, \x1b[H)
-    or os.system("cls") here. Gemini CLI uses React-Ink which takes full ownership
+    or os.system("cls") here. Antigravity CLI uses React-Ink which takes full ownership
     of the terminal after this function returns. Any ANSI VT state we inject here
     will corrupt Ink's internal cursor position tracking, causing the terminal to
     go completely black on resize. Pure newlines are safe because they don't alter
@@ -352,9 +352,9 @@ def print_banner():
     # ── Read theme ─────────────────────────────────────────────────────────────
     theme = "Default Dark"
     try:
-        gemini_settings = Path.home() / ".gemini" / "settings.json"
-        if gemini_settings.exists():
-            data = json.loads(gemini_settings.read_text(encoding="utf-8"))
+        agy_settings = Path.home() / ".gemini" / "settings.json"
+        if agy_settings.exists():
+            data = json.loads(agy_settings.read_text(encoding="utf-8"))
             theme = data.get("theme", data.get("ui", {}).get("theme", theme))
     except Exception:
         pass
@@ -1138,8 +1138,16 @@ def _ensure_telegram_watcher_running():
     Singleton-aware:
       - If a watcher is already alive (from a previous VoxKage session), do nothing.
       - If the lock file contains a dead PID, clean it up and spawn a fresh watcher.
-      - Only starts if TELEGRAM_BOT_TOKEN is configured.
+      - Only starts if TELEGRAM_BOT_TOKEN is configured and telegram_watcher_enabled is True.
     """
+    try:
+        if config_path().exists():
+            cfg = json.loads(config_path().read_text(encoding="utf-8"))
+            if not cfg.get("telegram_watcher_enabled", True):
+                return
+    except Exception:
+        pass
+
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         return  # Telegram not configured — skip silently

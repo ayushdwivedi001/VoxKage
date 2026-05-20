@@ -3,7 +3,7 @@ MCP Server: Telegram Bridge (voxkage-telegram)
 Handles outbound (VoxKage → Telegram) and inbox awareness.
 
 The inbound path is now handled by telegram_watcher.py which runs as a
-persistent background process and injects messages directly into Gemini CLI.
+persistent background process and injects messages directly into the VoxKage terminal.
 This MCP server handles:
   - Sending messages/files/reports outbound
   - Reading the inbox file (fallback when watcher injection fails)
@@ -119,7 +119,7 @@ def _save_offset(uid: int):
 def _read_inbox(mark_read: bool = True) -> list[dict]:
     """
     Read messages from the inbox file that telegram_watcher.py wrote.
-    Used as fallback when live injection failed (Gemini CLI window not found).
+    Used as fallback when live injection failed (VoxKage terminal window not found).
     """
     if not _INBOX_FILE.exists():
         return []
@@ -198,14 +198,14 @@ def telegram_send_file(file_path: str, caption: str = "") -> str:
 def telegram_check_inbox() -> str:
     """
     Check for Telegram messages that arrived while the watcher could not inject
-    them live into Gemini CLI (e.g. the terminal window was not found).
+    them live into the VoxKage terminal (e.g. the terminal window was not found).
 
     Returns unread messages from the inbox file and marks them as read.
     Use when user says 'check telegram inbox' or after being notified that
     a message could not be injected.
 
     NOTE: Under normal operation, the telegram_watcher.py process injects
-    messages directly into Gemini CLI — you will see them appear automatically
+    messages directly into the VoxKage terminal — you will see them appear automatically
     without needing to call this tool. This tool is the manual fallback.
     """
     messages = _read_inbox(mark_read=True)

@@ -128,3 +128,11 @@ test.py
 voxkage-shell-compatibility.skill.zip
 voxkage-shell-compatibility.skill/
 *.skill
+
+# General Document & Windows Files
+*.docx
+desktop.ini
+Desktop.ini
+
+# Temporary Scratch Files
+scratch*.py

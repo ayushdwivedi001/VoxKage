@@ -1,7 +1,7 @@
 """
 VoxKage Telegram Watcher — telegram_watcher.py
 
-A persistent background process that bridges Telegram → Gemini CLI.
+A persistent background process that bridges Telegram → VoxKage/agy CLI.
 
 Architecture:
   ┌─────────────┐   Bot API poll   ┌──────────────────┐
@@ -11,14 +11,14 @@ Architecture:
                                             │  stdin inject
                                             ▼
                                    ┌──────────────────┐
-                                   │   Gemini CLI /   │
-                                   │   VoxKage        │
+                                   │   VoxKage CLI /  │
+                                   │   agy CLI        │
                                    └──────────────────┘
 
 How it works:
   1. Polls Telegram Bot API every 2 seconds (long-poll friendly)
-  2. On new message: formats it and writes to Gemini CLI's stdin pipe
-  3. Gemini CLI reads it as a new user prompt and responds
+  2. On new message: delivers it to the VoxKage session via Named Pipe IPC
+  3. VoxKage/agy CLI reads it as a new user prompt and responds
   4. Handles text, photos, documents, voice, stickers
 
 Run standalone:
@@ -59,7 +59,6 @@ _VOXKAGE_DIR   = Path(os.path.expanduser("~")) / ".voxkage"
 _OFFSET_FILE   = _VOXKAGE_DIR / "telegram_offset.json"
 _LOCK_FILE     = _VOXKAGE_DIR / "telegram_watcher.lock"
 _INBOX_FILE    = _VOXKAGE_DIR / "telegram_inbox.jsonl"   # persistent message log
-_STDIN_PIPE    = _VOXKAGE_DIR / "gemini_stdin.pipe"      # named pipe path (Windows: use file)
 
 _VOXKAGE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -68,7 +67,7 @@ CHAT_ID  = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 POLL_SEC = 2      # seconds between polls
 API_BASE = f"https://api.telegram.org/bot{TOKEN}"
 
-# ── Gemini CLI stdin injection ────────────────────────────────────────────────
+# ── VoxKage CLI stdin injection ───────────────────────────────────────────────
 # Priority order:
 #   1. Named Pipe IPC (\\.\pipe\voxkage_ipc) — zero UI interference
 #   2. pyautogui clipboard injection — legacy fallback (Windows only)
@@ -119,29 +118,15 @@ def _inject_via_ipc(prompt: str) -> bool:
         return False
 
 
-# ── Headless Gemini processor (when VoxKage terminal is not open) ─────────────
+# ── Headless agy processor (when VoxKage terminal is not open) ─────────────────
 
-def _find_gemini_exe() -> str | None:
-    """Find the gemini CLI executable."""
-    import shutil
-    cmd = shutil.which("gemini")
-    if cmd:
-        return cmd
-    # Windows: npm global installs as .cmd wrapper
-    for name in ("gemini.cmd", "gemini"):
-        p = Path.home() / "AppData" / "Roaming" / "npm" / name
-        if p.exists():
-            return str(p)
-    return None
-
-
-def _process_via_headless_gemini(prompt: str) -> bool:
+def _process_via_headless_agy(prompt: str) -> bool:
     """
-    When the VoxKage terminal is NOT running, spawn a headless Gemini/VoxKage
+    When the VoxKage terminal is NOT running, spawn a headless Antigravity/VoxKage
     subprocess to process the Telegram message and send the answer back.
 
     Architecture:
-        telegram_watcher  →  gemini CLI (headless, VOXKAGE_ACTIVE=1)
+        telegram_watcher  →  agy CLI (headless, VOXKAGE_ACTIVE=1)
                                   ↓ MCP tools (all 18 servers loaded)
                                   ↓ telegram_send_message  →  User's phone
 
@@ -149,14 +134,11 @@ def _process_via_headless_gemini(prompt: str) -> bool:
     to call telegram_send_message at the end of every task.
     """
     import subprocess
-
-    gemini = _find_gemini_exe()
-    if not gemini:
-        log.warning("[Headless] gemini CLI not found in PATH — cannot process headlessly")
-        return False
-
-    # ~/.voxkage/.gemini contains GEMINI.md + settings.json with all 18 MCP servers
-    vk_gemini_home = str(_VOXKAGE_DIR / ".gemini")
+    try:
+        from voxkage.paths import find_agy_cli
+        agy = find_agy_cli()
+    except Exception:
+        agy = "agy"
 
     # Inject the REMOTE MODE system instruction so VoxKage knows to send to Telegram
     full_prompt = (
@@ -170,33 +152,44 @@ def _process_via_headless_gemini(prompt: str) -> bool:
     env = os.environ.copy()
     env["VOXKAGE_ACTIVE"] = "1"
 
+    # Check sandbox mode from config.json
+    sandbox_mode = True
+    try:
+        vk_config_path = _VOXKAGE_DIR / "config.json"
+        if vk_config_path.exists():
+            cfg = json.loads(vk_config_path.read_text(encoding="utf-8"))
+            sandbox_mode = cfg.get("sandbox_mode", True)
+    except Exception:
+        pass
+
     log.info("[Headless] VoxKage terminal not found — processing Telegram message headlessly")
     _send_telegram("⚙️ Received. Processing headlessly — reply coming shortly...")
 
     try:
-        # On Windows, .CMD files MUST be invoked with shell=True.
-        # We pipe the prompt via stdin instead of a positional arg so that
-        # special characters like [TELEGRAM MESSAGE] aren't mangled by cmd.exe.
-        use_shell = sys.platform == "win32" and gemini.lower().endswith(".cmd")
+        cmd_args = [
+            agy,
+            "--dangerously-skip-permissions",
+            "--prompt", full_prompt
+        ]
+        if sandbox_mode:
+            cmd_args.append("--sandbox")
+
         proc = subprocess.Popen(
-            [gemini, "-m", "gemini-2.5-flash",
-             "--include-directories", vk_gemini_home,
-             "--skip-trust"],
+            cmd_args,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env,
-            shell=use_shell,
             text=True,
             encoding="utf-8",
             errors="replace",
         )
         try:
-            _, stderr = proc.communicate(input=full_prompt + "\n", timeout=180)  # 3-minute ceiling
+            _, stderr = proc.communicate(timeout=180)  # 3-minute ceiling
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.communicate()
-            log.error("[Headless] Gemini timed out after 180s")
+            log.error("[Headless] agy timed out after 180s")
             _send_telegram(
                 "⏰ Your request timed out (3 min limit).\n"
                 "For complex tasks, please open VoxKage on your PC."
@@ -204,13 +197,13 @@ def _process_via_headless_gemini(prompt: str) -> bool:
             return True  # We attempted it
 
         if proc.returncode != 0 and stderr:
-            log.warning(f"[Headless] Gemini stderr: {stderr[:300]}")
+            log.warning(f"[Headless] agy stderr: {stderr[:300]}")
 
         log.info(f"[Headless] Subprocess finished (rc={proc.returncode})")
         return True
 
     except Exception as e:
-        log.error(f"[Headless] Failed to spawn Gemini subprocess: {e}")
+        log.error(f"[Headless] Failed to spawn agy subprocess: {e}")
         _send_telegram(f"❌ Error processing your request headlessly: {str(e)[:200]}")
         return False
 
@@ -223,12 +216,12 @@ _VOXKAGE_WINDOW_TITLES = [
 ]
 
 
-def _find_gemini_hwnd():
+def _find_voxkage_hwnd():
     """
-    Find the terminal window running VoxKage / Gemini CLI.
+    Find the terminal window running VoxKage / agy CLI.
 
     Strategy A: match by window title keywords (fast).
-    Strategy B: find node.exe running the gemini CLI via psutil,
+    Strategy B: find agy.exe process running the agy CLI via psutil,
                 then find the console window attached to that process
                 (handles Windows Terminal where tab titles aren't always
                  exposed as hwnd titles).
@@ -272,40 +265,40 @@ def _find_gemini_hwnd():
             log.debug(f"[inject] Found VoxKage terminal window: {win32gui.GetWindowText(title_hits[0])}")
             return title_hits[0]
 
-        # Strategy B — find node.exe process running gemini, get its console hwnd
+        # Strategy B — find agy.exe process running agy CLI, get its console hwnd
         try:
             import psutil
-            gemini_pids = set()
+            agy_pids = set()
             for proc in psutil.process_iter(["pid", "name", "cmdline"]):
                 try:
                     name = (proc.info["name"] or "").lower()
                     cmdline = " ".join(proc.info["cmdline"] or []).lower()
-                    if "node" in name and "gemini" in cmdline:
-                        gemini_pids.add(proc.pid)
+                    if "agy" in name or "agy" in cmdline:
+                        agy_pids.add(proc.pid)
                         # Also include parent process (terminal emulator)
                         try:
                             parent = proc.parent()
                             if parent:
-                                gemini_pids.add(parent.pid)
+                                agy_pids.add(parent.pid)
                         except Exception:
                             pass
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
 
-            if gemini_pids:
+            if agy_pids:
                 proc_hits = []
                 def _cb_pid(hwnd, _):
                     if not win32gui.IsWindowVisible(hwnd):
                         return
                     try:
                         _, pid = win32process.GetWindowThreadProcessId(hwnd)
-                        if pid in gemini_pids:
+                        if pid in agy_pids:
                             proc_hits.append(hwnd)
                     except Exception:
                         pass
                 win32gui.EnumWindows(_cb_pid, None)
                 if proc_hits:
-                    log.debug(f"[inject] Found window via process tree (node.exe gemini)")
+                    log.debug(f"[inject] Found window via process tree (agy.exe)")
                     return proc_hits[0]
         except ImportError:
             pass  # psutil not installed — Strategy B unavailable
@@ -317,7 +310,7 @@ def _find_gemini_hwnd():
 
 def _inject_via_pyautogui(prompt: str) -> bool:
     """
-    Focus the Gemini CLI terminal window and type the prompt.
+    Focus the VoxKage terminal window and type the prompt.
     Adds a newline at the end to submit it (Enter).
     """
     try:
@@ -325,9 +318,9 @@ def _inject_via_pyautogui(prompt: str) -> bool:
         import pyautogui
         import time as _t
 
-        hwnd = _find_gemini_hwnd()
+        hwnd = _find_voxkage_hwnd()
         if not hwnd:
-            log.warning("Gemini CLI window not found for stdin injection")
+            log.warning("VoxKage terminal window not found for stdin injection")
             return False
 
         # Restore if minimised
@@ -356,7 +349,7 @@ def _inject_via_pyautogui(prompt: str) -> bool:
 
         _t.sleep(0.2)
         pyautogui.press("enter")
-        log.info(f"Injected prompt into Gemini CLI ({len(prompt)} chars)")
+        log.info(f"Injected prompt into VoxKage terminal ({len(prompt)} chars)")
         return True
 
     except Exception as e:
@@ -368,7 +361,7 @@ def _inject_via_inbox_file(message_obj: dict):
     """
     Fallback: write the message to a persistent inbox file.
     The telegram_server MCP tool reads this file when polled.
-    Used when Gemini CLI window cannot be found (e.g. running headless).
+    Used when VoxKage terminal window cannot be found (e.g. running headless).
     """
     try:
         with open(_INBOX_FILE, "a", encoding="utf-8") as f:
@@ -712,15 +705,15 @@ def run():
                     # The terminal class filter ensures browsers with 'voxkage' in
                     # their tab title are never targeted.
                     if not injected:
-                        hwnd_check = _find_gemini_hwnd()
+                        hwnd_check = _find_voxkage_hwnd()
                         if hwnd_check:
                             injected = _inject_via_pyautogui(prompt)
 
-                    # P3: Headless Gemini — VoxKage terminal is not open.
-                    # Spawn a background Gemini process that processes the message
+                    # P3: Headless agy — VoxKage terminal is not open.
+                    # Spawn a background agy process that processes the message
                     # and replies directly via telegram_send_message.
                     if not injected:
-                        _process_via_headless_gemini(prompt)
+                        _process_via_headless_agy(prompt)
 
                     _inject_via_inbox_file({
                         "update_id": uid,
