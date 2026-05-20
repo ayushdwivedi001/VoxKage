@@ -2,12 +2,12 @@
 VoxKage IPC Bridge — Windows Named Pipe Communication
 
 Provides a lightweight, non-blocking IPC mechanism between the Telegram Watcher
-(or any external process) and the running VoxKage/Gemini CLI session.
+(or any external process) and the running VoxKage CLI session.
 
 Architecture:
     ┌──────────────┐  Named Pipe   ┌─────────────────┐
     │ Tg Watcher / │ ────────────► │ VoxKage CLI /    │
-    │ External App │ \\.\pipe\      │ Gemini Session   │
+    │ External App │ \\.\pipe\      │ VoxKage Session  │
     └──────────────┘  voxkage_ipc  └─────────────────┘
 
 Two modes:

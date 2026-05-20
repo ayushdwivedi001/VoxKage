@@ -121,7 +121,7 @@ def env_path_resolved() -> Path:
     return user_env  # default even if doesn't exist yet
 
 
-# ── Gemini CLI config ────────────────────────────────────────────────────────
+# ── Antigravity CLI config ───────────────────────────────────────────────────
 
 def gemini_dir() -> Path:
     """~/.voxkage/.gemini/"""
@@ -160,7 +160,7 @@ def python_exe() -> str:
     return sys.executable
 
 def find_gemini_cli() -> str:
-    """Find the gemini CLI executable (legacy — kept for reference)."""
+    """Find the legacy command line executable (kept for reference)."""
     found = shutil.which("gemini") or shutil.which("gemini.cmd")
     if found:
         return found

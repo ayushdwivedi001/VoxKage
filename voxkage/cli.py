@@ -416,20 +416,39 @@ def cmd_install(group: str):
         return
 
     pip_spec, post_cmd, label = _INSTALL_GROUPS[group]
-    print(f"\n  {_c(56,189,248)}↓{RST}  Installing {label} ({pip_spec})...\n")
+    
+    # Smart resolver for local repository clones / editable mode
+    from pathlib import Path
+    pkg_root = Path(__file__).parent.parent
+    pyproject_path = pkg_root / "pyproject.toml"
+
+    if pyproject_path.exists():
+        # We are in a local git clone/workspace! Install from the local folder with extras.
+        # Use editable -e flag to preserve the editable installation state
+        pip_args = [sys.executable, "-m", "pip", "install", "-e", f"{pkg_root.resolve()}[{group}]"]
+        print(f"\n  {_c(56,189,248)}↓{RST}  Installing {label} from local workspace clone ({pkg_root.resolve()}[{group}])...\n")
+    else:
+        # Standard PyPI install
+        pip_args = [sys.executable, "-m", "pip", "install", pip_spec]
+        print(f"\n  {_c(56,189,248)}↓{RST}  Installing {label} ({pip_spec})...\n")
 
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", pip_spec],
+        pip_args,
         capture_output=False,
     )
 
     if result.returncode != 0:
-        print(f"\n  {_c(255,80,80)}✗  Installation failed.{RST} Try manually: pip install {pip_spec}")
+        print(f"\n  {_c(255,80,80)}✗  Installation failed.{RST}")
         return
 
     if post_cmd:
         print(f"\n  {_c(56,189,248)}↓{RST}  Running post-install: {post_cmd}")
-        subprocess.run(post_cmd.split(), capture_output=False)
+        if post_cmd.startswith("playwright "):
+            # Run playwright module safely using environment's python executable
+            cmd_args = [sys.executable, "-m", "playwright"] + post_cmd.split()[1:]
+        else:
+            cmd_args = post_cmd.split()
+        subprocess.run(cmd_args, capture_output=False)
 
     print(f"\n  {_c(34,197,94)}✓  {label} is ready.{RST} Restart voxkage to use it.\n")
 
@@ -462,15 +481,7 @@ def cmd_status():
     print(f"    {_ok if agy_ok else _no}  Antigravity CLI     {'found — v' + result.stdout.strip() if agy_ok else 'not found — install from antigravity.dev'}")
     print(f"    {_ok}  Brain directory     {voxkage_dir()}")
 
-    # Count active MCP servers from settings
-    try:
-        cfg = json.loads(config_path().read_text(encoding="utf-8"))
-        model = cfg.get("main_model", "unknown")
-        sub_model = cfg.get("subagent_model", "unknown")
-        print(f"    {_ok}  Main model          {model}")
-        print(f"    {_ok}  Sub-agent model     {sub_model}")
-    except Exception:
-        pass
+
     print()
 
     # Capability Packs
@@ -493,44 +504,34 @@ def cmd_status():
 
     # Integrations
     print(f"  INTEGRATIONS")
-    integrations = [
-        ("Telegram", "TELEGRAM_BOT_TOKEN"),
-        ("Spotify",  "SPOTIFY_CLIENT_ID"),
-        ("GitHub",   "GITHUB_PAT"),
-    ]
-    from voxkage._env import load_voxkage_env
-    load_voxkage_env()
-    for name, env_var in integrations:
-        configured = bool(os.environ.get(env_var, "").strip())
-        if configured:
-            print(f"    {_ok}  {name:20s} Connected")
-        else:
-            print(f"    {_no}  {name:20s} voxkage plugins add {name.lower()}")
+    from voxkage.plugins.registry import _load_all_plugins
+    plugins = _load_all_plugins()
 
-    # Gmail uses OAuth credentials.json — check the file, not an env var
-    from voxkage.paths import data_dir
-    gmail_cred = data_dir() / "credentials.json"
-    gmail_token = data_dir() / "gmail_token.json"
-    gmail_ok = gmail_cred.exists() or gmail_token.exists()
-    if gmail_ok:
-        print(f"    {_ok}  {'Gmail':20s} Connected")
-    else:
-        print(f"    {_no}  {'Gmail':20s} voxkage plugins add gmail")
+    builtin_names = {
+        "telegram", "gmail", "spotify", "github", "firebase",
+        "netlify", "supabase", "chrome-devtools", "clickhouse", "sequential-thinking"
+    }
+
+    builtins = [p for p in plugins if p.name in builtin_names]
+    community = [p for p in plugins if p.name not in builtin_names]
+
+    for p in builtins:
+        configured = p.is_configured()
+        if configured:
+            print(f"    {_ok}  {p.display_name:24s} Connected")
+        else:
+            print(f"    {_no}  {p.display_name:24s} voxkage plugins add {p.name}")
 
     # Community Plugins
     print()
     print(f"  COMMUNITY PLUGINS")
-    try:
-        import importlib.metadata
-        eps = list(importlib.metadata.entry_points(group="voxkage.plugins"))
-        community = [ep for ep in eps if ep.name not in ("telegram", "gmail", "spotify", "github")]
-        if community:
-            for ep in community:
-                print(f"    {_ok}  {ep.name}")
-        else:
-            print(f"    (none installed)              voxkage plugins search <query>")
-    except Exception:
-        print(f"    (none installed)")
+    if community:
+        for p in community:
+            status = "Connected" if p.is_configured() else f"voxkage plugins add {p.name}"
+            marker = _ok if p.is_configured() else _no
+            print(f"    {marker}  {p.display_name:24s} {status}")
+    else:
+        print(f"    (none installed)              voxkage plugins search <query>")
     print()
 
 
@@ -1296,8 +1297,8 @@ def _inject_global_gemini_md():
     Copy VoxKage's GEMINI.md into ~/.gemini/GEMINI.md so agy reads it
     as the user-level system prompt.
 
-    agy reads GEMINI.md from ~/.gemini/GEMINI.md — same path as the old
-    Gemini CLI. We back up any existing file so _cleanup can restore it.
+    agy reads GEMINI.md from ~/.gemini/GEMINI.md — same path as the
+    legacy platform. We back up any existing file so _cleanup can restore it.
     """
     import shutil as _shutil
     src = gemini_md_path()          # ~/.voxkage/.gemini/GEMINI.md
@@ -1357,7 +1358,7 @@ def cmd_launch(extra_args: list[str] | None = None):
 
     # ── Regenerate GEMINI.md with latest soul memory + inject into agy ────────
     # agy reads its global system prompt from ~/.gemini/GEMINI.md —
-    # same location as the old Gemini CLI. Regenerating every launch
+    # same location as the legacy platform. Regenerating every launch
     # ensures personality and soul memory are always live.
     try:
         _generate_gemini_md()

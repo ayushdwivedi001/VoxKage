@@ -38,9 +38,37 @@ def _load_all_plugins():
     from voxkage.plugins.gmail import GmailPlugin
     from voxkage.plugins.spotify import SpotifyPlugin
     from voxkage.plugins.github import GitHubPlugin
+    from voxkage.plugins.firebase import FirebasePlugin
+    from voxkage.plugins.netlify import NetlifyPlugin
+    from voxkage.plugins.supabase import SupabasePlugin
+    from voxkage.plugins.devtools import ChromeDevtoolsPlugin
+    from voxkage.plugins.clickhouse import ClickhousePlugin
+    from voxkage.plugins.sequential_thinking import SequentialThinkingPlugin
 
-    builtin = [TelegramPlugin(), GmailPlugin(), SpotifyPlugin(), GitHubPlugin()]
-    _BUILTIN_NAMES = {"telegram", "gmail", "spotify", "github"}
+    builtin = [
+        TelegramPlugin(),
+        GmailPlugin(),
+        SpotifyPlugin(),
+        GitHubPlugin(),
+        FirebasePlugin(),
+        NetlifyPlugin(),
+        SupabasePlugin(),
+        ChromeDevtoolsPlugin(),
+        ClickhousePlugin(),
+        SequentialThinkingPlugin(),
+    ]
+    _BUILTIN_NAMES = {
+        "telegram",
+        "gmail",
+        "spotify",
+        "github",
+        "firebase",
+        "netlify",
+        "supabase",
+        "chrome-devtools",
+        "clickhouse",
+        "sequential-thinking",
+    }
 
     # Discover community plugins via importlib.metadata
     community = []
