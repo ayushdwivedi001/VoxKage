@@ -215,3 +215,51 @@ def agy_mcp_dir() -> Path:
     return d
 
 
+def find_opencode_cli() -> str:
+    """Find the OpenCode CLI executable across platforms."""
+    # 1. Check PATH first
+    found = shutil.which("opencode") or shutil.which("opencode.exe") or shutil.which("opencode.cmd")
+    if found:
+        return found
+
+    # 2. Platform-specific candidate locations
+    candidates: list[Path] = []
+    if is_windows():
+        candidates = [
+            home_dir() / "AppData" / "Roaming" / "npm" / "opencode.cmd",
+            home_dir() / "AppData" / "Roaming" / "npm" / "opencode",
+            home_dir() / ".local" / "bin" / "opencode",
+            Path(r"C:\Program Files\opencode\opencode.exe"),
+        ]
+    elif is_mac():
+        candidates = [
+            Path("/usr/local/bin/opencode"),
+            Path("/opt/homebrew/bin/opencode"),
+            home_dir() / ".local" / "bin" / "opencode",
+        ]
+    else:
+        candidates = [
+            home_dir() / ".local" / "bin" / "opencode",
+            Path("/usr/local/bin/opencode"),
+            Path("/usr/bin/opencode"),
+        ]
+
+    for c in candidates:
+        if c.exists():
+            return str(c)
+
+    return "opencode"  # fallback — hope it's in PATH
+
+
+def opencode_config_path() -> Path:
+    """Path to OpenCode's global config: %USERPROFILE%\\.config\\opencode\\opencode.json (Win) or ~/.config/opencode/opencode.json."""
+    p = home_dir() / ".config" / "opencode" / "opencode.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def opencode_agents_md_path() -> Path:
+    """Path to OpenCode's global instruction file: ~/.config/opencode/AGENTS.md."""
+    return home_dir() / ".config" / "opencode" / "AGENTS.md"
+
+

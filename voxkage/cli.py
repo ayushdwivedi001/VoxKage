@@ -36,6 +36,7 @@ from voxkage.paths import (
     voxkage_dir, package_dir, config_path, env_path,
     gemini_dir, settings_json_path, gemini_md_path,
     data_dir, task_logs_dir, find_agy_cli, find_npm,
+    find_opencode_cli, opencode_config_path, opencode_agents_md_path,
     python_exe, icon_path, template_path, output_dir,
     agy_mcp_dir,
 )
@@ -352,10 +353,14 @@ def print_banner():
     # ── Read theme ─────────────────────────────────────────────────────────────
     theme = "Default Dark"
     try:
-        agy_settings = Path.home() / ".gemini" / "settings.json"
-        if agy_settings.exists():
-            data = json.loads(agy_settings.read_text(encoding="utf-8"))
-            theme = data.get("theme", data.get("ui", {}).get("theme", theme))
+        if config_path().exists():
+            cfg_data = json.loads(config_path().read_text(encoding="utf-8"))
+            theme = cfg_data.get("theme", theme)
+        else:
+            agy_settings = Path.home() / ".gemini" / "settings.json"
+            if agy_settings.exists():
+                data = json.loads(agy_settings.read_text(encoding="utf-8"))
+                theme = data.get("theme", data.get("ui", {}).get("theme", theme))
     except Exception:
         pass
 
@@ -462,25 +467,49 @@ def cmd_status():
     print(f"  {_c(71,85,105)}{'─' * 50}{RST}")
     print()
 
-    # Core
-    agy = find_agy_cli()
-    agy_ok = False
+    # Core — detect active engine from config
+    _status_cfg: dict = {}
     try:
-        result = subprocess.run(
-            [agy, "--version"], capture_output=True, text=True, timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW if is_windows() else 0,
-        )
-        agy_ok = result.returncode == 0
+        _status_cfg = json.loads(config_path().read_text(encoding="utf-8")) if config_path().exists() else {}
     except Exception:
         pass
+    _active_engine = _status_cfg.get("interface_engine", "antigravity")
 
     _ok = f"{_c(34,197,94)}✓{RST}"
     _no = f"{_c(255,80,80)}✗{RST}"
 
-    print(f"  CORE")
-    print(f"    {_ok if agy_ok else _no}  Antigravity CLI     {'found — v' + result.stdout.strip() if agy_ok else 'not found — install from antigravity.dev'}")
-    print(f"    {_ok}  Brain directory     {voxkage_dir()}")
-
+    if _active_engine == "opencode":
+        _oc_exe = find_opencode_cli()
+        _oc_ok = False
+        _oc_ver = ""
+        try:
+            _oc_res = subprocess.run(
+                [_oc_exe, "--version"], capture_output=True, text=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW if is_windows() else 0,
+            )
+            _oc_ok = _oc_res.returncode == 0
+            _oc_ver = _oc_res.stdout.strip() or _oc_res.stderr.strip()
+        except Exception:
+            pass
+        print(f"  CORE")
+        print(f"    {_ok if _oc_ok else _no}  Interface Engine     {'OpenCode CLI — ' + _oc_ver if _oc_ok else 'OpenCode CLI — not found (npm install -g @opencode/cli)'}")
+        print(f"    {_ok}  Brain directory      {voxkage_dir()}")
+    else:
+        agy = find_agy_cli()
+        agy_ok = False
+        agy_ver = ""
+        try:
+            result = subprocess.run(
+                [agy, "--version"], capture_output=True, text=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW if is_windows() else 0,
+            )
+            agy_ok = result.returncode == 0
+            agy_ver = result.stdout.strip()
+        except Exception:
+            pass
+        print(f"  CORE")
+        print(f"    {_ok if agy_ok else _no}  Interface Engine     {'Antigravity CLI (agy) — ' + agy_ver if agy_ok else 'Antigravity CLI — not found'}")
+        print(f"    {_ok}  Brain directory      {voxkage_dir()}")
 
     print()
 
@@ -1015,6 +1044,11 @@ def _generate_settings_json():
         from voxkage.plugins.registry import get_configured_plugin_servers
         plugin_servers = get_configured_plugin_servers()
         for k, v in plugin_servers.items():
+            # Handle remote serverUrl entries — convert to local mcp-remote proxy
+            server_url = v.pop("serverUrl", None)
+            if server_url:
+                v["command"] = "npx"
+                v["args"] = ["-y", "mcp-remote", server_url]
             if "$typeName" not in v:
                 v["$typeName"] = "exa.cascade_plugins_pb.CascadePluginCommandTemplate"
         servers.update(plugin_servers)
@@ -1336,6 +1370,154 @@ def _cleanup_global_gemini_md():
         pass
 
 
+# ── OpenCode Engine Helpers ────────────────────────────────────────────────────
+
+def _scaffold_opencode_mcp():
+    """
+    Write all VoxKage MCP servers into OpenCode's global config file.
+
+    OpenCode reads MCP servers from ~/.config/opencode/opencode.json under the
+    "mcp" key. We read the existing file (if any), inject all VoxKage core +
+    plugin servers under "mcp", and write back — preserving every other key
+    the user may have set (models, providers, API keys, themes etc.).
+
+    OpenCode MCP entry format:
+        "server-name": {
+            "type": "local",
+            "command": ["python.exe", "/path/to/server.py"],
+            "env": {"VOXKAGE_HOME": "..."},
+            "enabled": true
+        }
+    """
+    py = python_exe()
+    pkg = str(package_dir())
+    vk_home = str(voxkage_dir())
+
+    core_servers = [
+        ("voxkage-system",    "mcp_servers/system_server.py"),
+        ("voxkage-browser",   "mcp_servers/browser_server.py"),
+        ("voxkage-media",     "mcp_servers/media_server.py"),
+        ("voxkage-download",  "mcp_servers/download_server.py"),
+        ("voxkage-oscontrol", "mcp_servers/os_control_server.py"),
+        ("voxkage-file",      "mcp_servers/file_server.py"),
+        ("voxkage-fileops",   "mcp_servers/file_ops_server.py"),
+        ("voxkage-gui",       "mcp_servers/gui_server.py"),
+        ("voxkage-health",    "mcp_servers/health_server.py"),
+        ("voxkage-notify",    "mcp_servers/notify_server.py"),
+        ("voxkage-memory",    "mcp_servers/memory_server.py"),
+        ("voxkage-tasks",     "mcp_servers/task_server.py"),
+        ("voxkage-rag",       "mcp_servers/rag_server.py"),
+        ("voxkage-devserver", "mcp_servers/devserver_server.py"),
+        ("voxkage-coding",    "mcp_servers/coding_server.py"),
+    ]
+
+    # Collect all configured plugin servers dynamically (same source as agy)
+    all_servers: dict = {}
+    for server_name, script_rel in core_servers:
+        script_abs = os.path.join(pkg, script_rel)
+        if not os.path.exists(script_abs):
+            continue
+        all_servers[server_name] = {
+            "type": "local",
+            "command": [py, script_abs],
+            "env": {"VOXKAGE_HOME": vk_home},
+            "enabled": True,
+        }
+
+    # Add every configured plugin server (Telegram, Gmail, GitHub, Spotify,
+    # Firebase, Netlify, Supabase, Chrome DevTools, ClickHouse, Sequential
+    # Thinking — whatever is registered at runtime).
+    try:
+        from voxkage.plugins.registry import get_configured_plugin_servers
+        plugin_cfgs = get_configured_plugin_servers()
+        for name, cfg in plugin_cfgs.items():
+            server_url = cfg.get("serverUrl")
+            if server_url:
+                # Remote MCP server — wrap with mcp-remote proxy
+                env_vars = cfg.get("env", {"VOXKAGE_HOME": vk_home})
+                all_servers[name] = {
+                    "type": "local",
+                    "command": ["npx", "-y", "mcp-remote", server_url],
+                    "env": env_vars,
+                    "enabled": True,
+                }
+            else:
+                # Plugin entries use agy format — extract command/args for opencode
+                cmd_exe = cfg.get("command", py)
+                args = cfg.get("args", [])
+                env_vars = cfg.get("env", {"VOXKAGE_HOME": vk_home})
+                # Build opencode-style command array: [executable, *args]
+                full_cmd = [cmd_exe] + args if args else [cmd_exe]
+                all_servers[name] = {
+                    "type": "local",
+                    "command": full_cmd,
+                    "env": env_vars,
+                    "enabled": True,
+                }
+    except Exception:
+        pass
+
+    # Read existing opencode.json (preserve all user keys)
+    cfg_path = opencode_config_path()
+    existing: dict = {}
+    if cfg_path.exists():
+        try:
+            existing = json.loads(cfg_path.read_text(encoding="utf-8"))
+        except Exception:
+            existing = {}
+
+    # Inject ONLY the "mcp" key — everything else is untouched
+    existing["mcp"] = all_servers
+
+    cfg_path.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _inject_agents_md():
+    """
+    Copy VoxKage's generated GEMINI.md into OpenCode's global AGENTS.md.
+
+    OpenCode reads ~/.config/opencode/AGENTS.md as its global system
+    instruction file (equivalent role to GEMINI.md in the agy engine).
+    We back up any pre-existing AGENTS.md so _cleanup can restore it.
+    """
+    import shutil as _shutil
+    src = gemini_md_path()          # ~/.voxkage/.gemini/GEMINI.md (already rendered)
+    dst = opencode_agents_md_path() # ~/.config/opencode/AGENTS.md
+    bak = dst.parent / "AGENTS.md.pre_voxkage"
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    if not src.exists():
+        return
+
+    # Back up existing AGENTS.md once (don't overwrite an existing backup)
+    if dst.exists() and not bak.exists():
+        _shutil.copy2(dst, bak)
+
+    _shutil.copy2(src, dst)
+
+
+def _cleanup_agents_md():
+    """
+    Restore ~/.config/opencode/AGENTS.md to its pre-VoxKage state on exit.
+    If the user had no AGENTS.md before, the file is removed.
+    NOTE: opencode.json MCP entries are intentionally NOT cleaned — they should
+    persist so /mcp always works even when OpenCode is launched independently.
+    """
+    dst = opencode_agents_md_path()
+    bak = dst.parent / "AGENTS.md.pre_voxkage"
+
+    try:
+        if bak.exists():
+            import shutil as _shutil
+            _shutil.copy2(bak, dst)
+            bak.unlink()
+        elif dst.exists():
+            dst.unlink()
+    except Exception:
+        pass
+
+
 def cmd_launch(extra_args: list[str] | None = None):
     # Set window title
     if is_windows():
@@ -1348,31 +1530,67 @@ def cmd_launch(extra_args: list[str] | None = None):
         print()
         cmd_init()
 
-    # ── Refresh MCP server registrations in agy ───────────────────────────────
-    # Lightweight (AST parsing only, no subprocess) so safe every launch.
-    # Picks up new plugins and updated tool signatures automatically.
+    # ── Read engine preference ─────────────────────────────────────────────────
+    _engine = "antigravity"
     try:
-        _scaffold_agy_mcp_servers()
+        _cfg_data = json.loads(config_path().read_text(encoding="utf-8")) if config_path().exists() else {}
+        _engine = _cfg_data.get("interface_engine", "antigravity")
     except Exception:
         pass
 
-    # ── Regenerate GEMINI.md with latest soul memory + inject into agy ────────
-    # agy reads its global system prompt from ~/.gemini/GEMINI.md —
-    # same location as the legacy platform. Regenerating every launch
-    # ensures personality and soul memory are always live.
-    try:
-        _generate_gemini_md()
-        _inject_global_gemini_md()
-    except Exception:
-        pass
+    if _engine == "opencode":
+        # ── OpenCode engine path ───────────────────────────────────────────────
+        # Scaffold ALL MCP servers (core + every configured plugin) into
+        # ~/.config/opencode/opencode.json under the "mcp" key.
+        try:
+            _scaffold_opencode_mcp()
+        except Exception:
+            pass
+
+        # Regenerate soul memory and inject as AGENTS.md for OpenCode.
+        try:
+            _generate_gemini_md()
+            _inject_agents_md()
+        except Exception:
+            pass
+
+        _cli_exe = find_opencode_cli()
+        _not_found_msg = (
+            f"OpenCode CLI not found.\n"
+            f"     Install with: {_c(56,189,248)}npm install -g @opencode/cli{RST}\n"
+            f"     Then relaunch: {_c(56,189,248)}voxkage{RST}"
+        )
+        _cleanup_fn = _cleanup_agents_md
+
+    else:
+        # ── Antigravity engine path (default — existing behaviour unchanged) ───
+        # Refresh MCP registrations in ~/.gemini/config/mcp_config.json.
+        try:
+            _scaffold_agy_mcp_servers()
+        except Exception:
+            pass
+
+        # Regenerate GEMINI.md with latest soul memory and inject into agy.
+        try:
+            _generate_gemini_md()
+            _inject_global_gemini_md()
+        except Exception:
+            pass
+
+        _cli_exe = find_agy_cli()
+        _not_found_msg = (
+            f"Antigravity CLI not found.\n"
+            f"     Install agy first, then run {_c(56,189,248)}voxkage init{RST} to configure."
+        )
+        _cleanup_fn = _cleanup_global_gemini_md
 
     _run_first_time_setup()                  # one-time: playwright install chromium
     _ensure_tray_running()
     _ensure_telegram_watcher_running()       # start Telegram background watcher
     _start_ipc_server()                      # Telegram → VoxKage terminal bridge
 
-    # ── Print VoxKage ASCII banner, then launch agy ───────────────────────────
-    # VoxKage branding appears first; agy prints its own header below.
+    # ── Print VoxKage ASCII banner, then launch chosen engine ─────────────────
+    # VoxKage branding appears first — identical regardless of engine selected.
     if is_windows():
         os.system("cls")
     else:
@@ -1380,8 +1598,7 @@ def cmd_launch(extra_args: list[str] | None = None):
 
     print_banner()
 
-    agy = find_agy_cli()
-    cmd = [agy]
+    cmd = [_cli_exe]
     if extra_args:
         cmd.extend(extra_args)
 
@@ -1391,15 +1608,13 @@ def cmd_launch(extra_args: list[str] | None = None):
     try:
         proc = subprocess.run(cmd, cwd=os.getcwd(), env=env)
     except FileNotFoundError:
-        print(f"\n  {_c(255,80,80)}✗  Antigravity CLI not found.{RST}")
-        print(f"     Install agy first, then run {_c(56,189,248)}voxkage init{RST} to configure.\n")
-        _cleanup_global_gemini_md()
+        print(f"\n  {_c(255,80,80)}✗  {_not_found_msg}{RST}\n")
+        _cleanup_fn()
         sys.exit(1)
     except KeyboardInterrupt:
         pass
     finally:
-        # Restore ~/.gemini/GEMINI.md to its original state on exit
-        _cleanup_global_gemini_md()
+        _cleanup_fn()
 
     sys.exit(proc.returncode if 'proc' in dir() else 0)
 

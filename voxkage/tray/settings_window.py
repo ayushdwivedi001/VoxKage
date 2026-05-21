@@ -106,7 +106,7 @@ def run_gui():
     root.title("VoxKage Control Center")
     
     # ── Geometry & Positioning (Bottom Right)
-    w, h = 380, 620
+    w, h = 380, 680
     sw = root.winfo_screenwidth()
     sh = root.winfo_screenheight()
     x = sw - w - 20
@@ -199,8 +199,81 @@ def run_gui():
     scroll_container.pack(fill="both", expand=True, padx=16, pady=12)
     
     content = scroll_container.scrollable_frame
-    
+
     cfg = _load_config()
+
+    # ── Interface Provider Card ──────────────────────────────────────────────
+    # Selected engine stored as mutable container so nested callbacks can write to it
+    _engine_sel = [cfg.get("interface_engine", "antigravity")]
+
+    ip_card = tk.Frame(content, bg=PANEL, bd=1, relief="solid",
+                       highlightbackground=BORDER, highlightcolor=BORDER, padx=10, pady=8)
+    ip_card.configure(highlightthickness=1)
+    ip_card.pack(fill="x", pady=(0, 14))
+
+    tk.Label(ip_card, text="Interface Provider", fg=ACCENT, bg=PANEL, font=FONT_B).pack(anchor="w")
+    tk.Label(ip_card, text="Select the CLI engine VoxKage launches as its terminal.",
+             fg=SUB, bg=PANEL, font=FONT).pack(anchor="w", pady=(0, 8))
+
+    _theme_lbl_ref = []
+    _engine_rows: dict = {}  # key -> (row_frame, accent_bar, badge_label)
+
+    def _build_engine_row(key: str, label: str, subtitle: str):
+        row = tk.Frame(ip_card, bg=PANEL, cursor="hand2")
+        row.pack(fill="x", pady=2)
+
+        # Left accent bar (3 px) — cyan when active, invisible when inactive
+        bar = tk.Frame(row, bg=ACCENT if _engine_sel[0] == key else BORDER, width=3)
+        bar.pack(side="left", fill="y", padx=(0, 8))
+        bar.pack_propagate(False)
+
+        # Text block
+        txt = tk.Frame(row, bg=PANEL)
+        txt.pack(side="left", fill="both", expand=True)
+        lbl_main = tk.Label(txt, text=label,
+                            fg=FG if _engine_sel[0] == key else SUB,
+                            bg=PANEL, font=FONT_B, anchor="w")
+        lbl_main.pack(anchor="w")
+        lbl_sub = tk.Label(txt, text=subtitle, fg=SUB, bg=PANEL, font=FONT, anchor="w")
+        lbl_sub.pack(anchor="w")
+
+        # ACTIVE badge
+        badge = tk.Label(row, text="ACTIVE" if _engine_sel[0] == key else "",
+                         fg=OK_COLOR, bg=PANEL, font=FONT_B)
+        badge.pack(side="right", padx=(6, 0))
+
+        _engine_rows[key] = (row, bar, lbl_main, badge)
+
+        def _select(e=None, _k=key):
+            _engine_sel[0] = _k
+            for k2, (r2, b2, m2, g2) in _engine_rows.items():
+                active = (k2 == _k)
+                b2.configure(bg=ACCENT if active else BORDER)
+                m2.configure(fg=FG if active else SUB)
+                g2.configure(text="ACTIVE" if active else "")
+            
+            if _theme_lbl_ref:
+                if _k == "opencode":
+                    _theme_lbl_ref[0].configure(text="Styles startup banner. OpenCode manages terminal themes.")
+                else:
+                    _theme_lbl_ref[0].configure(text="Syncs startup banner & agy terminal styling")
+
+        # Bind click on every widget in the row so the full area is clickable
+        for widget in (row, bar, txt, lbl_main, lbl_sub, badge):
+            widget.bind("<Button-1>", _select)
+
+    _build_engine_row(
+        "antigravity",
+        "Antigravity CLI  (agy)",
+        "Best for Pro users · Latest Google & Claude models"
+    )
+    _build_engine_row(
+        "opencode",
+        "OpenCode CLI  (opencode)",
+        "Best for free-tier · Connect any API key via /connect"
+    )
+    
+    # (cfg already loaded above for Interface Provider card)
     
     # ── Load current state ──
     # 1. Autostart
@@ -254,7 +327,11 @@ def run_gui():
     theme_frame.pack(fill="x", pady=(0, 14))
     
     tk.Label(theme_frame, text="Unified Color Theme", fg=ACCENT2, bg=PANEL, font=FONT_B).pack(anchor="w")
-    tk.Label(theme_frame, text="Syncs logo & agy interface styling", fg=SUB, bg=PANEL, font=FONT).pack(anchor="w", pady=(0, 6))
+    
+    initial_sub = "Styles startup banner. OpenCode manages terminal themes." if _engine_sel[0] == "opencode" else "Syncs startup banner & agy terminal styling"
+    lbl_theme_sub = tk.Label(theme_frame, text=initial_sub, fg=SUB, bg=PANEL, font=FONT)
+    lbl_theme_sub.pack(anchor="w", pady=(0, 6))
+    _theme_lbl_ref.append(lbl_theme_sub)
     
     cb_theme = ttk.Combobox(theme_frame, values=themes, state="readonly", font=FONT)
     cb_theme.set(current_theme)
@@ -328,6 +405,7 @@ def run_gui():
         telegram_state = toggles["telegram"].state
         sandbox_state = toggles["sandbox"].state
         notif_state = toggles["notifications"].state
+        engine_sel = _engine_sel[0]
         
         # 1. Save to ~/.voxkage/config.json
         _save_config({
@@ -336,7 +414,8 @@ def run_gui():
             "safe_mode": safe_mode_state,
             "telegram_watcher_enabled": telegram_state,
             "sandbox_mode": sandbox_state,
-            "notifications_enabled": notif_state
+            "notifications_enabled": notif_state,
+            "interface_engine": engine_sel,
         })
         
         # 2. Update Autostart Registry
@@ -350,40 +429,41 @@ def run_gui():
             print(f"[Settings] Registry error: {e}", file=sys.stderr)
             
         # 3. Update C:\Users\AYUSH\.gemini\settings.json for themes & notifications
-        try:
-            # Map theme to agy CLI counterpart
-            theme_map = {
-                "Default Dark": "Default",
-                "ANSI Dark": "ANSI Dark",
-                "Atom One Dark": "Atom One Dark",
-                "Ayu Dark": "Ayu Dark",
-                "Dracula Dark": "Dracula",
-                "GitHub Dark": "GitHub Dark",
-                "GitHub Dark Colorblind Dark": "GitHub Dark Colorblind",
-                "Holiday Dark": "Holiday",
-                "Shades Of Purple Dark": "Shades Of Purple",
-                "Solarized Dark": "Solarized Dark",
-                "Tokyo Night Dark": "Tokyo Night"
-            }
-            agy_theme = theme_map.get(theme_sel, "Default")
-            
-            settings_path = Path.home() / ".gemini" / "settings.json"
-            if settings_path.exists():
-                s_data = json.loads(settings_path.read_text(encoding="utf-8"))
+        if engine_sel == "antigravity":
+            try:
+                # Map theme to agy CLI counterpart
+                theme_map = {
+                    "Default Dark": "Default",
+                    "ANSI Dark": "ANSI Dark",
+                    "Atom One Dark": "Atom One Dark",
+                    "Ayu Dark": "Ayu Dark",
+                    "Dracula Dark": "Dracula",
+                    "GitHub Dark": "GitHub Dark",
+                    "GitHub Dark Colorblind Dark": "GitHub Dark Colorblind",
+                    "Holiday Dark": "Holiday",
+                    "Shades Of Purple Dark": "Shades Of Purple",
+                    "Solarized Dark": "Solarized Dark",
+                    "Tokyo Night Dark": "Tokyo Night"
+                }
+                agy_theme = theme_map.get(theme_sel, "Default")
                 
-                # Update theme in UI settings
-                if "ui" not in s_data:
-                    s_data["ui"] = {}
-                s_data["ui"]["theme"] = agy_theme
-                
-                # Update notifications in General settings
-                if "general" not in s_data:
-                    s_data["general"] = {}
-                s_data["general"]["enableNotifications"] = notif_state
-                
-                settings_path.write_text(json.dumps(s_data, indent=2), encoding="utf-8")
-        except Exception as e:
-            print(f"[Settings] Agy config error: {e}", file=sys.stderr)
+                settings_path = Path.home() / ".gemini" / "settings.json"
+                if settings_path.exists():
+                    s_data = json.loads(settings_path.read_text(encoding="utf-8"))
+                    
+                    # Update theme in UI settings
+                    if "ui" not in s_data:
+                        s_data["ui"] = {}
+                    s_data["ui"]["theme"] = agy_theme
+                    
+                    # Update notifications in General settings
+                    if "general" not in s_data:
+                        s_data["general"] = {}
+                    s_data["general"]["enableNotifications"] = notif_state
+                    
+                    settings_path.write_text(json.dumps(s_data, indent=2), encoding="utf-8")
+            except Exception as e:
+                print(f"[Settings] Agy config error: {e}", file=sys.stderr)
             
         # 4. Handle active Telegram Watcher process dynamically
         try:
