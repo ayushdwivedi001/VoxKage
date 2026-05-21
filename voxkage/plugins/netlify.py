@@ -1,7 +1,7 @@
 """VoxKage Netlify MCP Plugin — Deploy and manage sites."""
 
-import os
 from voxkage.plugins.base import VoxKagePlugin
+from voxkage.paths import voxkage_dir
 
 
 class NetlifyPlugin(VoxKagePlugin):
@@ -36,7 +36,7 @@ class NetlifyPlugin(VoxKagePlugin):
                 "command": "npx",
                 "args": ["-y", "@netlify/mcp"],
                 "env": {
-                    "NETLIFY_PERSONAL_ACCESS_TOKEN": os.environ.get("NETLIFY_PERSONAL_ACCESS_TOKEN", "")
+                    "VOXKAGE_HOME": str(voxkage_dir()),
                 }
             }
         }

@@ -4,6 +4,7 @@ import os
 
 from voxkage.plugins.base import VoxKagePlugin
 from voxkage._env import load_voxkage_env
+from voxkage.paths import voxkage_dir
 
 
 class SupabasePlugin(VoxKagePlugin):
@@ -39,7 +40,7 @@ class SupabasePlugin(VoxKagePlugin):
         load_voxkage_env()
         token = os.environ.get("SUPABASE_ACCESS_TOKEN", "")
 
-        env = {"VOXKAGE_HOME": os.environ.get("VOXKAGE_HOME", "")}
+        env = {"VOXKAGE_HOME": str(voxkage_dir())}
         if token:
             env["SUPABASE_ACCESS_TOKEN"] = token
 
