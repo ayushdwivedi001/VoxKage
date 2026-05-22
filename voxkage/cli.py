@@ -1068,9 +1068,7 @@ def _generate_settings_json():
         except Exception:
             pass
 
-    if "mcpServers" not in settings:
-        settings["mcpServers"] = {}
-    settings["mcpServers"].update(servers)
+    settings["mcpServers"] = servers
     settings = _sanitize_settings(settings)
 
     vk_settings.write_text(

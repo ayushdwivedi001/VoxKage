@@ -1,14 +1,20 @@
 """
 MCP Server: VoxKage Parallel Task Manager
 
-Enables VoxKage to spawn background agy CLI sub-agents for long-running
-multi-step tasks, keeping the main session free for continued interaction.
+Enables VoxKage to spawn background CLI sub-agents (agy OR OpenCode) for
+long-running multi-step tasks, keeping the main session free.
 
 Architecture:
-  Main VoxKage session  ->  spawn_task()  ->  Hidden agy CLI sub-agent
-                                              (runs autonomously with full MCP access)
-                                              calls complete_task() when done
+  Main VoxKage session  ->  spawn_task()  ->  Hidden CLI sub-agent (agy | opencode)
+                                               (runs autonomously with full MCP access)
+                                               calls complete_task() when done
   Main session          ->  check_tasks()  ->  Sees completed results
+
+Dual-Engine Support:
+  - Detects agy and opencode CLIs at runtime
+  - Priority: OpenCode > agy (mirrors user's engine preference)
+  - Falls back gracefully if one engine is missing
+  - All spawning, watchdog, and logging works identically for both
 
 Tools for Main Agent:
   spawn_task(description, model)   --  Launch a background sub-agent
@@ -16,7 +22,7 @@ Tools for Main Agent:
   get_task_result(task_id)         --  Read full sub-agent output
   cancel_task(task_id)             --  Kill a running sub-agent
 
-Tools for Sub-Agent (called by background agy CLI):
+Tools for Sub-Agent (called by background CLI):
   complete_task(task_id, summary, success, details)  --  Sub-agent reports completion
 
 Run standalone: python mcp_servers/task_server.py
@@ -55,10 +61,46 @@ os.makedirs(_LOG_DIR, exist_ok=True)
 _STUCK_TIMEOUT_SECS = 30 * 60   # 30 minutes — generous for slow research tasks
 _HARD_TIMEOUT_SECS  = 90 * 60   # 90 minutes — absolute hard kill regardless
 
-# -- Antigravity CLI executable resolution ------------------------------------
-# Uses the shared paths module for cross-platform resolution.
+# -- CLI executable resolution (dual-engine) ----------------------------------
+# Resolves both Antigravity (agy) and OpenCode CLI paths.
 from voxkage.paths import find_agy_cli as _paths_find_agy
-_AGY_EXE = _paths_find_agy()
+from voxkage.paths import find_opencode_cli as _paths_find_opencode
+
+_AGY_EXE      = _paths_find_agy()
+_OPENCODE_EXE = _paths_find_opencode()
+
+def _resolve_cli(force_engine: str = "") -> tuple[str, str]:
+    """
+    Returns (exe_path, engine_name) for the best available CLI.
+    Priority: OpenCode > agy (mirrors user's dual-engine config preference).
+    If force_engine is set to 'opencode' or 'agy', that specific engine is tried first.
+    """
+    from shutil import which as _which
+
+    def _alive(exe: str) -> bool:
+        """Check if an executable path is actually usable."""
+        if not exe:
+            return False
+        if os.path.isfile(exe):
+            return True
+        return _which(exe) is not None
+
+    candidates = []
+    if force_engine == "opencode":
+        candidates = [(_OPENCODE_EXE, "opencode")]
+    elif force_engine == "agy":
+        candidates = [(_AGY_EXE, "agy")]
+    else:
+        candidates = [(_OPENCODE_EXE, "opencode"), (_AGY_EXE, "agy")]
+
+    for exe, name in candidates:
+        if _alive(exe):
+            return exe, name
+
+    # Last resort — return whatever we have
+    if _alive(_OPENCODE_EXE):
+        return _OPENCODE_EXE, "opencode"
+    return _AGY_EXE, "agy"
 
 # -- Model catalogue & selection ------------------------------------------------
 # Ordered by capability (most capable first within each tier)
@@ -234,13 +276,16 @@ def _append_step(task_id: str, step: dict) -> bool:
     return True
 
 
-def _build_sub_agent_prompt(task_id: str, description: str) -> str:
+def _build_sub_agent_prompt(task_id: str, description: str, engine: str = "auto") -> str:
     """
-    Builds the full prompt injected into the background agy CLI session.
+    Builds the full prompt injected into the background CLI session.
+    Works for both agy and opencode engines.
     Overrides VoxKage's JARVIS personality and mandates step logging.
     """
+    engine_label = {"opencode": "OpenCode AI", "agy": "Antigravity CLI"}.get(engine, "CLI")
     return f"""[SUB-AGENT MODE — TASK {task_id}]
-You are a VoxKage background sub-agent. You are running HEADLESSLY with NO human present.
+You are a VoxKage background sub-agent running on {engine_label}.
+You are running HEADLESSLY with NO human present.
 This process WILL BE KILLED if you pause, wait, or ask for any input.
 
 YOUR TASK:
@@ -426,9 +471,10 @@ def _task_watchdog(task_id: str, pid: int):
 def spawn_task(
     description: str,
     model_override: str = "",
+    engine: str = "",
 ) -> str:
     """
-    Spawn a background agy CLI sub-agent to execute a long-running or complex task.
+    Spawn a background CLI sub-agent (agy OR OpenCode) for long-running tasks.
 
     Use for ANY task that requires multi-step execution and would block the main session:
     - Research + file creation (e.g. "research X and write a Word doc")
@@ -443,6 +489,7 @@ def spawn_task(
       description    : Full natural language task description for the sub-agent.
                        Be specific  --  include where to save files, what sites to use, etc.
       model_override : Force a specific model: "flash" or "pro". Leave blank for auto-select.
+      engine         : Force a specific CLI engine: "agy" or "opencode". Leave blank for auto-detect.
 
     Returns a task ID. Inform the user the task has been initiated and you will notify them when done.
     """
@@ -463,11 +510,15 @@ def spawn_task(
 
     override_key = (model_override or "").lower().strip()
     if override_key:
-        model = _MODEL_ALIASES.get(override_key, model_override)  # pass-through if exact model string
+        model = _MODEL_ALIASES.get(override_key, model_override)
         model_reason = f"Specified: '{model_override}' -> {model}"
     else:
         model = subagent_model
         model_reason = f"From settings: {model}"
+
+    # Resolve which CLI engine to use
+    cli_path, cli_name = _resolve_cli(engine)
+    engine_label = {"opencode": "OpenCode AI", "agy": "Antigravity CLI"}.get(cli_name, "CLI")
 
     # Build task record
     task = {
@@ -487,26 +538,20 @@ def spawn_task(
         "steps":        [],
         "current_step": "Initialising...",
         "step_updated_at": None,
+        "engine":       cli_name,
     }
     _save_task(task)
 
-    # Build the sub-agent prompt
-    prompt = _build_sub_agent_prompt(task_id, description)
+    # Build the sub-agent prompt (engine-aware)
+    prompt = _build_sub_agent_prompt(task_id, description, engine=cli_name)
 
-    # Launch background agy CLI process
-    # On Windows we must use the .cmd wrapper path directly.
-    # shell=True is NOT used  --  it causes extra cmd.exe overhead and PID tracking issues.
+    # Launch background CLI process
     log_path = task["log_file"]
     try:
-        # Build env for sub-agent:
-        #   VOXKAGE_SUBAGENT=1  → file-ops tools auto-confirm without blocking
-        #   VOXKAGE_SAFE_MODE=0 → Shield protocol skips confirmation prompts
-        #   VOXKAGE_HOME        → MCP servers find ~/.voxkage correctly
         sub_env = os.environ.copy()
         sub_env["VOXKAGE_SUBAGENT"]  = "1"
-        sub_env["VOXKAGE_SAFE_MODE"] = "0"   # No shield prompts in headless mode
+        sub_env["VOXKAGE_SAFE_MODE"] = "0"
         sub_env["VOXKAGE_HOME"]      = _MEM_DIR
-        # Ensure npm global bin (where agy lives) is in PATH
         if os.name == "nt":
             npm_bin = os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "npm")
             if npm_bin not in sub_env.get("PATH", ""):
@@ -515,18 +560,23 @@ def spawn_task(
         spawn_time = datetime.now().isoformat()
         with open(log_path, "w", encoding="utf-8") as log_f:
             log_f.write(f"[VoxKage Sub-Agent] Task {task_id} started at {spawn_time}\n")
+            log_f.write(f"[VoxKage Sub-Agent] Engine: {engine_label} ({cli_path})\n")
             log_f.write(f"[VoxKage Sub-Agent] Model: {model}\n")
-            log_f.write(f"[VoxKage Sub-Agent] Agy exe: {_AGY_EXE}\n")
             log_f.write("=" * 60 + "\n")
             log_f.flush()
 
-            cmd_args = [
-                _AGY_EXE,
-                "--dangerously-skip-permissions",
-                "--prompt", prompt,
-            ]
-            if sandbox_mode:
-                cmd_args.append("--sandbox")
+            if cli_name == "opencode":
+                cmd_args = [
+                    cli_path, "run", "--prompt", prompt, "--pure",
+                ]
+            else:
+                cmd_args = [
+                    cli_path,
+                    "--dangerously-skip-permissions",
+                    "--prompt", prompt,
+                ]
+                if sandbox_mode:
+                    cmd_args.append("--sandbox")
 
             proc = subprocess.Popen(
                 cmd_args,
@@ -545,10 +595,9 @@ def spawn_task(
             "status":       "running",
             "started_at":   spawn_time,
             "pid":          proc.pid,
-            "last_step_at": spawn_time,   # watchdog heartbeat
+            "last_step_at": spawn_time,
         })
 
-        # Launch per-task hard-timeout watchdog thread
         threading.Thread(
             target=_task_watchdog,
             args=(task_id, proc.pid),
@@ -559,6 +608,7 @@ def spawn_task(
         return (
             f"[TASK SPAWNED]\n"
             f"Task ID  : {task_id}\n"
+            f"Engine   : {engine_label}\n"
             f"Model    : {model} ({model_reason})\n"
             f"Status   : Running in background (PID {proc.pid})\n"
             f"Task     : {description[:120]}{'...' if len(description) > 120 else ''}\n"
@@ -568,10 +618,10 @@ def spawn_task(
         )
 
     except FileNotFoundError:
-        _update_task(task_id, {"status": "failed", "summary": "agy CLI not found in PATH"})
+        _update_task(task_id, {"status": "failed", "summary": f"{cli_name} CLI not found in PATH"})
         return (
-            f"[ERROR] Could not spawn sub-agent  --  'agy' command not found in PATH.\n"
-            f"Make sure the Antigravity CLI is installed."
+            f"[ERROR] Could not spawn sub-agent  --  '{cli_name}' command not found in PATH.\n"
+            f"Make sure {engine_label} is installed."
         )
     except Exception as e:
         _update_task(task_id, {"status": "failed", "summary": str(e)})
@@ -1227,9 +1277,10 @@ def spawn_evolution_task(
     project_dir: str,
     test_command: str = "",
     model_override: str = "",
+    engine: str = "",
 ) -> str:
     """
-    Spawn a protected background sub-agent to build a new feature or fix for a project.
+    Spawn a protected background sub-agent (agy OR OpenCode) for safe code evolution.
 
     This is the SAFE way to let VoxKage modify its own code or any project code.
     Before touching any files, it automatically creates a restore checkpoint (Git commit
@@ -1244,11 +1295,12 @@ def spawn_evolution_task(
       5. Tests fail → checkpoint rolled back automatically
 
     Parameters:
-      description  : Natural language description of the feature to build or bug to fix.
-      project_dir  : Absolute path to the project directory to modify.
-      test_command : Optional custom test command (e.g. "pytest tests/"). Defaults to
-                     running the auto-generated test file.
+      description   : Natural language description of the feature to build or bug to fix.
+      project_dir   : Absolute path to the project directory to modify.
+      test_command  : Optional custom test command (e.g. "pytest tests/"). Defaults to
+                      running the auto-generated test file.
       model_override: Optional model to use. Leave blank for auto-selection.
+      engine        : Force a specific CLI engine: "agy" or "opencode". Blank = auto-detect.
 
     Returns a task ID. The main session will be notified automatically when the task completes.
     """
@@ -1258,8 +1310,11 @@ def spawn_evolution_task(
 
     task_id = str(uuid.uuid4())[:8]
 
+    # ── Resolve CLI engine ────────────────────────────────────────────────────
+    cli_path, cli_name = _resolve_cli(engine)
+    engine_label = {"opencode": "OpenCode AI", "agy": "Antigravity CLI"}.get(cli_name, "CLI")
+
     # ── Model selection ────────────────────────────────────────────────────────
-    # Check ~/.voxkage/config.json first, then fall back to auto-select
     vk_config_path = os.path.join(_MEM_DIR, "config.json")
     subagent_model = _MODEL_STANDARD
     sandbox_mode = True
@@ -1310,6 +1365,7 @@ def spawn_evolution_task(
         "steps":        [],
         "current_step": "Checkpoint created — spawning sub-agent...",
         "step_updated_at": None,
+        "engine":       cli_name,
     }
     _save_task(task)
 
@@ -1320,7 +1376,7 @@ def spawn_evolution_task(
     try:
         sub_env = os.environ.copy()
         sub_env["VOXKAGE_SUBAGENT"]  = "1"
-        sub_env["VOXKAGE_SAFE_MODE"] = "0"   # No shield prompts — headless
+        sub_env["VOXKAGE_SAFE_MODE"] = "0"
         sub_env["VOXKAGE_HOME"]      = _MEM_DIR
         if os.name == "nt":
             npm_bin = os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "npm")
@@ -1330,18 +1386,24 @@ def spawn_evolution_task(
         spawn_time = datetime.now().isoformat()
         with open(log_path, "w", encoding="utf-8") as log_f:
             log_f.write(f"[VoxKage Evolution Sub-Agent] Task {task_id} started at {spawn_time}\n")
+            log_f.write(f"[VoxKage Evolution Sub-Agent] Engine: {engine_label} ({cli_path})\n")
             log_f.write(f"[VoxKage Evolution Sub-Agent] Model: {model}\n")
             log_f.write(f"[VoxKage Evolution Sub-Agent] Project: {project_dir}\n")
             log_f.write("=" * 60 + "\n")
             log_f.flush()
 
-            cmd_args = [
-                _AGY_EXE,
-                "--dangerously-skip-permissions",
-                "--prompt", prompt,
-            ]
-            if sandbox_mode:
-                cmd_args.append("--sandbox")
+            if cli_name == "opencode":
+                cmd_args = [
+                    cli_path, "run", "--prompt", prompt, "--pure",
+                ]
+            else:
+                cmd_args = [
+                    cli_path,
+                    "--dangerously-skip-permissions",
+                    "--prompt", prompt,
+                ]
+                if sandbox_mode:
+                    cmd_args.append("--sandbox")
 
             proc = subprocess.Popen(
                 cmd_args,
@@ -1360,7 +1422,6 @@ def spawn_evolution_task(
             "last_step_at": spawn_time,
         })
 
-        # Launch watchdog thread
         threading.Thread(
             target=_task_watchdog,
             args=(task_id, proc.pid),
@@ -1375,6 +1436,7 @@ def spawn_evolution_task(
         return (
             f"[EVOLUTION TASK SPAWNED]\n"
             f"Task ID     : {task_id}\n"
+            f"Engine      : {engine_label}\n"
             f"Model       : {model}\n"
             f"Project     : {project_dir}\n"
             f"Checkpoint  : {cp_method.upper()} — {cp_short}\n"
@@ -1387,8 +1449,8 @@ def spawn_evolution_task(
         )
 
     except FileNotFoundError:
-        _update_task(task_id, {"status": "failed", "summary": "agy CLI not found"})
-        return "[ERROR] 'agy' command not found in PATH. Cannot spawn evolution sub-agent."
+        _update_task(task_id, {"status": "failed", "summary": f"{cli_name} CLI not found"})
+        return f"[ERROR] '{cli_name}' command not found in PATH. Cannot spawn evolution sub-agent."
     except Exception as e:
         _update_task(task_id, {"status": "failed", "summary": str(e)})
         return f"[ERROR] Failed to spawn evolution sub-agent: {e}"
