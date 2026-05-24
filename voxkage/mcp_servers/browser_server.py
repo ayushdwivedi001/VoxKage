@@ -257,13 +257,22 @@ def execute_browser_workflow(goal: str, steps: list) -> str:
     Executes a multi-step browser workflow in sequence.
     steps: list of agent_step argument dicts.
     """
-    _, _, execute_workflow, *_ = _web_agent()
     if not steps:
         return "Error: No steps provided."
-    result = execute_workflow(goal, steps)
-    if isinstance(result, dict):
-        return result.get("text", str(result))
-    return str(result)
+    
+    import queue as _queue
+    _, _, _, _, _pw_queue = _web_agent()
+    res_q = _queue.Queue()
+    _pw_queue.put(("workflow", {"steps": steps, "goal": goal}, res_q))
+    try:
+        status, result = res_q.get(timeout=150)
+        if status == "ok":
+            if isinstance(result, dict):
+                return result.get("text", str(result))
+            return str(result)
+        return f"Error: {result}"
+    except _queue.Empty:
+        return "Error: Timeout waiting for browser workflow."
 
 
 
@@ -448,16 +457,11 @@ def dom_execute_js(code: str) -> str:
     Allows for deeply specific queries or interacting with page variables.
     Make sure your code returns a serializable value (e.g., array, object, string).
     """
-    # Wrap in async IIFE to allow await inside code
-    js_code = f"""
-    (async () => {{
-        try {{
-            {code}
-        }} catch(e) {{
-            return "JS Error: " + e.message;
-        }}
-    }})()
-    """
+    cleaned_code = code.strip()
+    if "\n" not in cleaned_code and not cleaned_code.startswith("return ") and ";" not in cleaned_code:
+        js_code = f"async () => {{ return ({cleaned_code}); }}"
+    else:
+        js_code = f"async () => {{\n{cleaned_code}\n}}"
     return _run_js(js_code)
 
 @mcp.tool()
