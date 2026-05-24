@@ -449,10 +449,22 @@ def dom_execute_js(code: str) -> str:
     Make sure your code returns a serializable value (e.g., array, object, string).
     """
     # Wrap in async IIFE to allow await inside code
-    js_code = f"""
+    cleaned = code.strip()
+    if "\n" not in cleaned and ";" not in cleaned and not cleaned.startswith("return "):
+        js_code = f"""
     (async () => {{
         try {{
-            {code}
+            return ({cleaned})
+        }} catch(e) {{
+            return "JS Error: " + e.message;
+        }}
+    }})()
+    """
+    else:
+        js_code = f"""
+    (async () => {{
+        try {{
+            {cleaned}
         }} catch(e) {{
             return "JS Error: " + e.message;
         }}
