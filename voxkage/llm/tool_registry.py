@@ -41,6 +41,20 @@ def _coding(fn_name: str, **kwargs):
     }
     return _fns[fn_name](**kwargs)
 
+# Session Logging — imported lazily
+def _session(fn_name: str, **kwargs):
+    from voxkage.mcp_servers.session_server import (
+        create_session_log, list_sessions,
+        get_session_log, search_sessions,
+    )
+    _fns = {
+        "create_session_log": create_session_log,
+        "list_sessions": list_sessions,
+        "get_session_log": get_session_log,
+        "search_sessions": search_sessions,
+    }
+    return _fns[fn_name](**kwargs)
+
 # GUI Pilot — imported lazily to avoid pyautogui import on headless machines
 def _gui(fn_name: str, **kwargs):
     from voxkage.mcp_servers.gui_server import gui_thinking, get_desktop_state, get_open_files, gui_step, read_active_document
@@ -595,6 +609,9 @@ def execute_tool_call(tool_name: str, arguments: dict):
 
         elif tool_name == "read_active_document":
             return _gui("read_active_document")
+
+        elif tool_name in ("create_session_log", "list_sessions", "get_session_log", "search_sessions"):
+            return _session(tool_name, **arguments)
 
         else:
             return f"Tool {tool_name} not found in registry."

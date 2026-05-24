@@ -896,6 +896,7 @@ def _scaffold_agy_mcp_servers():
         ("voxkage-rag",       "mcp_servers/rag_server.py"),
         ("voxkage-devserver", "mcp_servers/devserver_server.py"),
         ("voxkage-coding",    "mcp_servers/coding_server.py"),
+        ("voxkage-session",   "mcp_servers/session_server.py"),
     ]
 
     # Add configured plugin servers (telegram, github, spotify, gmail)
@@ -1027,6 +1028,7 @@ def _generate_settings_json():
         ("voxkage-rag",       "mcp_servers/rag_server.py"),
         ("voxkage-devserver", "mcp_servers/devserver_server.py"),
         ("voxkage-coding",    "mcp_servers/coding_server.py"),
+        ("voxkage-session",   "mcp_servers/session_server.py"),
     ]
 
     servers = {}
@@ -1407,6 +1409,7 @@ def _scaffold_opencode_mcp():
         ("voxkage-rag",       "mcp_servers/rag_server.py"),
         ("voxkage-devserver", "mcp_servers/devserver_server.py"),
         ("voxkage-coding",    "mcp_servers/coding_server.py"),
+        ("voxkage-session",   "mcp_servers/session_server.py"),
     ]
 
     # Collect all configured plugin servers dynamically (same source as agy)

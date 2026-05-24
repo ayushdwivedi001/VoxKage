@@ -103,6 +103,12 @@ TOOL_TO_SERVER = {
     "get_code_skeleton": "coding_server.py",
     "update_coding_plan": "coding_server.py",
     "get_coding_plan": "coding_server.py",
+
+    # Session Logging
+    "create_session_log": "session_server.py",
+    "list_sessions": "session_server.py",
+    "get_session_log": "session_server.py",
+    "search_sessions": "session_server.py",
 }
 
 # Tools that must run via tool_registry directly when inside an async context.
