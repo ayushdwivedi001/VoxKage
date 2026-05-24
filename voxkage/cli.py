@@ -538,7 +538,7 @@ def cmd_status():
 
     builtin_names = {
         "telegram", "gmail", "spotify", "github", "firebase",
-        "netlify", "supabase", "chrome-devtools", "clickhouse", "sequential-thinking"
+        "netlify", "supabase", "clickhouse", "sequential-thinking"
     }
 
     builtins = [p for p in plugins if p.name in builtin_names]
