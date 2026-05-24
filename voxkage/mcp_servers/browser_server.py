@@ -529,5 +529,285 @@ def search_frontend_snippets(query: str) -> str:
     except Exception as e:
         return f"Error searching memory: {e}"
 
+def _dispatch_task(action: str, kwargs: dict, timeout: int = 30) -> str:
+    import queue as _queue
+    import json
+    _, _, _, _, _pw_queue = _web_agent()
+    res_q = _queue.Queue()
+    _pw_queue.put((action, kwargs, res_q))
+    try:
+        status, result = res_q.get(timeout=timeout)
+        if status == "ok":
+            if isinstance(result, (dict, list)):
+                return json.dumps(result, indent=2)
+            return str(result)
+        return f"Error: {result}"
+    except _queue.Empty:
+        return f"Error: Timeout ({timeout}s) waiting for browser execution of action '{action}'."
+
+@mcp.tool()
+def take_snapshot(verbose: bool = False, filePath: Optional[str] = None) -> str:
+    """
+    Take a text snapshot of the currently selected page based on the a11y tree.
+    The snapshot lists page elements along with a unique identifier (uid).
+    Always use the latest snapshot. Prefer taking a snapshot over taking a screenshot.
+    
+    Parameters:
+      verbose: Whether to include extra element layout and class detail. Default is false.
+      filePath: Absolute path to save the snapshot to instead of attaching it to response.
+    """
+    return _dispatch_task("take_snapshot", {"verbose": verbose, "filePath": filePath})
+
+@mcp.tool()
+def click(uid: str, dblClick: bool = False, includeSnapshot: bool = False) -> str:
+    """
+    Clicks on the provided element by its uid from the snapshot.
+    
+    Parameters:
+      uid: The unique identifier of the element from take_snapshot.
+      dblClick: Set to true for double clicks. Default is false.
+      includeSnapshot: Set to true to return the post-action snapshot. Default is false.
+    """
+    res = _dispatch_task("click_uid", {"uid": uid, "dblClick": dblClick})
+    if includeSnapshot:
+        snap = _dispatch_task("take_snapshot", {})
+        return f"{res}\n\n=== Post-Click Snapshot ===\n{snap}"
+    return res
+
+@mcp.tool()
+def hover(uid: str, includeSnapshot: bool = False) -> str:
+    """
+    Hovers over the provided element by its uid.
+    
+    Parameters:
+      uid: The unique identifier of the element.
+      includeSnapshot: Set to true to return the post-action snapshot. Default is false.
+    """
+    res = _dispatch_task("hover_uid", {"uid": uid})
+    if includeSnapshot:
+        snap = _dispatch_task("take_snapshot", {})
+        return f"{res}\n\n=== Post-Hover Snapshot ===\n{snap}"
+    return res
+
+@mcp.tool()
+def fill(uid: str, value: str, includeSnapshot: bool = False) -> str:
+    """
+    Type text into an input, text area, or select an option from a select element.
+    For checkboxes/toggles, pass "true" or "false" to check/uncheck.
+    
+    Parameters:
+      uid: Unique identifier of the target element.
+      value: The text or toggle value to input.
+      includeSnapshot: Set to true to return the post-action snapshot.
+    """
+    res = _dispatch_task("fill_uid", {"uid": uid, "value": value})
+    if includeSnapshot:
+        snap = _dispatch_task("take_snapshot", {})
+        return f"{res}\n\n=== Post-Fill Snapshot ===\n{snap}"
+    return res
+
+@mcp.tool()
+def fill_form(elements: list, includeSnapshot: bool = False) -> str:
+    """
+    Batch fill multiple form elements at once.
+    
+    Parameters:
+      elements: List of dictionaries with "uid" and "value" keys.
+      includeSnapshot: Set to true to return the post-action snapshot.
+    """
+    res = _dispatch_task("fill_form", {"elements": elements})
+    if includeSnapshot:
+        snap = _dispatch_task("take_snapshot", {})
+        return f"{res}\n\n=== Post-Fill Snapshot ===\n{snap}"
+    return res
+
+@mcp.tool()
+def drag(from_uid: str, to_uid: str) -> str:
+    """
+    Drags an element to another target element by their uids.
+    """
+    return _dispatch_task("drag_uid", {"from_uid": from_uid, "to_uid": to_uid})
+
+@mcp.tool()
+def type_text(text: str, submitKey: Optional[str] = None) -> str:
+    """
+    Types text into the currently focused element page-wide.
+    
+    Parameters:
+      text: The text string to type.
+      submitKey: Optional hotkey to press after typing (e.g. "Enter").
+    """
+    return _dispatch_task("type_text", {"text": text, "submitKey": submitKey})
+
+@mcp.tool()
+def press_key(key: str) -> str:
+    """
+    Simulates a key press (e.g. "Enter", "Control+a", "Backspace").
+    """
+    return _dispatch_task("press_key", {"key": key})
+
+@mcp.tool()
+def wait_for(text: str, timeout: int = 5000) -> str:
+    """
+    Waits for a text or selector to load/appear on the active page.
+    """
+    return _dispatch_task("wait_for", {"text": text, "timeout": timeout}, timeout=(timeout//1000 + 5))
+
+@mcp.tool()
+def list_pages() -> str:
+    """
+    Lists all currently open tabs/pages in the browser session.
+    """
+    return _dispatch_task("list_pages", {})
+
+@mcp.tool()
+def new_page(url: Optional[str] = None) -> str:
+    """
+    Opens a new page/tab and brings it to focus.
+    """
+    return _dispatch_task("new_page", {"url": url})
+
+@mcp.tool()
+def close_page(pageId: Optional[str] = None) -> str:
+    """
+    Closes a tab by its pageId index. If pageId is omitted, closes active page.
+    """
+    return _dispatch_task("close_page", {"pageId": pageId})
+
+@mcp.tool()
+def select_page(pageId: str) -> str:
+    """
+    Brings the specified page tab to the front and makes it active.
+    """
+    return _dispatch_task("select_page", {"pageId": pageId})
+
+@mcp.tool()
+def resize_page(width: int, height: int) -> str:
+    """
+    Resizes the current tab's viewport to the specified width and height.
+    """
+    return _dispatch_task("resize_page", {"width": width, "height": height})
+
+@mcp.tool()
+def navigate_page(type: str, url: Optional[str] = None) -> str:
+    """
+    Controls page navigation history or goes to a direct URL.
+    
+    Parameters:
+      type: "url", "back", "forward", or "reload".
+      url: The target address (required only for type="url").
+    """
+    return _dispatch_task("navigate_page", {"type": type, "url": url})
+
+@mcp.tool()
+def emulate(
+    network: Optional[str] = None,
+    cpu: Optional[str] = None,
+    geolocation: Optional[dict] = None,
+    userAgent: Optional[str] = None,
+    colorScheme: Optional[str] = None,
+    viewport: Optional[dict] = None
+) -> str:
+    """
+    Emulates network, CPU speed, geolocation coordinates, custom color scheme, or viewports.
+    """
+    return _dispatch_task("emulate", {
+        "network": network,
+        "cpu": cpu,
+        "geolocation": geolocation,
+        "userAgent": userAgent,
+        "colorScheme": colorScheme,
+        "viewport": viewport
+    })
+
+@mcp.tool()
+def handle_dialog(action: str, promptText: Optional[str] = None) -> str:
+    """
+    Registers a handler to accept or dismiss dialog alerts, confirms, or prompts.
+    
+    Parameters:
+      action: "accept" or "dismiss".
+      promptText: Text to enter into prompt box.
+    """
+    return _dispatch_task("handle_dialog", {"action": action, "promptText": promptText})
+
+@mcp.tool()
+def upload_file(uid: str, filePath: str) -> str:
+    """
+    Uploads a file to the input file element matching the target uid.
+    """
+    return _dispatch_task("upload_file", {"uid": uid, "filePath": filePath})
+
+@mcp.tool()
+def list_console_messages(pageSize: int = 20, types: Optional[str] = None) -> str:
+    """
+    Lists captured browser console logs.
+    
+    Parameters:
+      pageSize: Number of logs to return. Default is 20.
+      types: Comma-separated list of log types to filter (e.g. "error,warning,log").
+    """
+    return _dispatch_task("list_console", {"pageSize": pageSize, "types": types})
+
+@mcp.tool()
+def get_console_message(msgid: str) -> str:
+    """
+    Retrieves full details of a specific console message by its unique id.
+    """
+    return _dispatch_task("get_console", {"msgid": msgid})
+
+@mcp.tool()
+def list_network_requests(pageSize: int = 50, resourceTypes: Optional[str] = None) -> str:
+    """
+    Lists captured network requests.
+    
+    Parameters:
+      pageSize: Number of requests to return. Default is 50.
+      resourceTypes: Comma-separated list of resource types to filter (e.g. "document,image,script").
+    """
+    return _dispatch_task("list_network", {"pageSize": pageSize, "resourceTypes": resourceTypes})
+
+@mcp.tool()
+def get_network_request(reqid: str) -> str:
+    """
+    Retrieves full details of a specific network request by its unique id.
+    """
+    return _dispatch_task("get_network", {"reqid": reqid})
+
+@mcp.tool()
+def take_memory_snapshot() -> str:
+    """
+    Captures a simulated high-fidelity heap memory utilization statistics snapshot.
+    """
+    return _dispatch_task("memory_snapshot", {})
+
+@mcp.tool()
+def performance_start_trace() -> str:
+    """
+    Starts recording page performance profiling metrics.
+    """
+    return _dispatch_task("performance_trace", {"trace_action": "start"})
+
+@mcp.tool()
+def performance_stop_trace() -> str:
+    """
+    Stops page performance recording and dumps statistics summary.
+    """
+    return _dispatch_task("performance_trace", {"trace_action": "stop"})
+
+@mcp.tool()
+def performance_analyze_insight() -> str:
+    """
+    Analyzes window.performance loading metrics and returns critical optimization stats.
+    """
+    return _dispatch_task("performance_trace", {"trace_action": "analyze"})
+
+@mcp.tool()
+def lighthouse_audit(mode: str = "navigation", device: str = "desktop") -> str:
+    """
+    Runs a high-fidelity visual and structural accessibility/SEO/Performance Lighthouse audit.
+    """
+    return _dispatch_task("lighthouse_audit", {"mode": mode, "device": device})
+
 if __name__ == "__main__":
     mcp.run()

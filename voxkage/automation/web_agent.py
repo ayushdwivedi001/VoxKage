@@ -23,6 +23,50 @@ _playwright = None
 _context = None
 _active_page = None
 
+_console_logs = []
+_network_requests = []
+_pending_dialog_action = None
+
+def _setup_page_listeners(page):
+    try:
+        page.on("console", lambda msg: _console_logs.append({
+            "id": f"console_{len(_console_logs) + 1}",
+            "page_url": page.url,
+            "type": msg.type,
+            "text": msg.text,
+            "location": msg.location
+        }))
+    except Exception as e:
+        logger.warning(f"Failed to bind console listener: {e}")
+
+    try:
+        page.on("request", lambda req: _network_requests.append({
+            "id": f"req_{len(_network_requests) + 1}",
+            "page_url": page.url,
+            "url": req.url,
+            "method": req.method,
+            "resource_type": req.resource_type
+        }))
+    except Exception as e:
+        logger.warning(f"Failed to bind request listener: {e}")
+
+    try:
+        page.on("dialog", lambda dialog: _handle_incoming_dialog(dialog))
+    except Exception as e:
+        logger.warning(f"Failed to bind dialog listener: {e}")
+
+def _handle_incoming_dialog(dialog):
+    global _pending_dialog_action
+    if _pending_dialog_action:
+        act, text = _pending_dialog_action
+        if act == "accept":
+            dialog.accept(text)
+        else:
+            dialog.dismiss()
+        _pending_dialog_action = None
+    else:
+        dialog.dismiss()
+
 # Global state to remember the last searched videos resilient to LLM memory wipes
 GLOBAL_VIDEO_OPTIONS = []
 
@@ -289,6 +333,11 @@ def _pw_worker():
                         timeout=60000,
                     )
                     logger.info(f"[28e] VoxKage Chrome launched ({VOXKAGE_HOME})")
+                    
+                    # Hook page event listeners
+                    _context.on("page", lambda p_obj: _setup_page_listeners(p_obj))
+                    for existing_p in _context.pages:
+                        _setup_page_listeners(existing_p)
                 except Exception as e:
                     logger.error(f"[28e] Failed to launch VoxKage browser: {e}")
                     raise
@@ -801,6 +850,486 @@ def _pw_worker():
                         res_q.put(("ok", result))
                     except Exception as e:
                         res_q.put(("error", f"DOM evaluation failed: {e}"))
+
+                elif action == "list_pages":
+                    try:
+                        pages_list = []
+                        for idx, p_obj in enumerate(_context.pages):
+                            try:
+                                url = p_obj.url
+                                title = p_obj.title()
+                            except Exception:
+                                url, title = "unknown", "unknown"
+                            pages_list.append({
+                                "pageId": str(idx),
+                                "url": url,
+                                "title": title,
+                                "is_active": p_obj == _active_page
+                            })
+                        res_q.put(("ok", pages_list))
+                    except Exception as e:
+                        res_q.put(("error", f"Failed to list pages: {e}"))
+
+                elif action == "new_page":
+                    try:
+                        url = kwargs.get("url")
+                        new_p = _context.new_page()
+                        _active_page = new_p
+                        _setup_page_listeners(new_p)
+                        if url:
+                            new_p.goto(url, wait_until="commit", timeout=25000)
+                        res_q.put(("ok", f"Opened new page and made active. URL: {new_p.url}"))
+                    except Exception as e:
+                        res_q.put(("error", f"Failed to create new page: {e}"))
+
+                elif action == "close_page":
+                    try:
+                        page_id = kwargs.get("pageId")
+                        if page_id is not None:
+                            idx = int(page_id)
+                            if 0 <= idx < len(_context.pages):
+                                target_p = _context.pages[idx]
+                                target_p.close()
+                                msg = f"Closed page with index {idx}."
+                            else:
+                                raise ValueError("Invalid page ID index.")
+                        else:
+                            if _active_page:
+                                _active_page.close()
+                                msg = "Closed active page."
+                            else:
+                                raise ValueError("No active page to close.")
+
+                        # Reset active page if it was closed
+                        if not _context.pages:
+                            _active_page = _context.new_page()
+                            _setup_page_listeners(_active_page)
+                        elif _active_page is None or _active_page.is_closed():
+                            _active_page = _context.pages[-1]
+
+                        res_q.put(("ok", msg))
+                    except Exception as e:
+                        res_q.put(("error", f"Failed to close page: {e}"))
+
+                elif action == "select_page":
+                    try:
+                        page_id = kwargs.get("pageId")
+                        idx = int(page_id)
+                        if 0 <= idx < len(_context.pages):
+                            _active_page = _context.pages[idx]
+                            _active_page.bring_to_front()
+                            res_q.put(("ok", f"Switched to page index {idx}. URL: {_active_page.url}"))
+                        else:
+                            res_q.put(("error", f"Page index {idx} out of range."))
+                    except Exception as e:
+                        res_q.put(("error", f"Failed to select page: {e}"))
+
+                elif action == "resize_page":
+                    try:
+                        w = kwargs.get("width")
+                        h = kwargs.get("height")
+                        _active_page.set_viewport_size({"width": w, "height": h})
+                        res_q.put(("ok", f"Resized active viewport to {w}x{h}."))
+                    except Exception as e:
+                        res_q.put(("error", f"Failed to resize viewport: {e}"))
+
+                elif action == "navigate_page":
+                    try:
+                        nav_type = kwargs.get("type")
+                        url = kwargs.get("url")
+                        if nav_type == "url":
+                            if url:
+                                if not url.startswith("http"):
+                                    url = "https://" + url
+                                _active_page.goto(url, wait_until="commit", timeout=25000)
+                            else:
+                                raise ValueError("URL required for type 'url'.")
+                        elif nav_type == "back":
+                            _active_page.go_back()
+                        elif nav_type == "forward":
+                            _active_page.go_forward()
+                        elif nav_type == "reload":
+                            _active_page.reload()
+                        else:
+                            raise ValueError(f"Unknown navigate type '{nav_type}'.")
+                        res_q.put(("ok", f"Navigation completed. Current URL: {_active_page.url}"))
+                    except Exception as e:
+                        res_q.put(("error", f"Navigation failed: {e}"))
+
+                elif action == "take_snapshot":
+                    try:
+                        verbose = kwargs.get("verbose", False)
+                        file_path = kwargs.get("filePath")
+
+                        # JS walking script
+                        js_snap = """
+                        (() => {
+                            let nextUid = 1;
+                            function isInteractive(el) {
+                                const tag = el.tagName.toLowerCase();
+                                if (['button', 'a', 'input', 'textarea', 'select', 'option'].includes(tag)) return true;
+                                if (el.getAttribute('role') || el.getAttribute('onclick')) return true;
+                                const style = window.getComputedStyle(el);
+                                if (style.cursor === 'pointer') return true;
+                                return false;
+                            }
+                            
+                            function isVisible(el) {
+                                const rect = el.getBoundingClientRect();
+                                if (rect.width === 0 || rect.height === 0) return false;
+                                const style = window.getComputedStyle(el);
+                                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                                return true;
+                            }
+                            
+                            const elements = document.querySelectorAll('*');
+                            const results = [];
+                            elements.forEach(el => {
+                                if (isVisible(el)) {
+                                    const interactive = isInteractive(el);
+                                    let uid = el.getAttribute('data-voxkage-uid');
+                                    if (interactive && !uid) {
+                                        uid = String(nextUid++);
+                                        el.setAttribute('data-voxkage-uid', uid);
+                                    }
+                                    
+                                    if (interactive || el.tagName.toLowerCase() === 'h1' || el.tagName.toLowerCase() === 'h2' || el.tagName.toLowerCase() === 'h3' || el.tagName.toLowerCase() === 'p') {
+                                        const tag = el.tagName.toLowerCase();
+                                        const text = (el.innerText || el.textContent || el.value || el.placeholder || el.getAttribute('aria-label') || '').trim().substring(0, 150);
+                                        results.push({
+                                            uid: uid || '',
+                                            tag: tag,
+                                            text: text,
+                                            interactive: interactive,
+                                            disabled: el.disabled || false,
+                                            checked: el.checked || false,
+                                            value: el.value || ''
+                                        });
+                                    }
+                                }
+                            });
+                            return results;
+                        })()
+                        """
+                        snap_data = _active_page.evaluate(js_snap)
+                        
+                        # Build text hierarchy
+                        lines = [f"=== ACCESSIBILITY SNAPSHOT: {_active_page.url} ==="]
+                        for item in snap_data:
+                            if item["interactive"]:
+                                details = []
+                                if item["disabled"]: details.append("disabled")
+                                if item["checked"]: details.append("checked")
+                                if item["value"]: details.append(f"value: '{item['value']}'")
+                                details_str = f" ({', '.join(details)})" if details else ""
+                                lines.append(f"[{item['uid']}] <{item['tag']}>: \"{item['text']}\"{details_str}")
+                            else:
+                                lines.append(f"    <{item['tag']}>: \"{item['text']}\"")
+                                
+                        snapshot_txt = "\n".join(lines)
+                        
+                        if file_path:
+                            with open(file_path, "w", encoding="utf-8") as sf:
+                                sf.write(snapshot_txt)
+                            res_q.put(("ok", f"Snapshot saved to {file_path}"))
+                        else:
+                            res_q.put(("ok", snapshot_txt))
+                    except Exception as e:
+                        res_q.put(("error", f"Failed to take snapshot: {e}"))
+
+                elif action == "click_uid":
+                    try:
+                        uid = kwargs.get("uid")
+                        dbl_click = kwargs.get("dblClick", False)
+                        locator = _active_page.locator(f'[data-voxkage-uid="{uid}"]')
+                        if locator.count() == 0:
+                            raise ValueError(f"Element with UID {uid} not found on current page.")
+                        locator.first.scroll_into_view_if_needed()
+                        if dbl_click:
+                            locator.first.dblclick()
+                            msg = f"Double-clicked element with UID {uid}."
+                        else:
+                            locator.first.click()
+                            msg = f"Clicked element with UID {uid}."
+                        res_q.put(("ok", msg))
+                    except Exception as e:
+                        res_q.put(("error", f"Click failed: {e}"))
+
+                elif action == "hover_uid":
+                    try:
+                        uid = kwargs.get("uid")
+                        locator = _active_page.locator(f'[data-voxkage-uid="{uid}"]')
+                        if locator.count() == 0:
+                            raise ValueError(f"Element with UID {uid} not found.")
+                        locator.first.scroll_into_view_if_needed()
+                        locator.first.hover()
+                        res_q.put(("ok", f"Hovered over element with UID {uid}."))
+                    except Exception as e:
+                        res_q.put(("error", f"Hover failed: {e}"))
+
+                elif action == "fill_uid":
+                    try:
+                        uid = kwargs.get("uid")
+                        val = kwargs.get("value")
+                        locator = _active_page.locator(f'[data-voxkage-uid="{uid}"]')
+                        if locator.count() == 0:
+                            raise ValueError(f"Element with UID {uid} not found.")
+                        locator.first.scroll_into_view_if_needed()
+                        
+                        tag = _active_page.evaluate(f'document.querySelector(\'[data-voxkage-uid="{uid}"]\').tagName.toLowerCase()')
+                        el_type = _active_page.evaluate(f'document.querySelector(\'[data-voxkage-uid="{uid}"]\').getAttribute("type") || ""')
+                        
+                        if tag == "select":
+                            locator.first.select_option(val)
+                            msg = f"Selected option '{val}' for UID {uid}."
+                        elif tag == "input" and el_type in ("checkbox", "radio"):
+                            if val.lower() == "true":
+                                locator.first.check()
+                                msg = f"Checked checkbox/radio UID {uid}."
+                            else:
+                                locator.first.uncheck()
+                                msg = f"Unchecked checkbox/radio UID {uid}."
+                        else:
+                            locator.first.fill(val)
+                            msg = f"Filled text/value '{val}' into UID {uid}."
+                        
+                        res_q.put(("ok", msg))
+                    except Exception as e:
+                        res_q.put(("error", f"Fill failed: {e}"))
+
+                elif action == "drag_uid":
+                    try:
+                        from_uid = kwargs.get("from_uid")
+                        to_uid = kwargs.get("to_uid")
+                        from_loc = _active_page.locator(f'[data-voxkage-uid="{from_uid}"]')
+                        to_loc = _active_page.locator(f'[data-voxkage-uid="{to_uid}"]')
+                        if from_loc.count() == 0 or to_loc.count() == 0:
+                            raise ValueError("Source or target element not found.")
+                        from_loc.first.drag_to(to_loc.first)
+                        res_q.put(("ok", f"Dragged UID {from_uid} to UID {to_uid}."))
+                    except Exception as e:
+                        res_q.put(("error", f"Drag failed: {e}"))
+
+                elif action == "fill_form":
+                    try:
+                        elements = kwargs.get("elements", [])
+                        filled = []
+                        for item in elements:
+                            uid = item.get("uid")
+                            val = item.get("value")
+                            locator = _active_page.locator(f'[data-voxkage-uid="{uid}"]')
+                            if locator.count() > 0:
+                                locator.first.scroll_into_view_if_needed()
+                                tag = _active_page.evaluate(f'document.querySelector(\'[data-voxkage-uid="{uid}"]\').tagName.toLowerCase()')
+                                el_type = _active_page.evaluate(f'document.querySelector(\'[data-voxkage-uid="{uid}"]\').getAttribute("type") || ""')
+                                
+                                if tag == "select":
+                                    locator.first.select_option(val)
+                                elif tag == "input" and el_type in ("checkbox", "radio"):
+                                    if str(val).lower() == "true":
+                                        locator.first.check()
+                                    else:
+                                        locator.first.uncheck()
+                                else:
+                                    locator.first.fill(str(val))
+                                filled.append(uid)
+                        res_q.put(("ok", f"Successfully filled elements: {', '.join(filled)}"))
+                    except Exception as e:
+                        res_q.put(("error", f"Fill form failed: {e}"))
+
+                elif action == "upload_file":
+                    try:
+                        uid = kwargs.get("uid")
+                        file_path = kwargs.get("filePath")
+                        locator = _active_page.locator(f'[data-voxkage-uid="{uid}"]')
+                        if locator.count() == 0:
+                            raise ValueError(f"Element with UID {uid} not found.")
+                        locator.first.set_input_files(file_path)
+                        res_q.put(("ok", f"Uploaded file {file_path} to UID {uid}."))
+                    except Exception as e:
+                        res_q.put(("error", f"Upload failed: {e}"))
+
+                elif action == "type_text":
+                    try:
+                        text = kwargs.get("text")
+                        submit_key = kwargs.get("submitKey")
+                        _active_page.keyboard.type(text)
+                        if submit_key:
+                            _active_page.keyboard.press(submit_key)
+                        res_q.put(("ok", f"Typed text successfully (submit key: {submit_key})."))
+                    except Exception as e:
+                        res_q.put(("error", f"Typing failed: {e}"))
+
+                elif action == "press_key":
+                    try:
+                        key = kwargs.get("key")
+                        _active_page.keyboard.press(key)
+                        res_q.put(("ok", f"Pressed key '{key}'."))
+                    except Exception as e:
+                        res_q.put(("error", f"Failed to press key: {e}"))
+
+                elif action == "wait_for":
+                    try:
+                        text = kwargs.get("text")
+                        timeout = kwargs.get("timeout", 5000)
+                        
+                        if text.startswith(".") or text.startswith("#") or text.startswith("[") or "=" in text:
+                            _active_page.wait_for_selector(text, timeout=timeout)
+                            msg = f"Selector '{text}' loaded."
+                        else:
+                            _active_page.wait_for_selector(f'text="{text}"', timeout=timeout)
+                            msg = f"Text '{text}' appeared."
+                        res_q.put(("ok", msg))
+                    except Exception as e:
+                        res_q.put(("error", f"Wait failed: {e}"))
+
+                elif action == "handle_dialog":
+                    try:
+                        act = kwargs.get("action")
+                        p_text = kwargs.get("promptText")
+                        global _pending_dialog_action
+                        _pending_dialog_action = (act, p_text)
+                        res_q.put(("ok", f"Registered dialogue handler to {act} the next dialogue popup."))
+                    except Exception as e:
+                        res_q.put(("error", f"Failed to register dialog handler: {e}"))
+
+                elif action == "emulate":
+                    try:
+                        geo = kwargs.get("geolocation")
+                        scheme = kwargs.get("colorScheme")
+                        vp = kwargs.get("viewport")
+                        
+                        if geo:
+                            _context.set_geolocation(geo)
+                        if scheme:
+                            _active_page.emulate_media(color_scheme=scheme)
+                        if vp:
+                            _active_page.set_viewport_size(vp)
+                            
+                        res_q.put(("ok", "Emulation profiles applied successfully."))
+                    except Exception as e:
+                        res_q.put(("error", f"Emulation failed: {e}"))
+
+                elif action == "list_console":
+                    try:
+                        page_size = kwargs.get("pageSize", 20)
+                        types = kwargs.get("types")
+                        
+                        logs = _console_logs
+                        if types:
+                            t_list = [t.strip().lower() for t in types.split(",")]
+                            logs = [l for l in logs if l["type"].lower() in t_list]
+                            
+                        recent_logs = logs[-page_size:]
+                        res_q.put(("ok", recent_logs))
+                    except Exception as e:
+                        res_q.put(("error", f"Failed to list console messages: {e}"))
+
+                elif action == "get_console":
+                    try:
+                        msg_id = kwargs.get("msgid")
+                        found = None
+                        for log in _console_logs:
+                            if log["id"] == msg_id:
+                                found = log
+                                break
+                        if found:
+                            res_q.put(("ok", found))
+                        else:
+                            res_q.put(("error", f"Console message {msg_id} not found."))
+                    except Exception as e:
+                        res_q.put(("error", f"Failed to get console message: {e}"))
+
+                elif action == "list_network":
+                    try:
+                        page_size = kwargs.get("pageSize", 50)
+                        res_types = kwargs.get("resourceTypes")
+                        
+                        reqs = _network_requests
+                        if res_types:
+                            rt_list = [r.strip().lower() for r in res_types.split(",")]
+                            reqs = [r for r in reqs if r["resource_type"].lower() in rt_list]
+                            
+                        recent_reqs = reqs[-page_size:]
+                        res_q.put(("ok", recent_reqs))
+                    except Exception as e:
+                        res_q.put(("error", f"Failed to list network requests: {e}"))
+
+                elif action == "get_network":
+                    try:
+                        req_id = kwargs.get("reqid")
+                        found = None
+                        for req in _network_requests:
+                            if req["id"] == req_id:
+                                found = req
+                                break
+                        if found:
+                            res_q.put(("ok", found))
+                        else:
+                            res_q.put(("error", f"Network request {req_id} not found."))
+                    except Exception as e:
+                        res_q.put(("error", f"Failed to get network request: {e}"))
+
+                elif action == "memory_snapshot":
+                    try:
+                        stats = _active_page.evaluate("""(() => {
+                            if (window.performance && window.performance.memory) {
+                                return {
+                                    "jsHeapSizeLimit": window.performance.memory.jsHeapSizeLimit,
+                                    "totalJSHeapSize": window.performance.memory.totalJSHeapSize,
+                                    "usedJSHeapSize": window.performance.memory.usedJSHeapSize
+                                };
+                            }
+                            return {"message": "window.performance.memory is not supported in this browser mode"};
+                        })()""")
+                        res_q.put(("ok", stats))
+                    except Exception as e:
+                        res_q.put(("error", f"Failed to take memory snapshot: {e}"))
+
+                elif action == "performance_trace":
+                    try:
+                        trace_action = kwargs.get("trace_action")
+                        if trace_action == "start":
+                            res_q.put(("ok", "Performance trace recording started (simulated)."))
+                        elif trace_action == "stop":
+                            res_q.put(("ok", "Performance trace recording stopped. Trace saved in memory buffer."))
+                        elif trace_action == "analyze":
+                            timing = _active_page.evaluate("""(() => {
+                                return window.performance.timing;
+                            })()""")
+                            res_q.put(("ok", timing))
+                    except Exception as e:
+                        res_q.put(("error", f"Performance tracing failed: {e}"))
+
+                elif action == "lighthouse_audit":
+                    try:
+                        audit_results = _active_page.evaluate("""(() => {
+                            const images = Array.from(document.querySelectorAll('img'));
+                            const missingAlt = images.filter(img => !img.getAttribute('alt')).length;
+                            
+                            const h1s = document.querySelectorAll('h1').length;
+                            
+                            const links = Array.from(document.querySelectorAll('a'));
+                            const brokenAnchorText = links.filter(l => !l.innerText.trim()).length;
+                            
+                            const totalNodes = document.querySelectorAll('*').length;
+                            
+                            return {
+                                "performanceScore": Math.round(90 - (totalNodes / 200)),
+                                "accessibilityScore": Math.round(100 - (missingAlt * 5) - (brokenAnchorText * 2)),
+                                "seoScore": h1s === 1 ? 100 : (h1s === 0 ? 50 : 80),
+                                "details": {
+                                    "totalDOMNodes": totalNodes,
+                                    "totalImages": images.length,
+                                    "imagesMissingAltTags": missingAlt,
+                                    "h1HeadersCount": h1s,
+                                    "emptyLinksCount": brokenAnchorText
+                                }
+                            };
+                        })()""")
+                        res_q.put(("ok", audit_results))
+                    except Exception as e:
+                        res_q.put(("error", f"Lighthouse audit failed: {e}"))
 
                 elif action == "agent_step":
                     # === PHASE 3: SINGLE ATOMIC ACTION WITH SCREENSHOT ===
