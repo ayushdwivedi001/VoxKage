@@ -59,11 +59,85 @@ except Exception:
 
 # ── Tray actions ───────────────────────────────────────────────────────────────
 
+def _load_config() -> dict:
+    try:
+        config_path = Path.home() / ".voxkage" / "config.json"
+        if config_path.exists():
+            import json
+            return json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def get_active_working_dir() -> str:
+    """Detect active or top-most folder in File Explorer, fallback to workspace or home."""
+    try:
+        import win32gui
+        import win32com.client
+        import win32con
+        
+        # 1. First, check if the foreground window itself is a File Explorer window
+        hwnd = win32gui.GetForegroundWindow()
+        if hwnd:
+            class_name = win32gui.GetClassName(hwnd)
+            if class_name.lower() in ("cabinetwclass", "explorewclass"):
+                shell = win32com.client.Dispatch("Shell.Application")
+                for window in shell.Windows():
+                    if int(window.HWND) == hwnd:
+                        path = window.Document.Folder.Self.Path
+                        if os.path.exists(path):
+                            return path
+                            
+        # 2. If not, look through all open File Explorer windows and find the top-most one in Z-order
+        shell = win32com.client.Dispatch("Shell.Application")
+        explorer_windows = []
+        for window in shell.Windows():
+            try:
+                hwnd_win = int(window.HWND)
+                win_class = win32gui.GetClassName(hwnd_win)
+                if win_class.lower() in ("cabinetwclass", "explorewclass"):
+                    path = window.Document.Folder.Self.Path
+                    if os.path.exists(path):
+                        explorer_windows.append((hwnd_win, path))
+            except Exception:
+                pass
+                
+        if explorer_windows:
+            # Walk windows from the foreground window down the Z-order
+            top_hwnd = win32gui.GetForegroundWindow()
+            curr_hwnd = top_hwnd
+            while curr_hwnd:
+                for hwnd_win, path in explorer_windows:
+                    if hwnd_win == curr_hwnd:
+                        return path
+                curr_hwnd = win32gui.GetWindow(curr_hwnd, win32con.GW_HWNDNEXT)
+            
+            # Fallback to the first explorer window
+            return explorer_windows[0][1]
+            
+    except Exception as e:
+        print(f"[Tray] Error detecting explorer path: {e}")
+        
+    fallback = r"C:\Users\AYUSH\Desktop\Vision-Assistant"
+    if os.path.exists(fallback):
+        return fallback
+    return os.path.expanduser("~")
+
+
 def _open_voxkage(icon=None, item=None):
-    """Open a new VoxKage terminal session."""
+    """Open a new VoxKage/OpenCode terminal session in the active folder context."""
+    cwd = get_active_working_dir()
+    escaped_cwd = cwd.replace("'", "''")
+    
+    cfg = _load_config()
+    engine = cfg.get("interface_engine", "antigravity")
+    cmd = "voxkage" if engine == "antigravity" else "opencode"
+    
     subprocess.Popen(
-        'start "VoxKage" powershell -NoExit -Command "voxkage"',
+        f'start "{cmd.upper()}" powershell -NoExit -Command "Set-Location -Path \'{escaped_cwd}\'; {cmd}"',
         shell=True,
+        cwd=cwd
     )
 
 
