@@ -38,11 +38,12 @@ def _save_config(data: dict):
 # ── Slide Toggle Widget ───────────────────────────────────────────────────────
 
 class SlideToggle(tk.Canvas):
-    def __init__(self, parent, default=False, active_color="#06b6d4", bg_color="#161b27", callback=None, **kwargs):
-        super().__init__(parent, width=42, height=22, bg=bg_color, highlightthickness=0, cursor="hand2", **kwargs)
+    def __init__(self, parent, default=False, active_color="#2563eb", bg_color="#15161e", callback=None, **kwargs):
+        # Premium thin-pill toggle design: 40px width, 20px height
+        super().__init__(parent, width=40, height=20, bg=bg_color, highlightthickness=0, cursor="hand2", **kwargs)
         self.state = default
         self.active_color = active_color
-        self.inactive_color = "#334155"  # slate-700
+        self.inactive_color = "#2c2d3a"  # Muted, clean dark gray
         self.knob_color = "#ffffff"
         self.callback = callback
         
@@ -52,16 +53,16 @@ class SlideToggle(tk.Canvas):
     def draw(self):
         self.delete("all")
         fill = self.active_color if self.state else self.inactive_color
-        # Draw track (rounded capsule)
-        self.create_oval(2, 2, 20, 20, fill=fill, outline="")
-        self.create_oval(22, 2, 40, 20, fill=fill, outline="")
-        self.create_rectangle(11, 2, 31, 20, fill=fill, outline="")
+        # Draw sleek rounded track (capsule shape)
+        self.create_oval(2, 2, 18, 18, fill=fill, outline="")
+        self.create_oval(22, 2, 38, 18, fill=fill, outline="")
+        self.create_rectangle(10, 2, 30, 18, fill=fill, outline="")
         
-        # Draw knob (white circle)
+        # Draw knob (white circle) with premium inset padding
         if self.state:
-            self.create_oval(22, 4, 38, 20, fill=self.knob_color, outline="")
+            self.create_oval(22, 4, 36, 18, fill=self.knob_color, outline="")
         else:
-            self.create_oval(4, 4, 20, 20, fill=self.knob_color, outline="")
+            self.create_oval(4, 4, 18, 18, fill=self.knob_color, outline="")
             
     def toggle(self, event=None):
         self.state = not self.state
@@ -105,8 +106,8 @@ def run_gui():
     root = tk.Tk()
     root.title("VoxKage Control Center")
     
-    # ── Geometry & Positioning (Bottom Right)
-    w, h = 380, 680
+    # ── Geometry & Positioning (Bottom Right, highly optimized compact height)
+    w, h = 380, 580
     sw = root.winfo_screenwidth()
     sh = root.winfo_screenheight()
     x = sw - w - 20
@@ -115,28 +116,26 @@ def run_gui():
     
     root.resizable(False, False)
     
-    # ── Styling Constants
-    BG = "#0f1117"
-    PANEL = "#161b27"
-    FG = "#e2e8f0"
-    SUB = "#64748b"
-    ACCENT = "#06b6d4"   # Electric cyan
-    ACCENT2 = "#a78bfa"  # Purple
-    OK_COLOR = "#10b981" # Green
-    BORDER = "#1e2535"
+    # ── Modern Minimalist Color Palette (Refined Dark Theme)
+    BG = "#0c0d12"       # Pure dark matte background
+    PANEL = "#13141c"    # Muted dark gray container panels
+    BORDER = "#1f212d"   # Extremely subtle cool border gray
+    FG = "#f1f5f9"       # Soft off-white for crisp readability
+    SUB = "#64748b"      # Muted slate-400 for secondary text
+    ACCENT = "#2563eb"   # Premium Royal Blue accent
+    OK_COLOR = "#10b981" # Elegant emerald green
+    
     FONT = ("Segoe UI", 9)
     FONT_B = ("Segoe UI", 9, "bold")
     
     root.configure(bg=BG)
     
-    # ── Header
-    header = tk.Frame(root, bg=BG, pady=12)
+    # ── Header (Clean and spacious without harsh horizontal lines)
+    header = tk.Frame(root, bg=BG, pady=16)
     header.pack(fill="x", padx=16)
     
-    tk.Label(header, text="VOXKAGE", fg=FG, bg=BG, font=("Segoe UI", 12, "bold")).pack(side="left")
-    tk.Label(header, text="CONTROL CENTER", fg=SUB, bg=BG, font=("Segoe UI", 9, "bold")).pack(side="right", pady=(4,0))
-    
-    tk.Frame(root, bg=BORDER, height=1).pack(fill="x")
+    tk.Label(header, text="VOXKAGE", fg=FG, bg=BG, font=("Segoe UI", 12, "bold"), anchor="w").pack(side="left")
+    tk.Label(header, text="CONTROL CENTER", fg=SUB, bg=BG, font=("Segoe UI", 9, "bold"), anchor="e").pack(side="right", pady=(4,0))
     
     # ── Scrollable Frame Class ───────────────────────────────────────────────
     class ScrollableFrame(tk.Frame):
@@ -160,7 +159,6 @@ def run_gui():
             self.canvas.pack(side="left", fill="both", expand=True)
             self.scrollbar.pack(side="right", fill="y", padx=(4, 0))
 
-            # Bind mouse wheel when hovering
             self.canvas.bind('<Enter>', self._bind_mousewheel)
             self.canvas.bind('<Leave>', self._unbind_mousewheel)
 
@@ -182,50 +180,41 @@ def run_gui():
         style.theme_use("clam")
     
     style.configure("Vertical.TScrollbar", background=PANEL, troughcolor=BG, bordercolor=BORDER, arrowcolor=SUB)
-    style.map("Vertical.TScrollbar", background=[("active", ACCENT), ("pressed", ACCENT2)])
-
-    style.configure("TCombobox", fieldbackground=PANEL, background=PANEL, foreground=FG, bordercolor=BORDER, arrowcolor=SUB)
-    style.map("TCombobox", fieldbackground=[("readonly", PANEL)], foreground=[("readonly", FG)], background=[("active", PANEL)])
-
-    # Add Popdown Listbox option database styles
-    root.option_add("*TCombobox*Listbox.background", PANEL)
-    root.option_add("*TCombobox*Listbox.foreground", FG)
-    root.option_add("*TCombobox*Listbox.selectBackground", "#2c3a52")
-    root.option_add("*TCombobox*Listbox.selectForeground", FG)
-    root.option_add("*TCombobox*Listbox.font", "Segoe UI 9")
+    style.map("Vertical.TScrollbar", background=[("active", ACCENT), ("pressed", ACCENT)])
 
     # Initialize Scrollable Viewport
     scroll_container = ScrollableFrame(root, bg_color=BG)
-    scroll_container.pack(fill="both", expand=True, padx=16, pady=12)
+    scroll_container.pack(fill="both", expand=True, padx=16, pady=(0, 8))
     
     content = scroll_container.scrollable_frame
 
     cfg = _load_config()
 
     # ── Interface Provider Card ──────────────────────────────────────────────
-    # Selected engine stored as mutable container so nested callbacks can write to it
     _engine_sel = [cfg.get("interface_engine", "antigravity")]
 
-    ip_card = tk.Frame(content, bg=PANEL, bd=1, relief="solid",
-                       highlightbackground=BORDER, highlightcolor=BORDER, padx=10, pady=8)
-    ip_card.configure(highlightthickness=1)
-    ip_card.pack(fill="x", pady=(0, 14))
+    ip_card = tk.Frame(content, bg=PANEL, highlightthickness=1, highlightbackground=BORDER, highlightcolor=BORDER, padx=12, pady=12)
+    ip_card.pack(fill="x", pady=(0, 10))
 
-    tk.Label(ip_card, text="Interface Provider", fg=ACCENT, bg=PANEL, font=FONT_B).pack(anchor="w")
+    tk.Label(ip_card, text="Interface Provider", fg=ACCENT, bg=PANEL, font=FONT_B, anchor="w").pack(anchor="w", fill="x")
     tk.Label(ip_card, text="Select the CLI engine VoxKage launches as its terminal.",
-             fg=SUB, bg=PANEL, font=FONT).pack(anchor="w", pady=(0, 8))
+             fg=SUB, bg=PANEL, font=FONT, anchor="w", justify="left", wraplength=310).pack(anchor="w", fill="x", pady=(2, 10))
 
-    _theme_lbl_ref = []
-    _engine_rows: dict = {}  # key -> (row_frame, accent_bar, badge_label)
+    _engine_rows: dict = {}  # key -> (row_frame, accent_bar, label, badge)
 
     def _build_engine_row(key: str, label: str, subtitle: str):
         row = tk.Frame(ip_card, bg=PANEL, cursor="hand2")
-        row.pack(fill="x", pady=2)
+        row.pack(fill="x", pady=3)
 
-        # Left accent bar (3 px) — cyan when active, invisible when inactive
+        # Left accent bar (3 px)
         bar = tk.Frame(row, bg=ACCENT if _engine_sel[0] == key else BORDER, width=3)
-        bar.pack(side="left", fill="y", padx=(0, 8))
+        bar.pack(side="left", fill="y", padx=(0, 10))
         bar.pack_propagate(False)
+
+        # ACTIVE badge (pack side="right" FIRST so expanding left frame doesn't clip it)
+        badge = tk.Label(row, text="ACTIVE" if _engine_sel[0] == key else "",
+                         fg=OK_COLOR, bg=PANEL, font=FONT_B, anchor="e")
+        badge.pack(side="right", padx=(6, 0))
 
         # Text block
         txt = tk.Frame(row, bg=PANEL)
@@ -233,14 +222,9 @@ def run_gui():
         lbl_main = tk.Label(txt, text=label,
                             fg=FG if _engine_sel[0] == key else SUB,
                             bg=PANEL, font=FONT_B, anchor="w")
-        lbl_main.pack(anchor="w")
-        lbl_sub = tk.Label(txt, text=subtitle, fg=SUB, bg=PANEL, font=FONT, anchor="w")
-        lbl_sub.pack(anchor="w")
-
-        # ACTIVE badge
-        badge = tk.Label(row, text="ACTIVE" if _engine_sel[0] == key else "",
-                         fg=OK_COLOR, bg=PANEL, font=FONT_B)
-        badge.pack(side="right", padx=(6, 0))
+        lbl_main.pack(anchor="w", fill="x")
+        lbl_sub = tk.Label(txt, text=subtitle, fg=SUB, bg=PANEL, font=FONT, anchor="w", justify="left", wraplength=270)
+        lbl_sub.pack(anchor="w", fill="x")
 
         _engine_rows[key] = (row, bar, lbl_main, badge)
 
@@ -251,14 +235,7 @@ def run_gui():
                 b2.configure(bg=ACCENT if active else BORDER)
                 m2.configure(fg=FG if active else SUB)
                 g2.configure(text="ACTIVE" if active else "")
-            
-            if _theme_lbl_ref:
-                if _k == "opencode":
-                    _theme_lbl_ref[0].configure(text="Styles startup banner. OpenCode manages terminal themes.")
-                else:
-                    _theme_lbl_ref[0].configure(text="Syncs startup banner & agy terminal styling")
 
-        # Bind click on every widget in the row so the full area is clickable
         for widget in (row, bar, txt, lbl_main, lbl_sub, badge):
             widget.bind("<Button-1>", _select)
 
@@ -273,9 +250,7 @@ def run_gui():
         "Best for free-tier · Connect any API key via /connect"
     )
     
-    # (cfg already loaded above for Interface Provider card)
-    
-    # ── Load current state ──
+    # ── Load toggle states ──
     # 1. Autostart
     try:
         from voxkage.autostart import is_autostart_enabled
@@ -303,67 +278,18 @@ def run_gui():
     except Exception:
         notifications_val = cfg.get("notifications_enabled", True)
 
-    # 6. Themes Sync
-    themes = [
-        "Default Dark",
-        "Atom One Dark",
-        "Ayu Dark",
-        "Dracula Dark",
-        "GitHub Dark",
-        "GitHub Dark Colorblind Dark",
-        "Holiday Dark",
-        "Shades Of Purple Dark",
-        "Solarized Dark",
-        "Tokyo Night Dark",
-        "ANSI Dark"
-    ]
-    current_theme = cfg.get("theme", "Default Dark")
-    if current_theme not in themes:
-        current_theme = "Default Dark"
-
-    # Theme picker dropdown frame
-    theme_frame = tk.Frame(content, bg=PANEL, bd=1, relief="solid", highlightbackground=BORDER, highlightcolor=BORDER, padx=10, pady=8)
-    theme_frame.configure(highlightthickness=1)
-    theme_frame.pack(fill="x", pady=(0, 14))
-    
-    tk.Label(theme_frame, text="Unified Color Theme", fg=ACCENT2, bg=PANEL, font=FONT_B).pack(anchor="w")
-    
-    initial_sub = "Styles startup banner. OpenCode manages terminal themes." if _engine_sel[0] == "opencode" else "Syncs startup banner & agy terminal styling"
-    lbl_theme_sub = tk.Label(theme_frame, text=initial_sub, fg=SUB, bg=PANEL, font=FONT)
-    lbl_theme_sub.pack(anchor="w", pady=(0, 6))
-    _theme_lbl_ref.append(lbl_theme_sub)
-    
-    cb_theme = ttk.Combobox(theme_frame, values=themes, state="readonly", font=FONT)
-    cb_theme.set(current_theme)
-    cb_theme.pack(fill="x", pady=(4, 0))
-
-    # Prevent mouse wheel from changing values, scroll canvas instead
-    def _combobox_scroll(event):
-        scroll_container._on_mousewheel(event)
-        return "break"
-    cb_theme.bind("<MouseWheel>", _combobox_scroll)
-
-    # Allow clicking anywhere on the combobox to drop it down
-    def _combobox_click(event):
-        cb_theme.focus_set()
-        cb_theme.event_generate('<Down>')
-        return "break"
-    cb_theme.bind("<Button-1>", _combobox_click)
-
-    # Helper for premium toggles
     toggles = {}
     
     def create_toggle_card(parent, key, title, desc, default_val, active_color=ACCENT):
-        card = tk.Frame(parent, bg=PANEL, bd=1, relief="solid", highlightbackground=BORDER, highlightcolor=BORDER, padx=10, pady=8)
-        card.configure(highlightthickness=1)
-        card.pack(fill="x", pady=(0, 10))
+        card = tk.Frame(parent, bg=PANEL, highlightthickness=1, highlightbackground=BORDER, highlightcolor=BORDER, padx=12, pady=10)
+        card.pack(fill="x", pady=(0, 8))
         
         # Left side: labels
         left_col = tk.Frame(card, bg=PANEL)
         left_col.pack(side="left", fill="both", expand=True)
         
-        tk.Label(left_col, text=title, fg=FG, bg=PANEL, font=FONT_B).pack(anchor="w")
-        tk.Label(left_col, text=desc, fg=SUB, bg=PANEL, font=FONT, justify="left", wraplength=280).pack(anchor="w", pady=(2, 0))
+        tk.Label(left_col, text=title, fg=FG, bg=PANEL, font=FONT_B, anchor="w").pack(anchor="w", fill="x")
+        tk.Label(left_col, text=desc, fg=SUB, bg=PANEL, font=FONT, justify="left", anchor="w", wraplength=260).pack(anchor="w", fill="x", pady=(2, 0))
         
         # Right side: toggle switch
         right_col = tk.Frame(card, bg=PANEL)
@@ -377,7 +303,7 @@ def run_gui():
     # 1. Autostart
     create_toggle_card(content, "autostart", "Autostart on Boot", "Launches VoxKage in the system tray when Windows boots.", autostart_val, ACCENT)
     
-    # 2. Safe Mode
+    # 2. Safe Mode (using a sleek secure red indicator)
     create_toggle_card(content, "safe_mode", "Safe Mode (Shield Protocol)", "Gates potentially destructive actions with confirmation warnings.", safe_mode_val, "#ef4444")
     
     # 3. Telegram watcher
@@ -389,17 +315,14 @@ def run_gui():
     # 5. Audio & Toast Notifications
     create_toggle_card(content, "notifications", "Toast Notifications", "Displays Windows banner notifications on task completions.", notifications_val, ACCENT)
 
-    # ── Footer ──
-    tk.Frame(root, bg=BORDER, height=1).pack(fill="x")
-    footer = tk.Frame(root, bg=BG, pady=12, padx=16)
+    # ── Footer (Sleek minimalist panel at bottom)
+    footer = tk.Frame(root, bg=BG, pady=16, padx=16)
     footer.pack(fill="x", side="bottom")
     
-    saved_lbl = tk.Label(footer, text="", fg=OK_COLOR, bg=BG, font=FONT_B)
+    saved_lbl = tk.Label(footer, text="", fg=OK_COLOR, bg=BG, font=FONT_B, anchor="w")
     saved_lbl.pack(side="left")
     
     def on_apply():
-        # Read GUI values
-        theme_sel = cb_theme.get()
         autostart_state = toggles["autostart"].state
         safe_mode_state = toggles["safe_mode"].state
         telegram_state = toggles["telegram"].state
@@ -407,9 +330,8 @@ def run_gui():
         notif_state = toggles["notifications"].state
         engine_sel = _engine_sel[0]
         
-        # 1. Save to ~/.voxkage/config.json
+        # 1. Save config settings
         _save_config({
-            "theme": theme_sel,
             "autostart": autostart_state,
             "safe_mode": safe_mode_state,
             "telegram_watcher_enabled": telegram_state,
@@ -428,47 +350,23 @@ def run_gui():
         except Exception as e:
             print(f"[Settings] Registry error: {e}", file=sys.stderr)
             
-        # 3. Update C:\Users\AYUSH\.gemini\settings.json for themes & notifications
-        if engine_sel == "antigravity":
-            try:
-                # Map theme to agy CLI counterpart
-                theme_map = {
-                    "Default Dark": "Default",
-                    "ANSI Dark": "ANSI Dark",
-                    "Atom One Dark": "Atom One Dark",
-                    "Ayu Dark": "Ayu Dark",
-                    "Dracula Dark": "Dracula",
-                    "GitHub Dark": "GitHub Dark",
-                    "GitHub Dark Colorblind Dark": "GitHub Dark Colorblind",
-                    "Holiday Dark": "Holiday",
-                    "Shades Of Purple Dark": "Shades Of Purple",
-                    "Solarized Dark": "Solarized Dark",
-                    "Tokyo Night Dark": "Tokyo Night"
-                }
-                agy_theme = theme_map.get(theme_sel, "Default")
+        # 3. Update C:\Users\AYUSH\.gemini\settings.json for notifications
+        try:
+            settings_path = Path.home() / ".gemini" / "settings.json"
+            if settings_path.exists():
+                s_data = json.loads(settings_path.read_text(encoding="utf-8"))
                 
-                settings_path = Path.home() / ".gemini" / "settings.json"
-                if settings_path.exists():
-                    s_data = json.loads(settings_path.read_text(encoding="utf-8"))
-                    
-                    # Update theme in UI settings
-                    if "ui" not in s_data:
-                        s_data["ui"] = {}
-                    s_data["ui"]["theme"] = agy_theme
-                    
-                    # Update notifications in General settings
-                    if "general" not in s_data:
-                        s_data["general"] = {}
-                    s_data["general"]["enableNotifications"] = notif_state
-                    
-                    settings_path.write_text(json.dumps(s_data, indent=2), encoding="utf-8")
-            except Exception as e:
-                print(f"[Settings] Agy config error: {e}", file=sys.stderr)
+                if "general" not in s_data:
+                    s_data["general"] = {}
+                s_data["general"]["enableNotifications"] = notif_state
+                
+                settings_path.write_text(json.dumps(s_data, indent=2), encoding="utf-8")
+        except Exception as e:
+            print(f"[Settings] settings.json config error: {e}", file=sys.stderr)
             
         # 4. Handle active Telegram Watcher process dynamically
         try:
             if not telegram_state:
-                # Stop Telegram watcher if running
                 lock_file = Path(os.path.expanduser("~")) / ".voxkage" / "telegram_watcher.lock"
                 if lock_file.exists():
                     pid = int(lock_file.read_text().strip())
@@ -486,10 +384,6 @@ def run_gui():
                         lock_file.unlink(missing_ok=True)
                     except Exception:
                         pass
-            else:
-                # If enabled, ensure running (though next startup will pick it up, we can spawn it now)
-                # But let's let cli.py or the watcher handle starting to avoid duplicate locks
-                pass
         except Exception:
             pass
             
@@ -497,16 +391,16 @@ def run_gui():
         root.after(1000, root.destroy)
         
     btn_apply = tk.Button(
-        footer, text="Apply", bg=ACCENT2, fg="white", font=FONT_B, 
-        relief="flat", activebackground="#8b5cf6", activeforeground="white",
-        cursor="hand2", padx=20, pady=4, command=on_apply
+        footer, text="Apply", bg=ACCENT, fg="white", font=FONT_B, 
+        relief="flat", activebackground="#1d4ed8", activeforeground="white",
+        cursor="hand2", padx=20, pady=5, command=on_apply
     )
     btn_apply.pack(side="right")
     
     btn_cancel = tk.Button(
-        footer, text="Close", bg=BORDER, fg=FG, font=FONT_B,
-        relief="flat", activebackground="#2c3447", activeforeground="white",
-        cursor="hand2", padx=16, pady=4, command=root.destroy
+        footer, text="Close", bg="#222530", fg="#94a3b8", font=FONT_B,
+        relief="flat", activebackground="#2d313f", activeforeground="white",
+        cursor="hand2", padx=16, pady=5, command=root.destroy
     )
     btn_cancel.pack(side="right", padx=(0, 10))
     
