@@ -3,286 +3,334 @@
   <p align="center">
     <img src="assets/VoxKage_Readme.png" alt="VoxKage Agentic OS Assistant" width="100%" style="max-width: 900px; border-radius: 10px; box-shadow: 0 4px 20px rgba(6,182,212,0.3);">
   </p>
- 
+
   <br>
   <h1>VoxKage</h1>
-  <h3><i>The Sovereign OS-Level Agentic Brain</i></h3>
-  <p><b>Commanding the Antigravity CLI (<code>agy</code>) and OpenCode CLI to deploy an untethered, system-wide living AI core.</b></p>
+  <h3><i>System-Wide Agentic OS Assistant & Dual-Engine Router</i></h3>
+  <p><b>Commanding the Antigravity CLI (<code>agy</code>) and OpenCode CLI to deploy a secure, system-wide local AI coordinator.</b></p>
   <br>
- 
+
   <p align="center">
     <a href="https://pypi.org/project/voxkage/" target="_blank">
       <img src="https://img.shields.io/pypi/v/voxkage?style=for-the-badge&logo=pypi&logoColor=white&label=PyPI&color=0ea5e9&cacheSeconds=3600" alt="PyPI Version">
     </a>
-    <img src="https://img.shields.io/badge/Engine-ACE_System-3b82f6?style=for-the-badge&logo=powershell&logoColor=white" alt="Engine">
-    <img src="https://img.shields.io/badge/Orchestrator-Dual_Engine_Core-06b6d4?style=for-the-badge&logo=control-panel&logoColor=white" alt="Interface">
-    <img src="https://img.shields.io/badge/OPEX-0.00_USD-10b981?style=for-the-badge&logoColor=white" alt="Zero Cost">
-  </p>
- 
-  <p align="center">
-    <img src="https://img.shields.io/badge/Install-pipx_install_voxkage-ff6b35?style=for-the-badge&logo=python&logoColor=white" alt="Install">
-    <img src="https://img.shields.io/badge/Token_Efficiency-95%25_Saved-ffb703?style=for-the-badge&logo=speedtest&logoColor=black" alt="Efficiency">
-    <img src="https://img.shields.io/badge/Remote_Bridge-Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram">
+    <img src="https://img.shields.io/badge/Orchestrator-Dual_Engine_Core-06b6d4?style=for-the-badge&logo=control-panel&logoColor=white" alt="Dual Engine">
+    <img src="https://img.shields.io/badge/Platform-Windows_|_macOS-3b82f6?style=for-the-badge&logo=windows&logoColor=white" alt="Platform">
     <img src="https://img.shields.io/badge/License-Apache_2.0-green?style=for-the-badge" alt="License">
   </p>
- 
+
+  <p align="center">
+    <img src="https://img.shields.io/badge/Install-pipx_install_voxkage-ff6b35?style=for-the-badge&logo=python&logoColor=white" alt="Install">
+    <img src="https://img.shields.io/badge/Remote_Control-Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram">
+    <img src="https://img.shields.io/badge/Token_Savings-95%25-ffb703?style=for-the-badge" alt="Token Savings">
+  </p>
+
   <br>
   <hr width="100%">
   <br>
- 
-  <p>
-    <strong>VoxKage</strong> is a massive paradigm shift in local AI capability. It is not an IDE chatbot or a localized command wrapper—it is a sovereign, system-wide <strong>living Agentic OS Brain</strong>. By leveraging the advanced execution engines of the <strong>Antigravity CLI (<code>agy</code>)</strong> or the **OpenCode CLI (<code>opencode</code>)** as its conversational frontends and toolkits, VoxKage breaks the AI out of standard directory confinements, deploying a unified honeycomb of intertwined MCP servers to act as your PC's central, self-learning mind.
-  </p>
- 
-  <p>
-    [<a href="#innovation"><strong>The Architecture</strong></a>] •
-    [<a href="#features"><strong>Core Capabilities</strong></a>] •
-    [<a href="#integrations"><strong>Unified Integrations</strong></a>] •
-    [<a href="#control-center"><strong>Control Center</strong></a>] •
-    [<a href="#started"><strong>Quick Start</strong></a>] •
-    [<a href="#upgrade"><strong>Updating</strong></a>]
-  </p>
+</div>
+
+**VoxKage** is an open-source, system-wide local AI coordinator designed to operate directly on Windows and macOS. Acting as a central bridging hub, it connects local runtimes, browser automation instances, and remote daemons directly to your system's shell. By routing tools through either the **Antigravity CLI (<code>agy</code>)** or the **OpenCode CLI**, VoxKage coordinates automated workflows, executes code updates, and communicates asynchronously through local and remote Model Context Protocol (MCP) integrations.
+
+<p align="center">
+  [<a href="#architecture"><strong>Architecture</strong></a>] •
+  [<a href="#capabilities"><strong>Capabilities</strong></a>] •
+  [<a href="#shield"><strong>Shield Security</strong></a>] •
+  [<a href="#installation"><strong>Installation Guide</strong></a>] •
+  [<a href="#plugins"><strong>Plugin Setup</strong></a>] •
+  [<a href="#development"><strong>Development & Contribution</strong></a>] •
+  [<a href="#troubleshooting"><strong>Troubleshooting</strong></a>]
+</p>
+
+<br>
+<hr width="100%">
+<br>
+
+<a name="architecture"></a>
+# 📐 Architecture & Context Routing
+
+VoxKage functions as an MCP server registry provider and routing gateway. It coordinates system resources by dynamically mapping and deploying its modular array of built-in engines depending on which front-end CLI environment is active.
+
+```mermaid
+graph TD
+    subgraph "VoxKage OS Assistant Layer"
+        A((VoxKage Core CLI / Daemon)) --> B{Agentic Reasoning Loop}
+
+        subgraph "Reasoning & Verification"
+            B <--> C(ACE: Code Planning & Verification)
+            B <--> D(DOM Inspection & GUI Control)
+            B <--> E(Memory & Soul Context)
+        end
+    end
+
+    subgraph "Unified Dual-Engine Bridge"
+        C <--> |Dynamic Mapping| F[Global MCP Server Registry]
+        F <--> |~/.gemini/config/mcp_config.json| G[Antigravity CLI]
+        F <--> |~/.config/opencode/opencode.json| H[OpenCode CLI]
+        B <--> |Execution Routing| I{Active Interface Terminal}
+    end
+
+    subgraph "Modular MCP Server Suite"
+        C <--> J[Playwright Web Engine]
+        C <--> K[Codebase AST Scaffolding]
+        D <--> L[Native PowerShell Shell / FileOps]
+    end
+
+    subgraph "Bridges & Daemons"
+        B <--> M[Telegram Remote Daemon]
+        B <--> N[Gmail / Spotify / GitHub / databases]
+    end
+
+    style A fill:#06b6d4,stroke:#fff,stroke-width:2px,color:#fff
+    style B fill:#8b5cf6,stroke:#fff,stroke-width:2px,color:#fff
+    style C fill:#10b981,stroke:#fff,stroke-width:2px,color:#fff
+    style I fill:#0ea5e9,stroke:#fff,stroke-width:2px,color:#fff
+```
+
+### Context Routing Modes
+*   **Antigravity CLI (`agy`)**: High-performance execution. VoxKage configures `mcp_config.json` inside `~/.gemini/config/`, registering local sub-servers directly to provide unified IDE-and-CLI tool parity.
+*   **OpenCode CLI**: Flexible terminal orchestration. VoxKage maps tool configurations to `opencode.json` inside `~/.config/opencode/`, allowing developers to integrate their custom API gateways and runtimes seamlessly.
+
+---
+
+<a name="capabilities"></a>
+# ✨ Core Capabilities
+
+### 1. Agentic Coding Engine (ACE)
+VoxKage runs an autonomous development process that prevents blind source code modifications:
+*   **AST Skeleton Scaffolding**: Leverages an Abstract Syntax Tree (AST) mapper to extract structural metadata from source files, preserving critical context while reducing token usage by up to **95%**.
+*   **Self-Healing Compilations**: Tracks changes within a living, stateful task list (`task.md`). If a syntax check, compiler command, or unit test fails, the agent intercepts the exit logs, diagnoses the error, and automatically writes a self-corrective patch.
+
+### 2. Deep Web & Desktop Automation
+The system launches isolated Playwright instances to crawl the web, interact with local DOM structures, and retrieve information:
+*   **Layout & Styling Auditing**: Inspects active layouts, pulls calculated CSS variables, and evaluates custom JavaScript.
+*   **Software Execution**: Can search public pages for software binaries, resolve direct URLs, trigger installers locally, and verify execution ports.
+*   **GUI Navigation**: Manipulates system UI components via keyboard events, shortcut actions, and mouse movements.
+
+### 3. Permanently Bound Remote Controls
+By setting up a background daemon, developers can query their workspace remotely through a secure, two-way Telegram bot bridge:
+> **Developer (Telegram):** `/run git log -n 5`
+>
+> **VoxKage:** *Pulls the requested commits, compiles a summary report, and returns it to your mobile client.*
+
+---
+
+<a name="shield"></a>
+# 🛡️ The Shield Protocol (Security & Sandboxing)
+
+Operating an agent with direct access to system-level commands requires strict security guarantees. VoxKage includes `shield.py`, a three-layer security protocol designed to prevent destructive actions:
+
+```
+┌────────────────────────────────────────────────────────┐
+│                   THE SHIELD PROTOCOL                  │
+├────────────────────────────────────────────────────────┤
+│ Layer 1: Core System Exclusions (Hard-coded)           │
+│   - Protected Paths: C:\Windows, C:\Program Files, etc. │
+│   - Dangerous Commands: diskpart, format, rm -rf /     │
+├────────────────────────────────────────────────────────┤
+│ Layer 2: Safe Mode Gate (Configurable Prompting)       │
+│   - Intercepts and requires verification on operations │
+├────────────────────────────────────────────────────────┤
+│ Layer 3: Auditing Pipeline                             │
+│   - Logs all shell & file interactions to audit.log    │
+└────────────────────────────────────────────────────────┘
+```
+
+1.  **Layer 1: Hard-Coded Exclusions (Never Overridable)**
+    *   **Paths**: Refuses modifications inside critical directories such as `C:\Windows`, `C:\Program Files`, `C:\Program Files (x86)`, and `/System`.
+    *   **Commands**: Automatically blocks dangerous execution signatures (e.g., `format`, `diskpart`, `rm -rf /`).
+    *   **Deletions**: Prohibits deletion of binary configurations (`.sys`, `.dll`, `.exe`) located inside system paths.
+2.  **Layer 2: Safe Mode Gate (Configurable)**
+    *   Checks `~/.voxkage/config.json` or the environmental `VOXKAGE_SAFE_MODE` parameter. Defaults to true to enforce manual CLI confirmation boundaries. Can be toggled if sandbox safety parameters are satisfied.
+3.  **Layer 3: Auditing Pipeline**
+    *   Every single destructive action (deletes, moves, terminations, shell executions) is logged to the local audit file (`~/.voxkage/brain/audit.log`) with an explicit timestamp and clearance state.
+
+---
+
+<a name="installation"></a>
+# 🛠️ Installation Guide
+
+VoxKage is distributed as a globally isolated Python CLI package using `pipx` to prevent dependency conflicts with your system environment.
+
+### Runtimes Required
+*   **Python 3.10 or higher**
+*   **pipx** (Highly recommended for direct global command-line availability)
+*   **Antigravity CLI** OR **OpenCode CLI**
+
+*If you need to install pipx first:*
+```powershell
+pip install pipx
+pipx ensurepath
+```
+
+---
+
+### Step 1: Install VoxKage Globally
+```powershell
+pipx install voxkage
+```
+
+### Step 2: Initialize the System Configuration
+```powershell
+voxkage init
+```
+This triggers an interactive configuration script that:
+*   Builds the runtime directories at `~/.voxkage`.
+*   Scaffolds the environment parameters file (`~/.voxkage/.env`).
+*   Auto-detects active instances of Antigravity or OpenCode and registers VoxKage's MCP configurations directly to their respective storage files.
+
+### Step 3: Add Modular Capability Packs
+To keep the base distribution lightweight (~80 MB), heavier dependencies are separated into on-demand packs installed directly inside the isolated environment:
+
+```powershell
+voxkage install <pack>
+```
+
+| Package Name | Key | System Runtimes Added | Estimated Size |
+|---|---|---|---|
+| **Web Browser** | `browser` | Playwright engine, browser drivers, and PDF readers | ~80 MB (+150MB browser binary) |
+| **Vector Memory** | `rag` | Sentence-transformers, ChromaDB Vector DB, and Numpy | ~500 MB (includes ML runtime) |
+| **Vision & Scan** | `vision` | OpenCV image processing engine and ONNX OCR runtimes | ~250 MB |
+| **Office Docs Plus** | `docs_plus`| Bi-directional PDF/Docx conversion layers | ~80 MB |
+| **Full Suite** | `full` | Installs all 4 capability packs at once | ~910 MB |
+
+---
+
+### Step 4: Run the Assistant
+
+*   **Interactive Terminal Session**:
+    ```powershell
+    voxkage
+    ```
+    This initializes the interactive shell, presenting a unified dashboard and setting up the chosen routing engine (Antigravity/OpenCode).
+
+*   **Background Tray Daemon & Telegram Listener**:
+    ```powershell
+    voxkage tray
+    ```
+    Runs the assistant persistently in the system tray, listening for external Telegram instructions without cluttering your open terminals.
+
+---
+
+<a name="plugins"></a>
+# 🔌 Plugin Configuration Reference
+
+VoxKage includes 10 built-in integrations. All plugins degrade gracefully if their configurations or environment keys are omitted. Add credentials to your environment variables file (`~/.voxkage/.env`) or configure them interactively:
+
+```powershell
+voxkage plugins add <name>
+```
+
+| Integration Name | Key | Environment Variable Key Requirements | Purpose |
+|---|---|---|---|
+| **Telegram Bot** | `telegram` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Asynchronous remote terminal orchestration. |
+| **Gmail** | `gmail` | Complete OAuth credentials configured via setup wizard | Read, write, and index system emails. |
+| **Spotify** | `spotify` | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` | Voice-to-media triggers and playlist queuing. |
+| **GitHub** | `github` | `GITHUB_PAT` | Repo cloning, commit logs, PR automation. |
+| **Firebase** | `firebase` | Configured through the setup wizard | Query databases, deploy hosting/rules. |
+| **Netlify** | `netlify` | Configured through the setup wizard | Deploy files, audit domains, review builds. |
+| **Supabase** | `supabase` | Configured through the setup wizard | Manage database schema & migrations. |
+| **Chrome DevTools** | `browser` | Installs via `voxkage install browser` | Layout testing, CSS extraction, JS executions. |
+| **ClickHouse** | `clickhouse`| Configured through the setup wizard | Audit pipelines and write database queries. |
+| **Sequential Thinking**| `reasoning` | Runs natively without configurations | Advanced multi-step math/algo planning. |
+
+---
+
+<a name="development"></a>
+# 💻 Local Development & Contribution
+
+If you want to modify VoxKage, build new capability packs, or inspect its core servers, you can set it up in editable developer mode:
+
+### 1. Clone and Configure Runtimes
+```bash
+git clone https://github.com/ayushdwivedi001/VoxKage.git
+cd VoxKage
+python -m venv venv
+```
+
+### 2. Activate the Environment
+*   **Windows**:
+    ```powershell
+    .\venv\Scripts\Activate.ps1
+    ```
+*   **macOS / Linux**:
+    ```bash
+    source venv/bin/activate
+    ```
+
+### 3. Install in Editable Mode with Dev Packages
+```bash
+pip install -e .[full]
+```
+Using `-e` mounts the project directory as a living module. Any edits to `cli.py`, `shield.py`, or inside the `mcp_servers` folders take effect immediately when calling `voxkage`.
+
+---
+
+<a name="config"></a>
+# ⚙️ Local Configuration Schema
+
+VoxKage's global options are saved within `~/.voxkage/config.json`. You can modify the configuration directly using a standard text editor:
+
+```json
+{
+  "main_model": "gemini-2.5-flash",
+  "subagent_model": "gemini-2.5-flash",
+  "autostart": false,
+  "safe_mode": true
+}
+```
+
+*   `main_model`: The baseline LLM used for standard chat sessions and execution orchestration.
+*   `subagent_model`: The secondary model assigned to execute narrow tasks in parallel sub-agents.
+*   `autostart`: If set to `true`, launches the system tray daemon automatically upon user login.
+*   `safe_mode`: Enables or disables Layer 2 safety gates across shell and file system operations.
+
+---
+
+<a name="troubleshooting"></a>
+# ❌ Common Installation Errors & Troubleshooting
+
+### 1. File Locks / Upgrades Denied (`[Errno 13] Permission Denied`)
+Because the system tray and Telegram monitoring daemons run persistently in the background as `pythonw` runners, updating VoxKage via PyPI or running local developer setups can fail due to locked binaries inside virtual environments.
+
+**Resolution**: Terminate active runners cleanly inside a Windows PowerShell terminal before attempting upgrades:
+```powershell
+# 1. Kill active background Pythonw / VoxKage processes
+Get-Process -Name "pythonw","python" -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "*pipx*voxkage*" } | Stop-Process -Force
+Start-Sleep -Seconds 2
+
+# 2. Force install/upgrade cleanly
+pipx install voxkage --force
+```
+
+### 2. Missing Playwright Chromium Binaries
+If you installed the `browser` capability pack but browser actions fail with errors stating that the browser is not found:
+
+**Resolution**: Download the isolated browser runtimes to the local Playwright folder:
+```powershell
+playwright install chromium
+```
+
+### 3. System PATH Not Set Up for pipx
+If running `voxkage` in your terminal returns `Command Not Found`:
+
+**Resolution**: Run `pipx ensurepath` to append your user path to the system variables, and restart your shell.
+
+---
+
+<div align="center">
   <br>
-  <hr width="100%">
+  <a href="https://github.com/ayushdwivedi001">
+    <img src="https://img.shields.io/badge/Follow_on_GitHub-181717?style=for-the-badge&logo=github&logoColor=white" alt="GitHub">
+  </a>
+  <a href="https://pypi.org/project/voxkage/">
+    <img src="https://img.shields.io/badge/View_on_PyPI-3775A9?style=for-the-badge&logo=pypi&logoColor=white" alt="PyPI">
+  </a>
+  <a href="https://www.linkedin.com/in/ayush-dwivedi29/">
+    <img src="https://img.shields.io/badge/Connect_on_LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn">
+  </a>
   <br>
- </div>
- 
- <a name="innovation"></a>
- # 🧠 The Innovation: Sovereign OS Mastery & Dual-Engine Routing
- 
- ### The Standard AI Limitation
- Standard AI command-line assistants are heavily restricted. They are confined strictly to the folders where they are executed. If you command them to *"Inspect my running local databases, compile a patch for a broken backend route in a separate directory, download the correct compiler from the web, and alert my Telegram when it's done,"* they fail. They are blind, unable to orchestrate processes, and isolated from your desktop and remote devices.
- 
- ### The VoxKage OS Evolution
- VoxKage redefines local AI orchestration. By taking direct command of **Antigravity CLI (`agy`)** or the **OpenCode CLI**, VoxKage acts as the overarching **System Mind**, using the local runtime environments to interface with your OS on a deep level. It merges its own 18+ core/plugin MCP engines with your local configuration, automatically mapping and injecting them depending on which engine you choose.
- 
- VoxKage doesn't merely trigger commands; it orchestrates full workflows. It will launch a Playwright browser, capture a desktop screenshot, extract DOM CSS styles, execute repairs, test process ports via native PowerShell, and sync with your personal remote Telegram chat—governing its own steps in a fluid, self-correcting cognitive loop.
- 
- <br>
- 
- ```mermaid
- graph TD
-     subgraph "VoxKage Sovereign OS Brain"
-         A((VoxKage Core Directive)) --> B{Agentic Reasoning Loop}
- 
-         subgraph "Self-Healing & Orchestration"
-             B <--> C(ACE: Dynamic Planning)
-             B <--> D(DOM Verification & GUI Thinking)
-             B <--> E(Sovereign RAG & Memory)
-         end
-     end
- 
-     subgraph "Unified Dual-Engine Core"
-         C <--> |Dynamic Scaffolding| F[Global MCP Registry]
-         F <--> |~/.gemini/config/mcp_config.json| G[Antigravity CLI]
-         F <--> |~/.config/opencode/opencode.json| H[OpenCode CLI]
-         B <--> |Dynamic Launcher Router| I{Active Terminal CLI}
-     end
- 
-     subgraph "The Honeywell MCP Web"
-         C <--> J[Playwright Browser Engine]
-         C <--> K[Codebase AST Skeletor]
-         D <--> L[Native Shell & FileOps]
-     end
- 
-     subgraph "Omnipresent Bridges"
-         B <--> M[Telegram Remote Control]
-         B <--> N[Gmail / Spotify / GitHub]
-     end
- 
-     style A fill:#06b6d4,stroke:#fff,stroke-width:2px,color:#fff
-     style B fill:#8b5cf6,stroke:#fff,stroke-width:2px,color:#fff
-     style C fill:#10b981,stroke:#fff,stroke-width:2px,color:#fff
-     style I fill:#0ea5e9,stroke:#fff,stroke-width:2px,color:#fff
- ```
- 
- ---
- 
- <a name="features"></a>
- # ✨ Core Capabilities & Engineering Specs
- 
- ### ⚙️ 1. The Agentic Coding Engine (ACE)
- VoxKage runs an autonomous, 5-phase software development pipeline. It never guesses or writes blind changes:
- *   **AST Skeleton Mapping:** Extracts 40-line structural metadata from 2000-line source code files. This results in **95% token savings** while retaining total architectural context.
- *   **Dynamic Planning:** Maintains a living step-by-step checklist (`task.md`) in its brain.
- *   **Self-Healing Loop:** Compiles, tests, and validates code changes. If a syntax or runtime check fails, VoxKage captures the log output, dynamically diagnoses the root cause, and writes a self-corrective patch automatically.
- 
- ### 🌐 2. Deep Web & Desktop Automation
- The internet and operating system are completely open to VoxKage. It launches an isolated, headless Playwright engine to:
- *   Inspect active layouts, extract computed CSS properties, and debug complex UI animations.
- *   Run semantic web queries, crawl official software downloads, extract direct URLs, execute the installer, and verify process health.
- *   Manipulate native applications via simulated mouse interactions, keyboard typing, and shortcut keys.
- 
- ### 🌉 3. The Omnipresent Bridges
- VoxKage establishes a permanent, secure remote control bridge. Even when away from your computer, you can communicate with VoxKage through your custom Telegram bot:
- > **You (Telegram):** *"My production deploy failed. Fetch the latest git logs, find the error, patch it, run unit tests, and push the commit."*
- >
- > **VoxKage:** *"Right away, sir. Pulling logs, writing a patch, and running tests... [1 minute later] Patch compiled successfully and pushed to main. Here is the verified test log."*
- 
- ---
- 
- <a name="integrations"></a>
- # 🔌 Unified Integrations (10 Built-In Plugins)
- 
- VoxKage features native real-time connection mapping. The moment you execute `voxkage status`, it dynamically queries the active state and configuration of all **10 built-in plugins**:
- 
- | Integration | Type | What it unlocks |
- |---|---|---|
- | **Telegram Bot** | Communication | Complete remote OS command execution, file transfer, and notifications. |
- | **Gmail** | Utility | Read, draft, reply, and index emails directly from the agentic core. |
- | **Spotify** | Media | Dynamic search, playlist queuing, playback control, and environment triggers. |
- | **GitHub** | Code | Scan commits, manage repositories, fetch Action/CI workflows, and auto-submit PRs. |
- | **Firebase MCP** | Development | Manage Firebase databases, query resources, check logs, and deploy rules. |
- | **Netlify MCP** | Deployment | Monitor hosting sites, configure deployments, read team stats, and deploy code. |
- | **Supabase MCP** | Database | Manage databases, list projects, view migration history, and execute SQL statements. |
- | **Chrome DevTools** | Web | Audit performance, click elements, fill forms, check networks, and audit web views. |
- | **ClickHouse MCP** | Database | Query analytics databases, fetch organization details, and audit pipes. |
- | **Sequential Thinking** | Reasoning | Advanced multi-step mathematical and algorithmic thinking logic. |
- 
- > [!NOTE]
- > **Coexistence Engine:** When initialized, VoxKage automatically detects pre-existing MCP integrations configured inside your Antigravity IDE setup and merges them safely inside its global registry, ensuring you have a synchronized collection of tools in both your IDE and your CLI sessions.
- 
- ---
- 
- <a name="control-center"></a>
- # 🎨 The VoxKage Control Center
- 
- VoxKage features a gorgeous, high-fidelity native Tkinter **Control Center** accessible right from your system tray. 
- 
- <div align="center">
-   <img src="assets/Control_Center_Showcase.png" alt="VoxKage Control Center Dashboard" width="380" style="border-radius: 10px; box-shadow: 0 4px 20px rgba(139,92,246,0.3); margin: 15px 0;">
- </div>
- 
- *   **Dynamic Interface Provider Selector:** Zero comboboxes. Switch between the premium **Antigravity CLI (agy)** (ideal for AI subscription accounts) and the flexible **OpenCode CLI** (ideal for free-tier users connecting custom API keys via OpenCode's `/connect` command) with a single, responsive click.
- *   **Engine-Aware Settings Sync:** Automatically gates Visual Themes and Notification configurations. Gated write cycles prevent writing irrelevant properties to Antigravity's settings directory when OpenCode is selected, while maintaining global VoxKage-level toast notifications and unified ASCII startup banner color schemes.
- *   **Custom Smooth Slide Toggles:** Canvas-rendered, animated round switches with snapping state logic (Autostart on Login, Safe Mode Shield Protocol, Telegram Watcher Daemon, Sandboxed Shell Tasks, Toast/Audio Notifications).
- *   **Dynamic Theme Subtitle Hints:** The theme card sub-label automatically shifts based on your active interface, informing you that OpenCode manages terminal color themes natively, while keeping the picker active to style VoxKage's beautiful CLI startup banner.
- 
- ---
- 
- <a name="started"></a>
- # 🛠️ Quick Start: Install in 60 Seconds
- 
- VoxKage is packaged as a globally executable Python distribution. No complex source code compilation is required.
- 
- ### Prerequisites
- 
- Ensure the following runtimes are active on your Windows machine:
- 1.  **Python 3.10+** (`python --version`)
- 2.  **pipx** (`pipx --version`)
- 3.  **Antigravity CLI** (`agy --version`) OR **OpenCode CLI** (`opencode --version`)
- 
- *If you need to install pipx first:*
- ```powershell
- pip install pipx
- pipx ensurepath
- ```
- 
- ---
- 
- ### Step 1: Install VoxKage
- ```powershell
- pipx install voxkage
- ```
- 
- ---
- 
- ### Step 2: Initialize the Brain
- ```powershell
- voxkage init
- ```
- This launches the setup wizard, which automatically:
- *   Creates the central data directory at `~/.voxkage`.
- *   Scaffolds the integration environment secrets file (`~/.voxkage/.env`).
- *   Configures system prompts and injects the global MCP server registrations directly into `~/.gemini/config/mcp_config.json` (for Antigravity) and `~/.config/opencode/opencode.json` (for OpenCode).
- *   Configures shared visual parameters.
- 
- ---
- 
- ### Step 3: Add Capability Packs
- The base package remains lightweight (~80 MB). Heavy dependencies are opt-in capability packs that VoxKage resolves, downloads, and isolates inside the `pipx` environment automatically:
- 
- ```powershell
- voxkage install <pack>
- ```
- 
- *   `voxkage install browser` (Playwright web browser automation, DOM styling tools - **Highly Recommended**)
- *   `voxkage install rag` (ChromaDB Vector Store, embedding models, semantic codebase indexes)
- *   `voxkage install vision` (OpenCV, screen OCR scanning, visual validations)
- *   `voxkage install docs_plus` (Word to PDF compilers, Excel data parsing dependencies)
- *   `voxkage install full` (Installs all 4 premium capability packs in a single command)
- 
- ---
- 
- ### Step 4: Launch the Sovereign Core
- 
- *   **To run an interactive terminal agentic session:**
-     ```powershell
-     voxkage
-     ```
-     *VoxKage will automatically detect your selected interface engine (Antigravity or OpenCode) and route your session seamlessly, printing the unified ASCII startup banner styled according to your active theme.*
- 
- *   **To start the background Control Center & Telegram daemon:**
-     ```powershell
-     voxkage tray
-     ```
-     Once launched, you can close your shell. VoxKage is alive in the system tray, listening for phone directives and remotely managing your operating system.
- 
- ---
- 
- <a name="upgrade"></a>
- # 🔄 Updating & Upgrading
- 
- To update your global VoxKage distribution to the latest PyPI release:
- 
- ```powershell
- pipx upgrade voxkage
- ```
- 
- ### Stuck Upgrades & Lock Resolution
- Since the tray Control Center and Telegram watcher daemons run persistently in the background as `pythonw` processes, they can lock virtual environment files and cause permission failures (`[Errno 13] Permission Denied`) during pipx upgrades.
- 
- If this happens, run this clean lock-breaking pipeline in Windows PowerShell to gracefully terminate all active instances and force reinstall the latest version:
- 
- ```powershell
- # 1. Kill any active background VoxKage and Python runners
- Get-Process -Name "pythonw","python" -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "*pipx*voxkage*" } | Stop-Process -Force
- Start-Sleep -Seconds 2
- 
- # 2. Force reinstall voxkage cleanly from PyPI
- pipx install voxkage --force
- ```
- 
- ---
- 
- # 🔌 Command Reference
- 
- | Command | Action |
- |---|---|
- | `voxkage` | Launch an interactive agentic session (seamlessly routed to Antigravity or OpenCode). |
- | `voxkage init` | Scaffold directories, environment config, and global MCP registrations. |
- | `voxkage status` | Show real-time dashboard of plugins, capability packs, active interface engine, and OS health. |
- | `voxkage tray` | Run the system tray Control Center icon and activate the Telegram daemon. |
- | `voxkage install <pack>` | Add modular capability packs (`browser`, `rag`, `vision`, `docs_plus`, `full`). |
- | `voxkage plugins` | Inspect registered plugin states. |
- | `voxkage plugins add <name>` | Interactively configure credentials for Gmail, GitHub, Spotify, and Telegram. |
- | `voxkage --version` | Output current installed release version. |
- 
- ---
- 
- <div align="center">
-   <br>
-   <a href="https://github.com/ayushdwivedi001">
-     <img src="https://img.shields.io/badge/Follow_on_GitHub-181717?style=for-the-badge&logo=github&logoColor=white" alt="GitHub">
-   </a>
-   <a href="https://pypi.org/project/voxkage/">
-     <img src="https://img.shields.io/badge/View_on_PyPI-3775A9?style=for-the-badge&logo=pypi&logoColor=white" alt="PyPI">
-   </a>
-   <a href="https://www.linkedin.com/in/ayush-dwivedi29/">
-     <img src="https://img.shields.io/badge/Connect_on_LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn">
-   </a>
-   <br>
-   <br>
-   <i>"I am ready, sir."</i><br>
-   <b>— VoxKage</b>
- </div>
+  <br>
+  <i>"Ready to coordinate the system, sir."</i><br>
+  <b>— VoxKage</b>
+</div>
