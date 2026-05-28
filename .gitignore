@@ -63,6 +63,7 @@ tmp/
 *.tmp
 debug_out.txt
 ASCII_issue.png
+documentation.md
 
 # Configuration (sensitive - user creates their own)
 config.json
