@@ -147,7 +147,7 @@ Here is what you will see when running VoxKage CLI commands:
 Interactive startup configuration wizard and dependency checker:
 ```text
   ┌────────────────────────────────────────────────────────────┐
-  │  ✦  VoxKage v1.1.6 — First-Time Setup                      │
+  │  ✦  VoxKage v1.1.7 — First-Time Setup                      │
   │  ────────────────────────────────────────────────────────  │
   │  VoxKage supercharges your CLI into a living OS AI.        │
   │  This takes about 2 minutes.                               │
@@ -176,7 +176,7 @@ Interactive startup configuration wizard and dependency checker:
 ### `voxkage status`
 Real-time dashboard of system health, active environment path, capability packs, and connectors:
 ```text
-  ✦  VoxKage v1.1.6 — System Status
+  ✦  VoxKage v1.1.7 — System Status
   ──────────────────────────────────────────────────
 
   CORE
