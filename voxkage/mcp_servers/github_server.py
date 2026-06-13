@@ -54,6 +54,7 @@ def _run_cmd(command, cwd=None, timeout=30):
         env["GIT_PAGER"] = "cat"
         env["PAGER"] = "cat"
         env["GIT_TERMINAL_PROMPT"] = "0"  # Prevent interactive credential prompts hanging
+        env["GCM_INTERACTIVE"] = "never"  # Prevent Git Credential Manager GUI from spawning and hanging
         
         result = subprocess.run(
             command,
@@ -94,11 +95,32 @@ def git_clone(kwargs):
     if os.path.exists(dest_path):
         return {"error": f"Destination path already exists: {dest_path}", "path": dest_path}
         
-    cmd = f"git clone {shlex.quote(url)} {shlex.quote(dest_path)}"
+    # Inject PAT into remote URL if available to prevent authentication prompts
+    global GITHUB_PAT
+    if not GITHUB_PAT:
+        load_voxkage_env()
+        GITHUB_PAT = os.environ.get("GITHUB_PAT", "")
+
+    url_auth = url
+    if GITHUB_PAT and url.startswith("https://") and "@" not in url.split("//")[1]:
+        url_auth = url.replace("https://", f"https://{GITHUB_PAT}@")
+
+    cmd = f"git clone {shlex.quote(url_auth)} {shlex.quote(dest_path)}"
     
     res = _run_cmd(cmd)
     res["path"] = dest_path
     
+    if res["success"]:
+        # Reset the remote URL in the cloned repository to the clean url
+        # so we don't persist the PAT in .git/config
+        _run_cmd(f"git remote set-url origin {url}", cwd=dest_path)
+        
+    # Sanitize PAT from output if present
+    if GITHUB_PAT:
+        for key in ["stdout", "stderr", "error"]:
+            if key in res and isinstance(res[key], str):
+                res[key] = res[key].replace(GITHUB_PAT, "********")
+                
     # Auto trigger RAG indexing (simulated here by returning instructions)
     res["message"] = f"Successfully cloned to {dest_path}. VoxKage, please run check_and_index or index_directory on this path now."
     return res
@@ -400,21 +422,40 @@ def create_repo_local(kwargs):
         
         remote_url = repo.clone_url
         
+        # Inject GITHUB_PAT into remote URL for command execution to avoid auth hangs
+        global GITHUB_PAT
+        if not GITHUB_PAT:
+            load_voxkage_env()
+            GITHUB_PAT = os.environ.get("GITHUB_PAT", "")
+
+        remote_url_auth = remote_url
+        if GITHUB_PAT and remote_url.startswith("https://") and "@" not in remote_url.split("//")[1]:
+            remote_url_auth = remote_url.replace("https://", f"https://{GITHUB_PAT}@")
+
         # 2. Handle local setup
         if path and os.path.exists(path):
             # Local to Remote flow
             _run_cmd("git init", cwd=path)
-            _run_cmd(f"git remote add origin {remote_url}", cwd=path)
+            _run_cmd("git remote remove origin", cwd=path)
+            _run_cmd(f"git remote add origin {remote_url_auth}", cwd=path)
             if push:
                 _run_cmd("git add .", cwd=path)
                 _run_cmd('git commit -m "Initial commit"', cwd=path)
                 _run_cmd("git branch -M main", cwd=path)
                 push_res = _run_cmd("git push -u origin main", cwd=path)
+                
+                # Reset remote URL back to clean remote_url (without PAT) so PAT is not persisted locally
+                _run_cmd(f"git remote set-url origin {remote_url}", cwd=path)
+                
+                push_out = push_res["stderr"] or push_res["stdout"]
+                if GITHUB_PAT:
+                    push_out = push_out.replace(GITHUB_PAT, "********")
+                
                 return {
                     "status": "Success",
                     "remote_url": remote_url,
                     "local_path": path,
-                    "push_output": push_res["stderr"] or push_res["stdout"]
+                    "push_output": push_out
                 }
             return {
                 "status": "Initialized local and created remote",
@@ -427,10 +468,13 @@ def create_repo_local(kwargs):
             clone_res = git_clone({"url": remote_url, "dest_name": name})
             
             if "error" in clone_res:
+                err_msg = clone_res["error"]
+                if GITHUB_PAT:
+                    err_msg = err_msg.replace(GITHUB_PAT, "********")
                 return {
                     "status": "Created remote, but local clone failed",
                     "remote_url": remote_url,
-                    "clone_error": clone_res["error"]
+                    "clone_error": err_msg
                 }
                 
             return {
@@ -440,7 +484,10 @@ def create_repo_local(kwargs):
                 "message": "Repository created remotely and cloned locally."
             }
     except Exception as e:
-        return {"error": str(e)}
+        err_msg = str(e)
+        if GITHUB_PAT:
+            err_msg = err_msg.replace(GITHUB_PAT, "********")
+        return {"error": err_msg}
 
 def actions_list(kwargs):
     try:
