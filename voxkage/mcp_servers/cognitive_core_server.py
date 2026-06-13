@@ -61,9 +61,15 @@ _HISTORY_FILE = os.path.join(_HISTORY_DIR, "recent.jsonl")
 
 # Checklists shipped with the package (read-only)
 _CHECKLISTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "checklists")
+_WRITABLE_CHECKLISTS_DIR = os.path.join(_COG_DIR, "checklists")
 
 os.makedirs(_COG_DIR, exist_ok=True)
 os.makedirs(_HISTORY_DIR, exist_ok=True)
+os.makedirs(_WRITABLE_CHECKLISTS_DIR, exist_ok=True)
+
+def _save_checklist(domain: str, items: list):
+    path = os.path.join(_WRITABLE_CHECKLISTS_DIR, f"{domain}.json")
+    _save_json(path, {"domain": domain, "items": items})
 
 # ── Turn-level guard ──────────────────────────────────────────────────────────
 # Tracks when start_turn() was last called. Other cognitive tools check this
@@ -159,16 +165,25 @@ def _save_session(data: dict):
     _save_json(_SESSION_FILE, data)
 
 def _load_checklist(domain: str) -> list:
-    """Load a shipped checklist for the given domain."""
-    path = os.path.join(_CHECKLISTS_DIR, f"{domain}.json")
+    """Load a dynamic checklist for the given domain from writable storage, falling back to shipped template."""
+    path = os.path.join(_WRITABLE_CHECKLISTS_DIR, f"{domain}.json")
     if not os.path.exists(path):
-        return []
+        shipped_path = os.path.join(_CHECKLISTS_DIR, f"{domain}.json")
+        if os.path.exists(shipped_path):
+            try:
+                import shutil
+                shutil.copy2(shipped_path, path)
+            except Exception:
+                path = shipped_path
+        else:
+            return []
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
         return data.get("items", [])
     except Exception:
         return []
+
 
 def _append_task_history(entry: dict):
     """Append a task summary to recent.jsonl, capping at 100 entries."""
@@ -417,6 +432,8 @@ def start_turn(user_message: str) -> str:
     classification = _classify_intent(user_message)
 
     if classification["type"] == "conversation":
+        session["last_start_turn_ts"] = _time.time()
+        _save_session(session)
         return "[COGNITIVE] type: conversation\nRespond normally. No cognitive tools needed."
 
     # ── Task detected ──────────────────────────────────────────────────────
@@ -453,11 +470,15 @@ def start_turn(user_message: str) -> str:
     # Session elevated checks (from recent failures)
     elevated = session.get("elevated_checks", [])
 
-    # Adjust tier based on profile confidence
-    if success_rate < 0.5 and tasks_done >= 3:
-        tier = max(tier, 2)  # Low success rate → at least standard tier
+    # Adjust tier based on profile confidence and safety triggers
+    if success_rate < 0.70 and tasks_done >= 3:
+        tier = 3  # Force complex tier for low success rate domains
+    elif success_rate < 0.85 and tasks_done >= 3:
+        tier = max(tier, 2)
     if len(common_errors) >= 3:
-        tier = max(tier, 2)  # Many known errors → at least standard tier
+        tier = max(tier, 2)
+    if len(elevated) > 0:
+        tier = 3  # Force complex tier if there are active session failures
 
     # Build task context
     task_context = {
@@ -471,6 +492,7 @@ def start_turn(user_message: str) -> str:
     # Update session state
     session["active_task"] = task_context
     session["tasks_this_session"].append(task_id)
+    session["last_start_turn_ts"] = _time.time()
     _save_session(session)
 
     # Build response
@@ -838,6 +860,67 @@ def refine(task_id: str, issues_fixed: str, iteration: int = 1) -> str:
     return guard_warning + "\n".join(lines)
 
 
+def _consolidate_soul():
+    """Consolidate recent task history and anti-patterns into a background summary."""
+    try:
+        # Load profile
+        profile = _load_profile()
+        gp = profile.get("global_profile", {})
+        dp = gp.get("domain_performance", {})
+        
+        # Load recent task history
+        recent_tasks = []
+        if os.path.exists(_HISTORY_FILE):
+            with open(_HISTORY_FILE, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            recent_tasks.append(json.loads(line))
+                        except Exception:
+                            pass
+        
+        # Load anti-patterns
+        ap_data = _load_anti_patterns()
+        anti_patterns = ap_data.get("anti_patterns", [])
+        
+        lines = [
+            "### VoxKage Consolidated Soul History & Performance",
+            "",
+            "**Domain Metrics**:",
+        ]
+        
+        for domain, perf in dp.items():
+            tasks = perf.get("tasks", 0)
+            successes = perf.get("successes", 0)
+            rate = round(successes / max(tasks, 1) * 100, 1) if tasks > 0 else 0
+            lines.append(f"- **{domain.upper()}**: {rate}% success rate ({successes}/{tasks} tasks)")
+            errors = perf.get("common_errors", [])
+            if errors:
+                lines.append(f"  - Common Weaknesses: {', '.join(errors[:3])}")
+                
+        if anti_patterns:
+            lines.append("")
+            lines.append("**Learned Negative Constraints (Anti-Patterns)**:")
+            # Show last 10 anti-patterns
+            for ap in anti_patterns[-10:]:
+                lines.append(f"- **{ap.get('domain', 'all').upper()}**: Avoid repeating: {ap.get('pattern')}")
+                
+        if recent_tasks:
+            lines.append("")
+            lines.append("**Recent Tasks Summary**:")
+            # Show last 5 tasks
+            for task in recent_tasks[-5:]:
+                lines.append(f"- [{task.get('timestamp')[:10]}] {task.get('domain').upper()}: {task.get('outcome').upper()} (Confidence: {task.get('confidence')})")
+                
+        consolidation_file = os.path.join(_COG_DIR, "soul_consolidation.md")
+        with open(consolidation_file, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+    except Exception:
+        pass
+
+
+
 @mcp.tool()
 def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found: str = "") -> str:
     """
@@ -938,6 +1021,7 @@ def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found:
             dp[domain]["common_errors"].append(failure)
             dp[domain]["common_errors"] = dp[domain]["common_errors"][-10:]
     _save_session(session)
+    _consolidate_soul()
 
     # Response
     success_rate = round(dp[domain]["successes"] / max(dp[domain]["tasks"], 1) * 100, 1)
@@ -1012,6 +1096,21 @@ def user_corrected(task_id: str, correction: str, error_category: str = "") -> s
     ap_data["anti_patterns"] = ap_data["anti_patterns"][-50:]
     _save_anti_patterns(ap_data)
 
+    # Update checklist dynamic rules
+    try:
+        items = _load_checklist(domain)
+        check_id = f"corr_{task_id}"
+        check_text = f"Did we avoid repeating: {correction[:120]}?"
+        if not any(it.get("id") == check_id for it in items):
+            items.append({
+                "id": check_id,
+                "check": check_text,
+                "severity": "high"
+            })
+            _save_checklist(domain, items)
+    except Exception:
+        pass
+
     # Update session elevated checks
     if error_category and error_category not in session.get("elevated_checks", []):
         session["elevated_checks"].append(error_category)
@@ -1033,6 +1132,7 @@ def user_corrected(task_id: str, correction: str, error_category: str = "") -> s
         })
         cal["domains"][domain]["predictions"] = cal["domains"][domain]["predictions"][-50:]
     _save_calibration(cal)
+    _consolidate_soul()
 
     corrections = gp.get("total_user_corrections", 0)
     total = gp.get("total_tasks_completed", 0)

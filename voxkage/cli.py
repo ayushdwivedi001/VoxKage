@@ -1124,6 +1124,16 @@ def _generate_gemini_md():
         except Exception as e:
             soul_text = f"*Error loading soul memory: {e}*"
 
+    # Inject background consolidated history if it exists
+    consolidation_path = voxkage_dir() / "cognitive" / "soul_consolidation.md"
+    if consolidation_path.exists():
+        try:
+            consol_content = consolidation_path.read_text(encoding="utf-8").strip()
+            if consol_content:
+                soul_text += "\n\n" + consol_content
+        except Exception:
+            pass
+
     content = content.replace("{{USER_SOUL_INJECTION}}", soul_text)
     # ──────────────────────────────────────────────────────────────────────────
 
