@@ -43,6 +43,7 @@ def _load_all_plugins():
     from voxkage.plugins.supabase import SupabasePlugin
     from voxkage.plugins.clickhouse import ClickhousePlugin
     from voxkage.plugins.sequential_thinking import SequentialThinkingPlugin
+    from voxkage.plugins.colab import ColabPlugin
 
     builtin = [
         TelegramPlugin(),
@@ -54,6 +55,7 @@ def _load_all_plugins():
         SupabasePlugin(),
         ClickhousePlugin(),
         SequentialThinkingPlugin(),
+        ColabPlugin(),
     ]
     _BUILTIN_NAMES = {
         "telegram",
@@ -65,6 +67,7 @@ def _load_all_plugins():
         "supabase",
         "clickhouse",
         "sequential-thinking",
+        "colab",
     }
 
     # Discover community plugins via importlib.metadata
