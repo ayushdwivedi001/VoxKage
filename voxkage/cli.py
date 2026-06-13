@@ -881,6 +881,7 @@ def _scaffold_agy_mcp_servers():
     mcp_base = agy_mcp_dir()  # ~/.gemini/antigravity-cli/mcp/
 
     core_servers = [
+        ("voxkage-cognitive-core", "mcp_servers/cognitive_core_server.py"),
         ("voxkage-system",    "mcp_servers/system_server.py"),
         ("voxkage-browser",   "mcp_servers/browser_server.py"),
         ("voxkage-media",     "mcp_servers/media_server.py"),
@@ -1013,6 +1014,7 @@ def _generate_settings_json():
     pkg = str(package_dir())
 
     core_servers = [
+        ("voxkage-cognitive-core", "mcp_servers/cognitive_core_server.py"),
         ("voxkage-system",    "mcp_servers/system_server.py"),
         ("voxkage-browser",   "mcp_servers/browser_server.py"),
         ("voxkage-media",     "mcp_servers/media_server.py"),
@@ -1394,6 +1396,7 @@ def _scaffold_opencode_mcp():
     vk_home = str(voxkage_dir())
 
     core_servers = [
+        ("voxkage-cognitive-core", "mcp_servers/cognitive_core_server.py"),
         ("voxkage-system",    "mcp_servers/system_server.py"),
         ("voxkage-browser",   "mcp_servers/browser_server.py"),
         ("voxkage-media",     "mcp_servers/media_server.py"),

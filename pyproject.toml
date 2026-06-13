@@ -134,5 +134,6 @@ voxkage = [
     "icons/*.ico",
     "data/shield_blocklist.json",
     "data/.env.example",
+    "data/checklists/*.json",
     "templates/*",
 ]

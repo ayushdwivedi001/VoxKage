@@ -71,6 +71,12 @@ def brain_dir() -> Path:
     d.mkdir(parents=True, exist_ok=True)
     return d
 
+def cognitive_dir() -> Path:
+    """~/.voxkage/cognitive/ — metacognitive core storage (profile, checklists, calibration)."""
+    d = voxkage_dir() / "cognitive"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
 def browser_dir() -> Path:
     """~/.voxkage/data/browser/ — isolated chrome profile."""
     d = data_dir() / "browser"
