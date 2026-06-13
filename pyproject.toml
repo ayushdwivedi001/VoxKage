@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "voxkage"
-version = "1.1.7"
+version = "1.1.8"
 description = "VoxKage - OS-level Agentic AI Assistant. Autonomous, Persistent, Aware."
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -90,7 +90,7 @@ browser = [
 ]
 rag = [
     # Semantic memory, codebase indexing, cross-session document search
-    # rag_server degrades gracefully without these ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â no crash on startup.
+    # rag_server degrades gracefully without these ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â no crash on startup.
     "chromadb>=1.5",
     "sentence-transformers>=3.0",
     "numpy>=1.24",

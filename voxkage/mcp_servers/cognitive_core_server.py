@@ -41,6 +41,9 @@ from pathlib import Path
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+_PARENT = os.path.dirname(_ROOT)
+if _PARENT not in sys.path:
+    sys.path.insert(0, _PARENT)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
