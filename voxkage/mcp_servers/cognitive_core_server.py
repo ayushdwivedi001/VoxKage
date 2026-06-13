@@ -65,6 +65,27 @@ _CHECKLISTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
 os.makedirs(_COG_DIR, exist_ok=True)
 os.makedirs(_HISTORY_DIR, exist_ok=True)
 
+# ── Turn-level guard ──────────────────────────────────────────────────────────
+# Tracks when start_turn() was last called. Other cognitive tools check this
+# and emit a loud warning if it was skipped.
+import time as _time
+_last_start_turn_ts: float = 0.0  # epoch seconds
+_GUARD_WINDOW_SECS = 120  # allow 2 minutes between start_turn and other tools
+
+def _guard_check() -> str:
+    """Returns a protocol violation warning if start_turn() was not called recently."""
+    global _last_start_turn_ts
+    elapsed = _time.time() - _last_start_turn_ts
+    if _last_start_turn_ts == 0.0 or elapsed > _GUARD_WINDOW_SECS:
+        return (
+            "\n⚠⚠⚠ PROTOCOL VIOLATION ⚠⚠⚠\n"
+            "You called a cognitive tool WITHOUT calling start_turn() first!\n"
+            "RULE ZERO: start_turn(user_message) MUST be your FIRST action every turn.\n"
+            "Call start_turn() NOW before proceeding.\n"
+            "⚠⚠⚠ END VIOLATION ⚠⚠⚠\n\n"
+        )
+    return ""
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # STORAGE I/O
@@ -389,6 +410,9 @@ def start_turn(user_message: str) -> str:
       If this is a follow-up to a recent task ("make it blue", "also add X"),
       returns the previous task_id so you continue the same context.
     """
+    global _last_start_turn_ts
+    _last_start_turn_ts = _time.time()  # Mark gate as fired
+
     session = _load_session()
     classification = _classify_intent(user_message)
 
@@ -522,6 +546,7 @@ def pre_mortem(task_id: str, task_summary: str) -> str:
 
     Returns predicted risks to keep in mind during execution.
     """
+    guard_warning = _guard_check()
     session = _load_session()
     task = session.get("active_task", {})
     domain = task.get("domain", "coding")
@@ -569,7 +594,7 @@ def pre_mortem(task_id: str, task_summary: str) -> str:
         lines.append(f"\n  Total risks identified: {risk_count}")
         lines.append("  Keep these in mind during execution. reflect() will check against them.")
 
-    return "\n".join(lines)
+    return guard_warning + "\n".join(lines)
 
 
 @mcp.tool()
@@ -588,6 +613,7 @@ def checkpoint(task_id: str, sub_task: str, status: str, issues: str = "") -> st
 
     Returns acknowledgment with progress update.
     """
+    guard_warning = _guard_check()
     session = _load_session()
 
     if "sub_tasks" not in session:
@@ -623,7 +649,7 @@ def checkpoint(task_id: str, sub_task: str, status: str, issues: str = "") -> st
         lines.append(f"  Issues: {issues}")
         lines.append(f"  → Elevated checks updated. reflect() will prioritize these areas.")
 
-    return "\n".join(lines)
+    return guard_warning + "\n".join(lines)
 
 
 @mcp.tool()
@@ -642,6 +668,7 @@ def reflect(task_id: str, output_summary: str, checklist_results: str) -> str:
 
     Returns structured critique with DELIVER or REFINE recommendation.
     """
+    guard_warning = _guard_check()
     session = _load_session()
     task = session.get("active_task", {})
     domain = task.get("domain", "coding")
@@ -731,6 +758,7 @@ def verify(task_id: str, verification_results: str) -> str:
 
     Returns PASS (deliver) or FAIL (specific issues to refine).
     """
+    guard_warning = _guard_check()
     session = _load_session()
 
     # Parse verification results
@@ -773,7 +801,7 @@ def verify(task_id: str, verification_results: str) -> str:
     }
     _save_session(session)
 
-    return "\n".join(lines)
+    return guard_warning + "\n".join(lines)
 
 
 @mcp.tool()
@@ -792,6 +820,7 @@ def refine(task_id: str, issues_fixed: str, iteration: int = 1) -> str:
 
     Returns CONTINUE (re-reflect) or MAX_ITERATIONS (deliver best-effort).
     """
+    guard_warning = _guard_check()
     max_iterations = 3
 
     lines = [f"[COGNITIVE REFINE] task: {task_id}, iteration: {iteration}/{max_iterations}"]
@@ -802,11 +831,11 @@ def refine(task_id: str, issues_fixed: str, iteration: int = 1) -> str:
         lines.append(f"  → Deliver your current best-effort output.")
         lines.append(f"  → Include a note to the user about remaining limitations.")
         lines.append(f"  → Proceed to learn(task_id, 'partial') to record what happened.")
-        return "\n".join(lines)
+        return guard_warning + "\n".join(lines)
 
     lines.append(f"\n  → Refinement recorded. Re-run reflect() to check if issues are resolved.")
     lines.append(f"  → Iterations remaining: {max_iterations - iteration}")
-    return "\n".join(lines)
+    return guard_warning + "\n".join(lines)
 
 
 @mcp.tool()
@@ -826,6 +855,7 @@ def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found:
 
     Returns profile update confirmation.
     """
+    guard_warning = _guard_check()
     session = _load_session()
     task = session.get("active_task", {})
     domain = task.get("domain", "coding")
@@ -925,7 +955,7 @@ def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found:
         lines.append(f"  Errors logged: {errors_found}")
 
     lines.append(f"\n  → Profile updated. Deliver your response now.")
-    return "\n".join(lines)
+    return guard_warning + "\n".join(lines)
 
 
 @mcp.tool()
@@ -944,6 +974,7 @@ def user_corrected(task_id: str, correction: str, error_category: str = "") -> s
 
     Returns confirmation of the high-weight profile update.
     """
+    guard_warning = _guard_check()
     session = _load_session()
     task = session.get("last_task") or session.get("active_task", {})
     domain = task.get("domain", "coding")
@@ -1007,7 +1038,7 @@ def user_corrected(task_id: str, correction: str, error_category: str = "") -> s
     total = gp.get("total_tasks_completed", 0)
     ratio = round(corrections / max(total, 1) * 100, 1)
 
-    return (
+    return guard_warning + (
         f"[COGNITIVE] ⚡ User correction recorded (HIGH WEIGHT)\n"
         f"  Task: {task_id}\n"
         f"  Domain: {domain}\n"
