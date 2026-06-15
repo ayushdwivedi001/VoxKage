@@ -181,6 +181,9 @@ def run_gui():
     
     style.configure("Vertical.TScrollbar", background=PANEL, troughcolor=BG, bordercolor=BORDER, arrowcolor=SUB)
     style.map("Vertical.TScrollbar", background=[("active", ACCENT), ("pressed", ACCENT)])
+    
+    style.map('TCombobox', fieldbackground=[('readonly', PANEL)], selectbackground=[('readonly', PANEL)])
+    style.configure('TCombobox', background=PANEL, foreground=FG, fieldbackground=PANEL, bordercolor=BORDER, arrowcolor=FG)
 
     # Initialize Scrollable Viewport
     scroll_container = ScrollableFrame(root, bg_color=BG)
@@ -199,6 +202,34 @@ def run_gui():
     tk.Label(ip_card, text="Interface Provider", fg=ACCENT, bg=PANEL, font=FONT_B, anchor="w").pack(anchor="w", fill="x")
     tk.Label(ip_card, text="Select the CLI engine VoxKage launches as its terminal.",
              fg=SUB, bg=PANEL, font=FONT, anchor="w", justify="left", wraplength=310).pack(anchor="w", fill="x", pady=(2, 10))
+
+    # Claude Model selection frame
+    claude_model_frame = tk.Frame(ip_card, bg=PANEL, pady=5)
+    
+    # Load model selection
+    current_model = cfg.get("claude_model", "deepseek-v4-flash-free")
+    
+    # Parse free models
+    free_models = []
+    try:
+        opencode_config_path = Path.home() / ".opencode-starter" / "config.json"
+        if opencode_config_path.exists():
+            config_data = json.loads(opencode_config_path.read_text(encoding="utf-8"))
+            models_list = config_data.get("modelListCache", {}).get("zen", {}).get("models", [])
+            free_models = [m.get("id") for m in models_list if m.get("isFree") is True]
+    except Exception:
+        pass
+        
+    if not free_models:
+        free_models = ["deepseek-v4-flash-free", "big-pickle", "mimo-v2.5-free", "nemotron-3-ultra-free", "north-mini-code-free"]
+        
+    if current_model not in free_models:
+        free_models.insert(0, current_model)
+        
+    tk.Label(claude_model_frame, text="Model:", fg=SUB, bg=PANEL, font=FONT_B).pack(side="left", padx=(5, 5))
+    model_var = tk.StringVar(value=current_model)
+    model_combo = ttk.Combobox(claude_model_frame, textvariable=model_var, values=free_models, state="readonly", width=25)
+    model_combo.pack(side="left", padx=5)
 
     _engine_rows: dict = {}  # key -> (row_frame, accent_bar, label, badge)
 
@@ -235,6 +266,10 @@ def run_gui():
                 b2.configure(bg=ACCENT if active else BORDER)
                 m2.configure(fg=FG if active else SUB)
                 g2.configure(text="ACTIVE" if active else "")
+            if _k == "claude":
+                claude_model_frame.pack(fill="x", pady=(8, 0))
+            else:
+                claude_model_frame.pack_forget()
 
         for widget in (row, bar, txt, lbl_main, lbl_sub, badge):
             widget.bind("<Button-1>", _select)
@@ -249,6 +284,14 @@ def run_gui():
         "OpenCode CLI  (opencode)",
         "Best for free-tier · Connect any API key via /connect"
     )
+    _build_engine_row(
+        "claude",
+        "Claude Code CLI  (claude)",
+        "Best for local CLI · Direct launch using OpenCode Zen"
+    )
+
+    if _engine_sel[0] == "claude":
+        claude_model_frame.pack(fill="x", pady=(8, 0))
     
     # ── Load toggle states ──
     # 1. Autostart
@@ -329,6 +372,7 @@ def run_gui():
         sandbox_state = toggles["sandbox"].state
         notif_state = toggles["notifications"].state
         engine_sel = _engine_sel[0]
+        claude_model_state = model_var.get()
         
         # 1. Save config settings
         _save_config({
@@ -338,7 +382,19 @@ def run_gui():
             "sandbox_mode": sandbox_state,
             "notifications_enabled": notif_state,
             "interface_engine": engine_sel,
+            "claude_model": claude_model_state,
         })
+        
+        # 1b. Sync model to ~/.opencode-starter/config.json
+        if claude_model_state:
+            try:
+                opencode_starter_config = Path.home() / ".opencode-starter" / "config.json"
+                if opencode_starter_config.exists():
+                    os_config = json.loads(opencode_starter_config.read_text(encoding="utf-8"))
+                    os_config["lastModel"] = claude_model_state
+                    opencode_starter_config.write_text(json.dumps(os_config, indent=2, ensure_ascii=False), encoding="utf-8")
+            except Exception as e:
+                print(f"[Settings] Error writing to opencode-starter config: {e}", file=sys.stderr)
         
         # 2. Update Autostart Registry
         try:

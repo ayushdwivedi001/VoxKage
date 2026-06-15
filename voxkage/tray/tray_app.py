@@ -126,16 +126,14 @@ def get_active_working_dir() -> str:
 
 
 def _open_voxkage(icon=None, item=None):
-    """Open a new VoxKage/OpenCode terminal session in the active folder context."""
+    """Open a new VoxKage terminal session in the active folder context."""
     cwd = get_active_working_dir()
     escaped_cwd = cwd.replace("'", "''")
     
-    cfg = _load_config()
-    engine = cfg.get("interface_engine", "antigravity")
-    cmd = "voxkage" if engine == "antigravity" else "opencode"
-    
+    # Always launch 'voxkage' — cmd_launch() reads the engine from config
+    # and handles antigravity/opencode/claude routing internally.
     subprocess.Popen(
-        f'start "{cmd.upper()}" powershell -NoExit -Command "Set-Location -Path \'{escaped_cwd}\'; {cmd}"',
+        f'start "VOXKAGE" powershell -NoExit -Command "Set-Location -Path \'{escaped_cwd}\'; voxkage"',
         shell=True,
         cwd=cwd
     )

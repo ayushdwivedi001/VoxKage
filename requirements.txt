@@ -24,6 +24,9 @@ mcp>=1.0
 httpx>=0.27
 requests>=2.31
 python-dotenv>=1.0
+duckduckgo_search>=8.0.0
+trafilatura>=2.0.0
+aiohttp
 
 # ── Core: OS Integration (Cross-Platform) ────────────────────────────────────
 psutil>=5.9

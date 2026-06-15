@@ -142,6 +142,33 @@ except Exception:
     _PIL = False
 
 
+
+def is_desktop_accessible() -> bool:
+    if not _WIN32:
+        return False
+    try:
+        # DESKTOP_SWITCHDESKTOP = 0x0100
+        h_desk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x0100)
+        if h_desk:
+            ctypes.windll.user32.CloseDesktop(h_desk)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _get_window_title_safe(hwnd: int) -> str:
+    if not hwnd or not _WIN32:
+        return ""
+    try:
+        buf = ctypes.create_unicode_buffer(512)
+        # InternalGetWindowText is safe and does not send messages to foreign threads
+        ctypes.windll.user32.InternalGetWindowText(hwnd, buf, 512)
+        return buf.value
+    except Exception:
+        return ""
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SCREENSHOT ENGINE — saves to disk, NEVER base64 in tool responses
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -152,7 +179,7 @@ def _take_screenshot(label: str = "gui", hwnd: int = 0) -> str:
     Returns the absolute file path. Empty string on failure.
     Never returns base64 — callers reference the path only.
     """
-    if not _PYAUTOGUI:
+    if not _PYAUTOGUI or not is_desktop_accessible():
         return ""
     try:
         region = None
@@ -214,7 +241,7 @@ def _get_windows() -> list[dict]:
     def _cb(hwnd, _):
         if not win32gui.IsWindowVisible(hwnd):
             return
-        title = win32gui.GetWindowText(hwnd)
+        title = _get_window_title_safe(hwnd)
         if not title or len(title) < 2:
             return
         exe, pid = "unknown", 0
@@ -527,12 +554,15 @@ def get_desktop_state() -> str:
     - After completing a task to verify the result
     - When unsure what is currently on screen
     """
+    if _WIN32 and not is_desktop_accessible():
+        return "DESKTOP INACCESSIBLE: The Windows desktop is currently locked, asleep, or disconnected. GUI actions are suspended."
+
     def _run():
         windows = _get_windows()
         focused = ""
         if _WIN32:
             try:
-                focused = win32gui.GetWindowText(win32gui.GetForegroundWindow())
+                focused = _get_window_title_safe(win32gui.GetForegroundWindow())
             except Exception:
                 pass
 
@@ -716,6 +746,9 @@ def gui_step(
       from_x,from_y,to_x,to_y : drag coordinates
       file_path   : path for open_file action
     """
+    if _WIN32 and action != "wait" and not is_desktop_accessible():
+        return "DESKTOP INACCESSIBLE: The Windows desktop is currently locked, asleep, or disconnected. GUI actions are suspended."
+
     if not _PYAUTOGUI and action not in ("screenshot", "read_screen", "wait"):
         return "pyautogui not available — cannot perform GUI automation."
 
@@ -730,7 +763,7 @@ def gui_step(
             focused = ""
             if _WIN32:
                 try:
-                    focused = win32gui.GetWindowText(win32gui.GetForegroundWindow())
+                    focused = _get_window_title_safe(win32gui.GetForegroundWindow())
                 except Exception:
                     pass
             win_summary = ", ".join(
@@ -861,6 +894,9 @@ def read_active_document() -> str:
 
     Use when user says "what does my open file say" or "summarize my current doc".
     """
+    if _WIN32 and not is_desktop_accessible():
+        return "DESKTOP INACCESSIBLE: The Windows desktop is currently locked, asleep, or disconnected. GUI actions are suspended."
+
     def _run():
         # Try Word COM first (most accurate — gets full document text)
         try:
@@ -884,7 +920,7 @@ def read_active_document() -> str:
         focused = ""
         if _WIN32:
             try:
-                focused = win32gui.GetWindowText(win32gui.GetForegroundWindow()).lower()
+                focused = _get_window_title_safe(win32gui.GetForegroundWindow()).lower()
             except Exception:
                 pass
 

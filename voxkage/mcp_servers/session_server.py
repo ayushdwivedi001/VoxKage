@@ -114,8 +114,26 @@ def create_session_log(
         f.write(content)
 
     try:
-        from voxkage.mcp_servers.rag_server import index_document
-        index_document(file_path=filepath)
+        import subprocess as _sp
+        import sys as _sys_mod
+        py = _sys_mod.executable
+        cmd = [
+            py, "-c",
+            f"import sys; sys.path.insert(0, r'{_ROOT}'); "
+            f"from voxkage.mcp_servers.rag_server import index_document; "
+            f"index_document(r'{filepath}')"
+        ]
+        flags = 0
+        if _sys_mod.platform == "win32":
+            flags = 0x08000000 | 0x00000200 # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+        _sp.Popen(
+            cmd,
+            stdout=_sp.DEVNULL,
+            stderr=_sp.DEVNULL,
+            stdin=_sp.DEVNULL,
+            creationflags=flags,
+            close_fds=True
+        )
     except Exception:
         pass
 

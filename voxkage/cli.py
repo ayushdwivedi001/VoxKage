@@ -898,6 +898,7 @@ def _scaffold_agy_mcp_servers():
         ("voxkage-devserver", "mcp_servers/devserver_server.py"),
         ("voxkage-coding",    "mcp_servers/coding_server.py"),
         ("voxkage-session",   "mcp_servers/session_server.py"),
+        ("voxkage-websearch", "mcp_servers/websearch_server.py"),
     ]
 
     # Add configured plugin servers (telegram, github, spotify, gmail)
@@ -1382,6 +1383,54 @@ def _cleanup_global_gemini_md():
         pass
 
 
+# ── OpenCode AGENTS.md Helpers ─────────────────────────────────────────────────
+
+def _inject_agents_md():
+    """
+    Copy VoxKage's generated GEMINI.md into OpenCode's AGENTS.md.
+
+    OpenCode reads AGENTS.md from ~/.config/opencode/AGENTS.md as the
+    user-level system prompt. We back up any existing file so _cleanup
+    can restore it on exit.
+    """
+    import shutil as _shutil
+    from voxkage.paths import opencode_agents_md_path
+    src = gemini_md_path()          # ~/.voxkage/.gemini/GEMINI.md
+    dst = opencode_agents_md_path() # ~/.config/opencode/AGENTS.md
+    bak = dst.parent / "AGENTS.md.pre_voxkage"
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    if not src.exists():
+        return
+
+    # Back up the user's original AGENTS.md (if any and not already backed up)
+    if dst.exists() and not bak.exists():
+        _shutil.copy2(dst, bak)
+
+    _shutil.copy2(src, dst)
+
+
+def _cleanup_agents_md():
+    """
+    Restore ~/.config/opencode/AGENTS.md to whatever it was before VoxKage ran.
+    If the user had no AGENTS.md before, the file is removed.
+    """
+    from voxkage.paths import opencode_agents_md_path
+    dst = opencode_agents_md_path()
+    bak = dst.parent / "AGENTS.md.pre_voxkage"
+
+    try:
+        if bak.exists():
+            import shutil as _shutil
+            _shutil.copy2(bak, dst)
+            bak.unlink()
+        elif dst.exists():
+            dst.unlink()
+    except Exception:
+        pass
+
+
 # ── OpenCode Engine Helpers ────────────────────────────────────────────────────
 
 def _scaffold_opencode_mcp():
@@ -1423,6 +1472,7 @@ def _scaffold_opencode_mcp():
         ("voxkage-devserver", "mcp_servers/devserver_server.py"),
         ("voxkage-coding",    "mcp_servers/coding_server.py"),
         ("voxkage-session",   "mcp_servers/session_server.py"),
+        ("voxkage-websearch", "mcp_servers/websearch_server.py"),
     ]
 
     # Collect all configured plugin servers dynamically (same source as agy)
@@ -1438,16 +1488,12 @@ def _scaffold_opencode_mcp():
             "enabled": True,
         }
 
-    # Add every configured plugin server (Telegram, Gmail, GitHub, Spotify,
-    # Firebase, Netlify, Supabase, Chrome DevTools, ClickHouse, Sequential
-    # Thinking — whatever is registered at runtime).
     try:
         from voxkage.plugins.registry import get_configured_plugin_servers
         plugin_cfgs = get_configured_plugin_servers()
         for name, cfg in plugin_cfgs.items():
             server_url = cfg.get("serverUrl")
             if server_url:
-                # Remote MCP server — wrap with mcp-remote proxy
                 env_vars = cfg.get("env", {"VOXKAGE_HOME": vk_home})
                 all_servers[name] = {
                     "type": "local",
@@ -1456,70 +1502,145 @@ def _scaffold_opencode_mcp():
                     "enabled": True,
                 }
             else:
-                # Plugin entries use agy format — extract command/args for opencode
                 cmd_exe = cfg.get("command", py)
                 args = cfg.get("args", [])
                 env_vars = cfg.get("env", {"VOXKAGE_HOME": vk_home})
-                # Build opencode-style command array: [executable, *args]
-                full_cmd = [cmd_exe] + args if args else [cmd_exe]
                 all_servers[name] = {
                     "type": "local",
-                    "command": full_cmd,
+                    "command": [cmd_exe] + args,
                     "env": env_vars,
                     "enabled": True,
                 }
     except Exception:
         pass
 
-    # Read existing opencode.json (preserve all user keys)
     cfg_path = opencode_config_path()
-    existing: dict = {}
+    existing = {}
     if cfg_path.exists():
         try:
             existing = json.loads(cfg_path.read_text(encoding="utf-8"))
         except Exception:
             existing = {}
 
-    # Inject ONLY the "mcp" key — everything else is untouched
-    existing["mcp"] = all_servers
+    if "mcp" not in existing:
+        existing["mcp"] = {}
+    existing["mcp"].update(all_servers)
 
-    cfg_path.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+    try:
+        cfg_path.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
 
 
-def _inject_agents_md():
+def _scaffold_claude_mcp():
     """
-    Copy VoxKage's generated GEMINI.md into OpenCode's global AGENTS.md.
+    Write all VoxKage MCP servers into Claude's global config file ~/.claude.json.
 
-    OpenCode reads ~/.config/opencode/AGENTS.md as its global system
-    instruction file (equivalent role to GEMINI.md in the agy engine).
-    We back up any pre-existing AGENTS.md so _cleanup can restore it.
+    Claude Code reads MCP servers from ~/.claude.json under the "mcpServers" key.
+    We read the existing file (if any), inject all VoxKage core + plugin servers,
+    and write back, preserving every other key (custom settings, promptQueue, etc.).
+    """
+    py = python_exe()
+    pkg = str(package_dir())
+    vk_home = str(voxkage_dir())
+
+    core_servers = [
+        ("voxkage-cognitive-core", "mcp_servers/cognitive_core_server.py"),
+        ("voxkage-system",    "mcp_servers/system_server.py"),
+        ("voxkage-browser",   "mcp_servers/browser_server.py"),
+        ("voxkage-media",     "mcp_servers/media_server.py"),
+        ("voxkage-download",  "mcp_servers/download_server.py"),
+        ("voxkage-oscontrol", "mcp_servers/os_control_server.py"),
+        ("voxkage-file",      "mcp_servers/file_server.py"),
+        ("voxkage-fileops",   "mcp_servers/file_ops_server.py"),
+        ("voxkage-gui",       "mcp_servers/gui_server.py"),
+        ("voxkage-health",    "mcp_servers/health_server.py"),
+        ("voxkage-notify",    "mcp_servers/notify_server.py"),
+        ("voxkage-memory",    "mcp_servers/memory_server.py"),
+        ("voxkage-tasks",     "mcp_servers/task_server.py"),
+        ("voxkage-rag",       "mcp_servers/rag_server.py"),
+        ("voxkage-devserver", "mcp_servers/devserver_server.py"),
+        ("voxkage-coding",    "mcp_servers/coding_server.py"),
+        ("voxkage-session",   "mcp_servers/session_server.py"),
+        ("voxkage-websearch", "mcp_servers/websearch_server.py"),
+    ]
+
+    all_servers = {}
+    for server_name, script_rel in core_servers:
+        script_abs = os.path.join(pkg, script_rel)
+        if not os.path.exists(script_abs):
+            continue
+        all_servers[server_name] = {
+            "command": py,
+            "args": [script_abs],
+            "env": {"VOXKAGE_HOME": vk_home},
+        }
+
+    try:
+        from voxkage.plugins.registry import get_configured_plugin_servers
+        plugin_cfgs = get_configured_plugin_servers()
+        for name, cfg in plugin_cfgs.items():
+            server_url = cfg.get("serverUrl")
+            if server_url:
+                env_vars = cfg.get("env", {"VOXKAGE_HOME": vk_home})
+                all_servers[name] = {
+                    "command": "npx",
+                    "args": ["-y", "mcp-remote", server_url],
+                    "env": env_vars,
+                }
+            else:
+                cmd_exe = cfg.get("command", py)
+                args = cfg.get("args", [])
+                env_vars = cfg.get("env", {"VOXKAGE_HOME": vk_home})
+                all_servers[name] = {
+                    "command": cmd_exe,
+                    "args": args,
+                    "env": env_vars,
+                }
+    except Exception:
+        pass
+
+    claude_json_path = Path.home() / ".claude.json"
+    existing = {}
+    if claude_json_path.exists():
+        try:
+            existing = json.loads(claude_json_path.read_text(encoding="utf-8"))
+        except Exception:
+            existing = {}
+
+    if "mcpServers" not in existing:
+        existing["mcpServers"] = {}
+    existing["mcpServers"].update(all_servers)
+
+    claude_json_path.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _inject_claude_md():
+    """
+    Copy VoxKage's generated GEMINI.md into the active folder's CLAUDE.md.
+    Claude Code reads CLAUDE.md in the current working directory.
     """
     import shutil as _shutil
-    src = gemini_md_path()          # ~/.voxkage/.gemini/GEMINI.md (already rendered)
-    dst = opencode_agents_md_path() # ~/.config/opencode/AGENTS.md
-    bak = dst.parent / "AGENTS.md.pre_voxkage"
-
-    dst.parent.mkdir(parents=True, exist_ok=True)
+    src = gemini_md_path()          # ~/.voxkage/.gemini/GEMINI.md
+    dst = Path.cwd() / "CLAUDE.md"
+    bak = Path.cwd() / "CLAUDE.md.pre_voxkage"
 
     if not src.exists():
         return
 
-    # Back up existing AGENTS.md once (don't overwrite an existing backup)
+    # Back up existing CLAUDE.md once
     if dst.exists() and not bak.exists():
         _shutil.copy2(dst, bak)
 
     _shutil.copy2(src, dst)
 
 
-def _cleanup_agents_md():
+def _cleanup_claude_md():
     """
-    Restore ~/.config/opencode/AGENTS.md to its pre-VoxKage state on exit.
-    If the user had no AGENTS.md before, the file is removed.
-    NOTE: opencode.json MCP entries are intentionally NOT cleaned — they should
-    persist so /mcp always works even when OpenCode is launched independently.
+    Restore CLAUDE.md in the active folder on exit.
     """
-    dst = opencode_agents_md_path()
-    bak = dst.parent / "AGENTS.md.pre_voxkage"
+    dst = Path.cwd() / "CLAUDE.md"
+    bak = Path.cwd() / "CLAUDE.md.pre_voxkage"
 
     try:
         if bak.exists():
@@ -1537,7 +1658,7 @@ def cmd_launch(extra_args: list[str] | None = None):
     if is_windows():
         os.system("title VoxKage")
     else:
-        os.system("echo -e \"\\033]0;VoxKage\\a\"")
+        os.system("echo -e \"\033]0;VoxKage\a\"")
 
     if not config_path().exists():
         print(f"  {_c(56,189,248)}First run detected — running setup...{RST}")
@@ -1546,9 +1667,11 @@ def cmd_launch(extra_args: list[str] | None = None):
 
     # ── Read engine preference ─────────────────────────────────────────────────
     _engine = "antigravity"
+    _claude_model = "deepseek-v4-flash-free"
     try:
         _cfg_data = json.loads(config_path().read_text(encoding="utf-8")) if config_path().exists() else {}
         _engine = _cfg_data.get("interface_engine", "antigravity")
+        _claude_model = _cfg_data.get("claude_model", "deepseek-v4-flash-free")
     except Exception:
         pass
 
@@ -1575,6 +1698,49 @@ def cmd_launch(extra_args: list[str] | None = None):
             f"     Then relaunch: {_c(56,189,248)}voxkage{RST}"
         )
         _cleanup_fn = _cleanup_agents_md
+
+    elif _engine == "claude":
+        # ── Claude Code engine path ────────────────────────────────────────────
+        try:
+            # First-run setup check
+            opencode_starter_config = Path.home() / ".opencode-starter" / "config.json"
+            if not opencode_starter_config.exists():
+                print(f"  {_c(56,189,248)}opencode-starter setup not found. Running setup wizard...{RST}")
+                import shutil as _shutil
+                setup_exe = _shutil.which("opencode-starter") or _shutil.which("opencode-starter.cmd") or "opencode-starter"
+                subprocess.run([setup_exe, "claude"])
+
+            # Scaffold MCP servers into ~/.claude.json
+            _scaffold_claude_mcp()
+        except Exception:
+            pass
+
+        # Regenerate soul memory and inject as CLAUDE.md in CWD
+        try:
+            _generate_gemini_md()
+            _inject_claude_md()
+        except Exception:
+            pass
+
+        # Fallback dynamic model lookup
+        try:
+            if not _claude_model:
+                opencode_starter_config = Path.home() / ".opencode-starter" / "config.json"
+                if opencode_starter_config.exists():
+                    os_config = json.loads(opencode_starter_config.read_text(encoding="utf-8"))
+                    _claude_model = os_config.get("lastModel", "deepseek-v4-flash-free")
+        except Exception:
+            pass
+
+        import shutil as _shutil
+        _cli_exe = _shutil.which("opencode-starter") or _shutil.which("opencode-starter.cmd") or "opencode-starter"
+        _not_found_msg = (
+            f"opencode-starter not found.\n"
+            f"     Install with: {_c(56,189,248)}npm install -g opencode-starter{RST}\n"
+            f"     Then relaunch: {_c(56,189,248)}voxkage{RST}"
+        )
+        _cleanup_fn = _cleanup_claude_md
+        extra_args = ["claude"] + (extra_args or [])
 
     else:
         # ── Antigravity engine path (default — existing behaviour unchanged) ───
@@ -1610,7 +1776,8 @@ def cmd_launch(extra_args: list[str] | None = None):
     else:
         os.system("clear")
 
-    print_banner()
+    if _engine != "claude":
+        print_banner()
 
     cmd = [_cli_exe]
     if extra_args:
@@ -1618,6 +1785,8 @@ def cmd_launch(extra_args: list[str] | None = None):
 
     env = os.environ.copy()
     env["VOXKAGE_ACTIVE"] = "1"
+    if _engine == "claude":
+        env["VOXKAGE_CLAUDE_MODEL"] = _claude_model
 
     try:
         proc = subprocess.run(cmd, cwd=os.getcwd(), env=env)

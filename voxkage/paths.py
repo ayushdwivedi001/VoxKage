@@ -269,3 +269,14 @@ def opencode_agents_md_path() -> Path:
     return home_dir() / ".config" / "opencode" / "AGENTS.md"
 
 
+def find_node_exe() -> str:
+    """Find the node executable in PATH."""
+    return shutil.which("node") or shutil.which("node.exe") or "node"
+
+
+def claude_launcher_template_path() -> Path:
+    """Path to the Claude Code launcher script."""
+    return package_dir() / "templates" / "claude_launcher.js"
+
+
+

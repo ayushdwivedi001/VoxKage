@@ -488,19 +488,43 @@ async def run_shell_command(command: str) -> str:
             for b in BLOCKED:
                 if b in cmd_lower:
                     return f"BLOCKED: '{b}' is a dangerous command."
+        proc = None
         try:
             pwsh = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
-            r = _sp.run([pwsh, "-NoProfile", "-Command", command],
-                       shell=False, capture_output=True, text=True, timeout=30,
-                       cwd=os.path.expanduser("~"), env=os.environ.copy())
-            out = r.stdout.strip()
-            err = r.stderr.strip()
-            if r.returncode == 0:
+            proc = _sp.Popen(
+                [pwsh, "-NoProfile", "-Command", command],
+                shell=False,
+                stdout=_sp.PIPE,
+                stderr=_sp.PIPE,
+                stdin=_sp.DEVNULL,
+                text=True,
+                cwd=os.path.expanduser("~"),
+                env=os.environ.copy()
+            )
+            out, err = proc.communicate(timeout=30)
+            out = out.strip()
+            err = err.strip()
+            if proc.returncode == 0:
                 return out or "(Command succeeded with no output)"
-            return f"Exit {r.returncode}\n{out}\n{err}"
+            return f"Exit {proc.returncode}\n{out}\n{err}"
         except _sp.TimeoutExpired:
+            if proc:
+                try:
+                    _sp.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                            stdout=_sp.DEVNULL, stderr=_sp.DEVNULL, timeout=5)
+                except Exception:
+                    pass
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
             return "Command timed out after 30 seconds."
         except Exception as e:
+            if proc:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
             return f"Shell command failed: {e}"
     return await asyncio.to_thread(_run)
 

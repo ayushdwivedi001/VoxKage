@@ -553,9 +553,24 @@ def mute_microphone(mute: bool):
 
 def system_uptime():
     import subprocess
+    import datetime
+    # Try psutil fallback first or on error/timeout, since it is near-instantaneous and extremely reliable
+    try:
+        import psutil
+        boot_timestamp = psutil.boot_time()
+        boot_time = datetime.datetime.fromtimestamp(boot_timestamp)
+        delta = datetime.datetime.now() - boot_time
+        days = delta.days
+        hours, remainder = divmod(delta.seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"System Uptime:\nDays    : {days}\nHours   : {hours}\nMinutes : {minutes}\nSeconds : {seconds}"
+    except Exception:
+        pass
+
+    # Fallback to PowerShell if psutil failed
     try:
         script = "((get-date) - (gcim Win32_OperatingSystem).LastBootUpTime) | Select-Object Days, Hours, Minutes, Seconds | Out-String"
-        res = subprocess.run(["powershell", "-Command", script], capture_output=True, text=True)
+        res = subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True, text=True, timeout=5)
         return f"System Uptime:\n{res.stdout.strip()}"
     except Exception as e:
         return f"Failed to get uptime: {e}"
@@ -1017,23 +1032,44 @@ def get_disk_usage() -> str:
 
 
 def get_largest_files(directory: str, count: int = 10) -> str:
-    """Find the top N largest files in a directory tree."""
+    """Find the top N largest files in a directory tree with safety limits."""
     directory = os.path.expanduser(directory)
     if not os.path.isdir(directory):
         return f"Directory not found: {directory}"
+    
+    directory = os.path.abspath(directory)
+    base_depth = directory.rstrip(os.sep).count(os.sep)
+    max_depth = 3 # default safety limit to prevent full drive scans
+    
+    EXCLUDE_DIRS = {
+        "$recycle.bin", "system volume information", "onedrive", "dropbox",
+        "appdata", "node_modules", ".git", ".voxkage", "venv", ".venv",
+        "__pycache__", "dist", "build", "local settings", "application data"
+    }
+
     files = []
     try:
-        for root, _, fnames in os.walk(directory):
+        for root, dirs, fnames in os.walk(directory, topdown=True):
+            cur_depth = root.rstrip(os.sep).count(os.sep) - base_depth
+            
+            # Prune directory search
+            dirs[:] = [d for d in dirs if d.lower() not in EXCLUDE_DIRS and not d.startswith(".")]
+            if cur_depth >= max_depth:
+                dirs[:] = []
+                
             for fn in fnames:
                 fp = os.path.join(root, fn)
                 try:
+                    if os.path.islink(fp):
+                        continue
                     files.append((os.path.getsize(fp), fp))
                 except Exception:
                     pass
     except Exception as e:
         return f"Scan failed: {e}"
+        
     files.sort(reverse=True)
-    lines = [f"Top {count} largest files in {directory}:"]
+    lines = [f"Top {count} largest files in {directory} (max depth: {max_depth}):"]
     for sz, fp in files[:count]:
         sz_s = f"{sz//1024//1024}MB" if sz > 1024*1024 else f"{sz//1024}KB"
         lines.append(f"  {sz_s:>8}  {fp}")
@@ -1041,19 +1077,42 @@ def get_largest_files(directory: str, count: int = 10) -> str:
 
 
 def get_folder_size(path: str) -> str:
-    """Recursively calculate total size of a folder."""
+    """Recursively calculate total size of a folder with safety exclusions."""
     path = os.path.expanduser(path)
     if not os.path.isdir(path):
         return f"Folder not found: {path}"
+        
+    path = os.path.abspath(path)
+    base_depth = path.rstrip(os.sep).count(os.sep)
+    max_depth = 3
+    
+    EXCLUDE_DIRS = {
+        "$recycle.bin", "system volume information", "onedrive", "dropbox",
+        "appdata", "node_modules", ".git", ".voxkage", "venv", ".venv",
+        "__pycache__", "dist", "build", "local settings", "application data"
+    }
+
     total = 0
     count = 0
-    for root, _, files in os.walk(path):
-        for f in files:
-            try:
-                total += os.path.getsize(os.path.join(root, f))
-                count += 1
-            except Exception:
-                pass
+    try:
+        for root, dirs, files in os.walk(path, topdown=True):
+            cur_depth = root.rstrip(os.sep).count(os.sep) - base_depth
+            dirs[:] = [d for d in dirs if d.lower() not in EXCLUDE_DIRS and not d.startswith(".")]
+            if cur_depth >= max_depth:
+                dirs[:] = []
+                
+            for f in files:
+                fp = os.path.join(root, f)
+                try:
+                    if os.path.islink(fp):
+                        continue
+                    total += os.path.getsize(fp)
+                    count += 1
+                except Exception:
+                    pass
+    except Exception:
+        pass
+        
     gb = total / 1024 / 1024 / 1024
     mb = total / 1024 / 1024
     sz_s = f"{gb:.2f} GB" if gb >= 1 else f"{mb:.1f} MB"
