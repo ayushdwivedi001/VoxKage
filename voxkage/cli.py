@@ -1032,6 +1032,7 @@ def _generate_settings_json():
         ("voxkage-devserver", "mcp_servers/devserver_server.py"),
         ("voxkage-coding",    "mcp_servers/coding_server.py"),
         ("voxkage-session",   "mcp_servers/session_server.py"),
+        ("voxkage-websearch", "mcp_servers/websearch_server.py"),
     ]
 
     servers = {}
@@ -1980,9 +1981,51 @@ def _ensure_tray_running():
 
 
 
+def ensure_core_dependencies():
+    """Verify that core packages are installed, and auto-install/upgrade them if missing or outdated."""
+    required = {
+        "ddgs": "ddgs>=9.14.4",
+        "trafilatura": "trafilatura>=2.0.0",
+        "aiohttp": "aiohttp",
+    }
+    missing = []
+    
+    # 1. Check for ddgs or old duckduckgo_search
+    try:
+        from ddgs import DDGS
+    except ImportError:
+        try:
+            import duckduckgo_search
+            ver = getattr(duckduckgo_search, "__version__", "0.0.0")
+            if ver.startswith("8."):
+                missing.append("ddgs>=9.14.4")
+        except ImportError:
+            missing.append("ddgs>=9.14.4")
+
+    # 2. Check for other packages
+    for mod in ("trafilatura", "aiohttp"):
+        try:
+            __import__(mod)
+        except ImportError:
+            missing.append(required[mod])
+
+    if missing:
+        print(f"\n  [VoxKage] Missing or outdated core dependencies: {', '.join(missing)}")
+        print(f"  Attempting automatic installation/upgrade into environment...")
+        try:
+            import subprocess
+            import sys
+            subprocess.run([sys.executable, "-m", "pip", "install"] + missing, check=True)
+            print(f"  [VoxKage] Core dependencies successfully installed!\n")
+        except Exception as e:
+            print(f"  [VoxKage ERROR] Automatic installation failed: {e}")
+            print(f"  Please run: pipx inject voxkage {' '.join(missing)}\n")
+
+
 # ── Main Entry Point ─────────────────────────────────────────────────────────
 
 def main():
+    ensure_core_dependencies()
     if not is_supported_platform():
         print("\n  VoxKage currently supports Windows and macOS only.\n")
         sys.exit(1)

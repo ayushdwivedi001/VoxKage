@@ -104,7 +104,7 @@ Use these facts to guide your decisions and personalize your responses immediate
   - Common Weaknesses: protocol_violation, None — 8/8 checklist passed after one refine iteration (added loading overlay)
 - **BACKEND**: 100.0% success rate (5/5 tasks)
   - Common Weaknesses: Notebook cell outputs not persisted via API on initial attempt, guard window false positives, session-global sub-task counter
-- **RESEARCH**: 100.0% success rate (25/25 tasks)
+- **RESEARCH**: 100.0% success rate (26/26 tasks)
   - Common Weaknesses: none, None, None — research task completed successfully
 - **SYSTEM**: 100.0% success rate (3/3 tasks)
 - **CODING**: 100.0% success rate (8/8 tasks)
@@ -114,10 +114,10 @@ Use these facts to guide your decisions and personalize your responses immediate
 
 **Recent Tasks Summary**:
 - [2026-06-16] CODING: SUCCESS (Confidence: 0.8)
-- [2026-06-16] CODING: SUCCESS (Confidence: 0.8)
 - [2026-06-16] FRONTEND: SUCCESS (Confidence: 0.9)
 - [2026-06-16] CODING: SUCCESS (Confidence: 0.8)
 - [2026-06-16] FRONTEND: SUCCESS (Confidence: 0.9)
+- [2026-06-16] RESEARCH: SUCCESS (Confidence: 0.95)
 
 ---
 
