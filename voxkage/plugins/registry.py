@@ -130,7 +130,7 @@ def _load_all_plugins():
             "websearch", "Web Search",
             "Headless, fast DuckDuckGo search and trafilatura article markdown fetching.",
             "voxkage-websearch", "mcp_servers/websearch_server.py",
-            ["ddgs", "trafilatura", "aiohttp"], ["ddgs>=9.14.4", "trafilatura>=2.0.0", "aiohttp"]
+            ["ddgs", "trafilatura", "lxml_html_clean", "aiohttp"], ["ddgs>=9.14.4", "trafilatura>=2.0.0", "lxml_html_clean>=0.1.0", "aiohttp"]
         ),
         CoreMcpServerPlugin(
             "browser", "Browser Automation",
