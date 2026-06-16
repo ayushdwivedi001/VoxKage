@@ -538,11 +538,17 @@ def cmd_status():
 
     builtin_names = {
         "telegram", "gmail", "spotify", "github", "firebase",
-        "netlify", "supabase", "clickhouse", "sequential-thinking"
+        "netlify", "supabase", "clickhouse", "sequential-thinking", "colab"
+    }
+    core_names = {
+        "cognitive-core", "websearch", "browser", "rag", "system", "gui",
+        "health", "notify", "memory", "tasks", "devserver", "coding",
+        "session", "download", "file", "fileops", "oscontrol"
     }
 
     builtins = [p for p in plugins if p.name in builtin_names]
-    community = [p for p in plugins if p.name not in builtin_names]
+    cores = [p for p in plugins if p.name in core_names]
+    community = [p for p in plugins if p.name not in builtin_names and p.name not in core_names]
 
     for p in builtins:
         configured = p.is_configured()
@@ -550,6 +556,14 @@ def cmd_status():
             print(f"    {_ok}  {p.display_name:24s} Connected")
         else:
             print(f"    {_no}  {p.display_name:24s} voxkage plugins add {p.name}")
+
+    # Core MCP Servers
+    print()
+    print(f"  CORE MCP SERVERS")
+    for p in cores:
+        status = "Active" if p.is_configured() else f"voxkage plugins add {p.name}"
+        marker = _ok if p.is_configured() else _no
+        print(f"    {marker}  {p.display_name:24s} {status}")
 
     # Community Plugins
     print()
@@ -1981,51 +1995,9 @@ def _ensure_tray_running():
 
 
 
-def ensure_core_dependencies():
-    """Verify that core packages are installed, and auto-install/upgrade them if missing or outdated."""
-    required = {
-        "ddgs": "ddgs>=9.14.4",
-        "trafilatura": "trafilatura>=2.0.0",
-        "aiohttp": "aiohttp",
-    }
-    missing = []
-    
-    # 1. Check for ddgs or old duckduckgo_search
-    try:
-        from ddgs import DDGS
-    except ImportError:
-        try:
-            import duckduckgo_search
-            ver = getattr(duckduckgo_search, "__version__", "0.0.0")
-            if ver.startswith("8."):
-                missing.append("ddgs>=9.14.4")
-        except ImportError:
-            missing.append("ddgs>=9.14.4")
-
-    # 2. Check for other packages
-    for mod in ("trafilatura", "aiohttp"):
-        try:
-            __import__(mod)
-        except ImportError:
-            missing.append(required[mod])
-
-    if missing:
-        print(f"\n  [VoxKage] Missing or outdated core dependencies: {', '.join(missing)}")
-        print(f"  Attempting automatic installation/upgrade into environment...")
-        try:
-            import subprocess
-            import sys
-            subprocess.run([sys.executable, "-m", "pip", "install"] + missing, check=True)
-            print(f"  [VoxKage] Core dependencies successfully installed!\n")
-        except Exception as e:
-            print(f"  [VoxKage ERROR] Automatic installation failed: {e}")
-            print(f"  Please run: pipx inject voxkage {' '.join(missing)}\n")
-
-
 # ── Main Entry Point ─────────────────────────────────────────────────────────
 
 def main():
-    ensure_core_dependencies()
     if not is_supported_platform():
         print("\n  VoxKage currently supports Windows and macOS only.\n")
         sys.exit(1)
