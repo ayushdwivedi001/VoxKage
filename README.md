@@ -6,15 +6,15 @@
 
   <br>
   <h1>VoxKage</h1>
-  <h3><i>Dynamic OS-Level AI Coordinator & Dual-Engine Router</i></h3>
-  <p><b>Orchestrating the Antigravity CLI (<code>agy</code>) and OpenCode CLI to deploy an untethered, system-wide agentic capability core.</b></p>
+  <h3><i>Dynamic OS-Level AI Coordinator & Tri-Engine Router</i></h3>
+  <p><b>Orchestrating the Antigravity CLI (<code>agy</code>), OpenCode CLI, and Claude Code to deploy an untethered, system-wide agentic capability core.</b></p>
   <br>
 
   <p align="center">
     <a href="https://pypi.org/project/voxkage/" target="_blank">
       <img src="https://img.shields.io/pypi/v/voxkage?style=for-the-badge&logo=pypi&logoColor=white&label=PyPI&color=0ea5e9&cacheSeconds=3600" alt="PyPI Version">
     </a>
-    <img src="https://img.shields.io/badge/Orchestrator-Dual_Engine_Core-06b6d4?style=for-the-badge&logo=control-panel&logoColor=white" alt="Dual Engine">
+    <img src="https://img.shields.io/badge/Orchestrator-Tri_Engine_Core-06b6d4?style=for-the-badge&logo=control-panel&logoColor=white" alt="Tri Engine">
     <img src="https://img.shields.io/badge/Platform-Windows_|_macOS-3b82f6?style=for-the-badge&logo=windows&logoColor=white" alt="Platform">
     <img src="https://img.shields.io/badge/License-Apache_2.0-green?style=for-the-badge" alt="License">
   </p>
@@ -30,13 +30,14 @@
   <br>
 </div>
 
-**VoxKage** is an open-source, system-wide local AI coordinator designed to operate directly on Windows and macOS. It functions as an orchestration layer and local daemon that maps, registers, and scaffolds a unified network of built-in Model Context Protocol (MCP) servers directly into your active front-end CLI. By acting as the central bridging hub, VoxKage routes resources, coordinates persistent tools, and manages background daemons seamlessly through the **Antigravity CLI (<code>agy</code>)** or the **OpenCode CLI**.
+**VoxKage** is an open-source, system-wide local AI coordinator designed to operate directly on Windows and macOS. It functions as an orchestration layer and local daemon that maps, registers, and scaffolds a unified network of built-in Model Context Protocol (MCP) servers directly into your active front-end CLI. By acting as the central bridging hub, VoxKage routes resources, coordinates persistent tools, and manages background daemons seamlessly through the **Antigravity CLI (<code>agy</code>)**, the **OpenCode CLI**, or **Claude Code**.
 
 Unlike traditional API wrappers, VoxKage does not execute its own standalone LLM reasoning loop. Instead, it acts as the orchestrating launcher—scaffolding directories, injecting custom instructions, establishing background named-pipe IPC servers, and routing your prompts directly to your primary developer shells.
 
 <p align="center">
   [<a href="#architecture"><strong>Architecture</strong></a>] •
   [<a href="#control-center"><strong>Control Center</strong></a>] •
+  [<a href="#mcp-servers"><strong>MCP Servers Suite</strong></a>] •
   [<a href="#shield"><strong>Shield Security</strong></a>] •
   [<a href="#previews"><strong>Interactive Previews</strong></a>] •
   [<a href="#installation"><strong>Installation Guide</strong></a>] •
@@ -66,39 +67,46 @@ graph TD
     subgraph "Context Routing & Scaffolding"
         B --> |interface_engine: 'antigravity'| F[Antigravity CLI Core]
         B --> |interface_engine: 'opencode'| G[OpenCode CLI Core]
+        B --> |interface_engine: 'claude'| H[Claude Code CLI Core]
         
-        F <--> |Auto-Inject GEMINI.md| H[~/.gemini/config/mcp_config.json]
-        G <--> |Auto-Inject AGENTS.md| I[~/.config/opencode/opencode.json]
+        F <--> |Auto-Inject GEMINI.md| I[~/.gemini/config/mcp_config.json]
+        G <--> |Auto-Inject AGENTS.md| J[~/.config/opencode/opencode.json]
+        H <--> |Auto-Inject CLAUDE.md| K[~/.opencode-starter/config.json]
     end
 
     subgraph "Shared Consciousness (MCP Web)"
-        H <--> J[session_server.py]
-        I <--> J
-        J <--> K[(Unified Vector RAG & Audit Logs)]
+        I <--> L[session_server.py]
+        J <--> L
+        K <--> L
+        L <--> M[(Unified Vector RAG & Audit Logs)]
     end
 
     subgraph "Modular MCP Server Suite"
-        H <--> L[Playwright Web Browser / OSControl]
-        I <--> L
+        I <--> N[Playwright Browser / OSControl / WebSearch / Cognitive Core]
+        J <--> N
+        K <--> N
     end
 
     style A fill:#06b6d4,stroke:#fff,stroke-width:2px,color:#fff
     style B fill:#8b5cf6,stroke:#fff,stroke-width:2px,color:#fff
-    style J fill:#10b981,stroke:#fff,stroke-width:2px,color:#fff
+    style L fill:#10b981,stroke:#fff,stroke-width:2px,color:#fff
     style F fill:#3b82f6,stroke:#fff,stroke-width:2px,color:#fff
     style G fill:#0ea5e9,stroke:#fff,stroke-width:2px,color:#fff
+    style H fill:#e879f9,stroke:#fff,stroke-width:2px,color:#fff
 ```
 
-### Dual-Engine Routing Modes & Model Portfolios
-VoxKage seamlessly coordinates your session across two distinct terminal environments, enabling you to exploit the strongest model offerings of each client:
+### Tri-Engine Routing Modes & Model Portfolios
+VoxKage coordinates your session across three terminal environments, enabling you to exploit the strongest capabilities of each client:
 
 *   **Antigravity CLI (<code>agy</code>)**: Pre-scaffolds and registers local sub-servers directly into the central `mcp_config.json` and injects custom instruction sets to `~/.gemini/GEMINI.md`.
     *   *Core Developer Models*: Leverages top-performing models including **Gemini 3.5 Flash** (high-speed commands), **Gemini 3.1 Pro** (complex operations), **Claude 4.6 Sonnet** (advanced logic), and **Claude 4.6 Opus** (high-context reasoning).
 *   **OpenCode CLI**: Registers MCP tools directly to `opencode.json` and maps instructions to `AGENTS.md` inside `~/.config/opencode/`.
     *   *Core Developer Models*: Configured for OpenCode's free high-efficiency **OpenCode Zen** portfolio, including **DeepSeek v4 Flash**.
+*   **Claude Code CLI**: Integrates local MCP endpoints directly with Anthropic's Claude Code launcher environment, pre-injecting safety overrides and system mappings into `CLAUDE.md`.
+    *   *Core Developer Models*: Uses OpenCode Zen free-tier API integrations to run Claude Code with robust local tool execution.
 
 ### Shared Consciousness & Session Syncing
-At the heart of the dual-engine architecture is `session_server.py`. Whether you are typing in the Antigravity shell or working through OpenCode, the session manager intercepts, structures, and logs active history and workspace contexts to a unified memory repository. Both engines draw from the same vector RAG database and problem/solution registries, ensuring that context established in an `agy` session is instantly recalled when you pivot to `opencode`.
+At the heart of the engine architecture is `session_server.py`. Whether you are typing in the Antigravity shell, OpenCode, or Claude Code, the session manager intercepts, structures, and logs active history and workspace contexts to a unified memory repository. All engines draw from the same vector RAG database and problem/solution registries, ensuring that context established in one CLI session is instantly recalled when you pivot to another.
 
 ---
 
@@ -111,14 +119,39 @@ VoxKage includes a canvas-rendered native **Control Center** that resides in you
   <img src="assets/Control_Center_Showcase.png" alt="VoxKage Control Center Dashboard" width="380" style="border-radius: 10px; box-shadow: 0 4px 20px rgba(139,92,246,0.3); margin: 15px 0;">
 </div>
 
-*   **Interactive Engine Selector**: Switch your active CLI environment with a single click. VoxKage dynamically routes the execution paths for subsequent sessions.
-*   **Gated settings Sync**: Autodetects configuration directories. Prevents polluting folders with irrelevant settings (e.g. gates write cycles to protect `agy`'s configuration when `opencode` is active, and vice versa).
+*   **Interactive Engine Selector**: Switch your active CLI environment (Antigravity, OpenCode, or Claude Code) with a single click. VoxKage dynamically routes execution paths and configures local launcher templates.
+*   **Gated Settings Sync**: Autodetects configuration directories. Prevents polluting folders with irrelevant settings (e.g. gates write cycles to protect `agy`'s configuration when `opencode` is active, and vice versa).
 *   **Canvas-Rendered Smooth Toggles**:
     *   *Autostart on Login*: Registers VoxKage to launch on startup (`autostart.py`).
     *   *Safe Mode Shield Protocol*: Restricts destructive shell and file system interactions.
     *   *Telegram Watcher Daemon*: Persistently listens for remote directives (`telegram_watcher.py`).
     *   *Sandboxed Shell Tasks*: Restricts terminal operations to safe user environments.
     *   *Audio/Toast Notifications*: Emits auditory and system notifications (`notify_server.py`) upon task milestones.
+
+---
+
+<a name="mcp-servers"></a>
+# ⚙️ Modular MCP Server Suite
+
+VoxKage ships with a suite of custom Model Context Protocol (MCP) servers engineered for local OS control and speed:
+
+### 1. Cognitive Core Server (`cognitive_core_server.py`)
+Provides self-correction, self-critique, and self-evolution gates. Under RULE ZERO, it parses tasks, sets domain-specific checklists, runs risk-prevention (`pre_mortem`), checks progress (`checkpoint`), conducts post-execution validation (`reflect` / `verify`), and updates behavioral memories (`learn`).
+
+### 2. Headless WebSearch Server (`websearch_server.py`)
+A high-performance, region-unlocked search utility using `ddgs` (DuckDuckGo Search) and article text extraction via `trafilatura` (HTML-to-markdown). Bypasses the overhead of Playwright browsers for simple queries. Supports:
+*   `web_search` & `web_fetch` (Headless search/read)
+*   `web_search_parallel` & `web_fetch_parallel` (Concurrent fetches)
+*   `web_search_deep` (Auto-fetch top search results concurrently)
+
+### 3. Optimized RAG Indexer (`rag_server.py`)
+A local semantic memory database using ChromaDB. Safety-hardened to prevent SQLite write-locks and sentence-transformer hangs:
+*   *Size Guard*: Skips text/code files >500KB and rich documents >5MB.
+*   *Chunk Capping*: Caps files to a maximum of 250 chunks.
+*   *Exclusion Filters*: Automatically ignores dependency lockfiles (`package-lock.json`, `yarn.lock`, etc.) and directories like `vendor`, `.git`, `venv`, and build caches.
+
+### 4. Google Colab Workspace (`ColabPlugin`)
+An integration server allowing developers to offload Python processing, dataset cleaning, and machine learning runs directly onto cloud kernels (`create_colab_notebook`, `run_code_cell`, `get_notebook_content`).
 
 ---
 
@@ -147,7 +180,7 @@ Here is what you will see when running VoxKage CLI commands:
 Interactive startup configuration wizard and dependency checker:
 ```text
   ┌────────────────────────────────────────────────────────────┐
-  │  ✦  VoxKage v1.1.7 — First-Time Setup                      │
+  │  ✦  VoxKage v1.1.9 — First-Time Setup                      │
   │  ────────────────────────────────────────────────────────  │
   │  VoxKage supercharges your CLI into a living OS AI.        │
   │  This takes about 2 minutes.                               │
@@ -176,11 +209,11 @@ Interactive startup configuration wizard and dependency checker:
 ### `voxkage status`
 Real-time dashboard of system health, active environment path, capability packs, and connectors:
 ```text
-  ✦  VoxKage v1.1.7 — System Status
+  ✦  VoxKage v1.1.9 — System Status
   ──────────────────────────────────────────────────
 
   CORE
-    ✓  Interface Engine     Antigravity CLI (agy) — v1.0.4
+    ✓  Interface Engine     Claude Code CLI — v0.2.9
     ✓  Brain directory      C:\Users\AYUSH\.voxkage
 
   CAPABILITY PACKS
@@ -221,9 +254,9 @@ List of registered services and credentials status:
 
 ### Prerequisites
 *   **Python 3.10+**
-*   **Node.js & npm** (Required to run both OpenCode and standard global web modules)
+*   **Node.js & npm** (Required to run OpenCode, Claude Code, and global web modules)
 *   **pipx** (Global CLI isolator)
-*   **Antigravity CLI** OR **OpenCode CLI**
+*   **Antigravity CLI** OR **OpenCode CLI** OR **Claude Code**
 
 ---
 
@@ -272,7 +305,7 @@ voxkage install <pack>
     ```powershell
     voxkage
     ```
-    *Launches your configured shell client (agy or opencode) pre-populated with VoxKage MCP endpoints and custom global systems.*
+    *Launches your configured shell client (agy, opencode, or claude) pre-populated with VoxKage MCP endpoints and custom global systems.*
 
 *   **Background System Tray Mode**:
     ```powershell
@@ -341,13 +374,15 @@ VoxKage settings reside at `~/.voxkage/config.json`:
 {
   "interface_engine": "antigravity",
   "autostart": false,
-  "safe_mode": true
+  "safe_mode": true,
+  "claude_model": "deepseek-v4-flash-free"
 }
 ```
 
-*   `interface_engine`: Selects your active client shell. Options: `"antigravity"` or `"opencode"`.
+*   `interface_engine`: Selects your active client shell. Options: `"antigravity"`, `"opencode"`, or `"claude"`.
 *   `autostart`: Launches the system tray Control Center automatically when the computer boots.
 *   `safe_mode`: Restricts or enables Layer 2 confirmation prompt gates.
+*   `claude_model`: Defines the default model selected for Claude Code runs.
 
 ---
 
