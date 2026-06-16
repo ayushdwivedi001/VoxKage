@@ -43,13 +43,10 @@ Use these facts to guide your decisions and personalize your responses immediate
 - **Prefers (honorific)**: sir
 - **Prefers (sir_protocol)**: Always address user as Sir.
 - **Prefers (telegram_handling)**: Strict Telegram-Only Reply: If [TELEGRAM MESSAGE] is seen, reply via telegram_send_message/file and suppress all terminal output.
-- **Prefers (web_browsing_preference)**: Use voxkage-browser (Chromium) MCP tools for interactive/visual queries, clicking, and inspections. Use local/native WebSearch only for simple one-shot or general knowledge queries.
 - **Prefers (movie_streaming_app)**: Stremio
 - **Prefers (favorite_movie)**: Project Hail Mary 2026 - best sci-fi/space movie, loves the accurate science and realistic alien communication approach
 - **Prefers (anime_favorites)**: Favorite anime: Attack on Titan, Death Note, Naruto, all Ghibli movies. Favorite season-based: Monster, Attack on Titan, The Promised Neverland, Another (favorite horror). Also enjoyed The Elusive Samurai.
 - **Prefers (infosys_assessment_31st_may_2026)**: Infosys Off-Campus Virtual Assessment for Specialist Programmer/Digital Specialist Engineer on Sunday, 31st May 2026, Slot 1, 10:00 AM - 1:00 PM. Second chance after Round 1 issues on 17th May.
-- **Prefers (web_search_fallback_strategy)**: Do not rely solely on voxkage-browser MCP for web searches. Always use websearch and webfetch as primary or fallback tools for the most updated and accurate results. Combine all three tools when needed.
-- **Prefers (web_workflow_rule)**: For ALL web workflows, use a combined multi-tool approach: 1) webfetch for direct URL lookups, 2) websearch for quick/backend search, 3) voxkage-browser for visual/JS-heavy pages and screenshots. Never rely on a single tool. Cross-verify between tools before concluding something doesn't exist.
 - **Prefers (games_folder)**: C:\games
 - **Prefers (voxkage_website)**: https://voxkage.vercel.app/
 - **Prefers (version_check)**: When asked about VoxKage version, run 'voxkage --version' on terminal first. Fall back to PyPI website only if that fails.
@@ -59,7 +56,7 @@ Use these facts to guide your decisions and personalize your responses immediate
 - **Prefers (claude_design_tokens)**: CLAUDE DESIGN SYSTEM TOKENS: Canvas=#faf9f5, Ink=#141413, Body=#3d3d3a, Body-strong=#252523, Muted=#6c6a64, Muted-soft=#8e8b82, Primary=#cc785c (coral), Primary-active=#a9583e, Hairline=#e6dfd8, Hairline-soft=#ebe6df, Surface-soft=#f5f0e8, Surface-card=#efe9de, Surface-dark=#181715, Surface-dark-elevated=#252320. Typography: Copernicus/Tiempos serif for display (h1, h2) weight 400, StyreneB/Inter for body weight 400-500, JetBrains Mono for code. Type scale: display-xl 64px/1.05/-1.5px, display-lg 48px/1.1/-1px, display-md 36px/1.15/-0.5px, display-sm 28px/1.2/-0.3px, title-lg 22px/1.3, title-md 18px/1.4, body-md 16px/1.55, caption 13px/1.4. Spacing: 4/8/12/16/24/32/48/96px. Radii: 6px default, 4px small, 10px large. Max-width 1200px. Section gap 96px. Card padding 32px. Flat surfaces, no shadows. Depth from surface color shifts and hairline borders.
 - **Prefers (design_anti_patterns)**: GENERIC AI DESIGN PATTERNS TO ALWAYS AVOID: 1) Purple/indigo gradients on white or dark backgrounds (bg-indigo-500, from-indigo-500 to-purple-600). 2) Inter font as default — use serif for display, humanist sans for body. 3) rounded-lg (8px) on everything — vary radii. 4) shadow-md on cards — use flat surfaces and hairline borders instead. 5) Three-column feature grid with icons — default AI SaaS template. 6) Hero gradient text. 7) Green pulsing dots or glowing "online" indicators. 8) Cyberpunk neon borders/glow effects. 9) bg-blue-500 hover:bg-blue-600 buttons — default Tailwind button. 10) Inter + white/gray background + rounded cards + subtle shadow — the "average" of all AI-generated sites. 11) Emojis in UI chrome. 12) Scale-on-hover lift animations. 13) Multiple chromatic accents competing. 14) Glassmorphism or frosted glass. 15) Heavy box-shadows. 16) Purple/magenta "futuristic" color schemes. Everything should feel editorial, warm, restrained, and intentional — never templated.
 - **Prefers (awwwards_design_patterns)**: AWWWARDS PREMIUM LAYER — extends Anthropic editorial for immersive/interactive: 1) Scroll-driven 3D narratives — camera spline paths, GSAP ScrollTrigger + Lenis, Three.js. 2) Narrative architecture over visual craft — treat scroll as film input, chapter-based scrollytelling. 3) Restraint rule — 1-2 strong effects per page, not 10. 4) Oversized typography 80-120px, serif comeback for display. 5) Kinetic/animated type — splits, reveals, rotations driven by scroll. 6) Clip-path image reveals — morph in, not fade. 7) Camera-relative parallax — elements at different Z depths. 8) Device-tier detection — serve different 3D fidelity per hardware tier. 9) Scroll velocity-aware pacing — fast scroll = abbreviated transitions, slow = hidden details. 10) Gold/copper accents on dark backgrounds for premium projects. 11) Images in 3D space, not grids — full-bleed cinematic, depth-map overlays. 12) Mobile-first 70%+ traffic — Lighthouse 90+ table stakes. 13) prefers-reduced-motion respected. 14) Tech stack for production: Three.js stable + GSAP ScrollTrigger 4.0 + Lenis + Vite + glTF 2.0. 15) Motion as brand personality — slow/graceful for luxury, crisp/aggressive for speed. NEVER: generic particle backgrounds, template layouts, ignoring mobile, NFT/metaverse themes, autoplay video, AI-gen 3D tools, orbiting 3D logos, kitchen-sink effects.
-- **Prefers (tool_search_hierarchy)**: Always use internal WebSearch and WebFetch tools FIRST for web research. Only use voxkage-browser MCP (Chromium/Playwright) for visual inspections, screenshots, and interactive browser manipulation (clicking forms, JS-heavy pages). Internal tools are faster and lighter for most search/extraction tasks.
+- **Prefers (web_tool_separation)**: 1) voxkage-websearch MCP (web_search, web_fetch, web_search_parallel, web_fetch_parallel, web_search_deep) = for ALL web searching, information retrieval, and content fetching. Always use this first for any query. 2) voxkage-browser MCP (agent_step, open_url, get_browser_state, agent_thinking, etc.) = ONLY for browser automation — Playwright-driven tasks, clicking links, filling forms, screenshots of web pages, interactive sessions, JS-heavy pages. Never use browser tools for simple searches.
 - **Habit**: music_trigger: When taking breaks, says play my usual songs = means scenarios playlist on Spotify
 - **Habit**: file_search_priority: When searching for files, prioritize Desktop and background running apps/files unless a specific directory is provided. Do not default to the codebase directory.
 - **Habit**: execution_style: turn-by-turn
@@ -103,24 +100,24 @@ Use these facts to guide your decisions and personalize your responses immediate
 ### VoxKage Consolidated Soul History & Performance
 
 **Domain Metrics**:
-- **FRONTEND**: 100.0% success rate (5/5 tasks)
+- **FRONTEND**: 100.0% success rate (12/12 tasks)
   - Common Weaknesses: protocol_violation, None — 8/8 checklist passed after one refine iteration (added loading overlay)
-- **BACKEND**: 100.0% success rate (2/2 tasks)
-  - Common Weaknesses: Notebook cell outputs not persisted via API on initial attempt
-- **RESEARCH**: 100.0% success rate (5/5 tasks)
-  - Common Weaknesses: none
+- **BACKEND**: 100.0% success rate (5/5 tasks)
+  - Common Weaknesses: Notebook cell outputs not persisted via API on initial attempt, guard window false positives, session-global sub-task counter
+- **RESEARCH**: 100.0% success rate (25/25 tasks)
+  - Common Weaknesses: none, None, None — research task completed successfully
 - **SYSTEM**: 100.0% success rate (3/3 tasks)
-- **CODING**: 100.0% success rate (2/2 tasks)
+- **CODING**: 100.0% success rate (8/8 tasks)
 
 **Learned Negative Constraints (Anti-Patterns)**:
 - **FRONTEND**: Avoid repeating: I failed to call start_turn() before every turn, skipping it for multiple queries about git status, commits, RAG indexing, and follow-up questions. The user expects it as the ABSOLUTE FIRST action eve
 
 **Recent Tasks Summary**:
-- [2026-06-14] FRONTEND: SUCCESS (Confidence: 0.95)
-- [2026-06-15] CODING: SUCCESS (Confidence: 0.5)
-- [2026-06-15] CODING: SUCCESS (Confidence: 0.5)
-- [2026-06-15] BACKEND: SUCCESS (Confidence: 0.5)
-- [2026-06-15] SYSTEM: SUCCESS (Confidence: 0.5)
+- [2026-06-16] CODING: SUCCESS (Confidence: 0.8)
+- [2026-06-16] CODING: SUCCESS (Confidence: 0.8)
+- [2026-06-16] FRONTEND: SUCCESS (Confidence: 0.9)
+- [2026-06-16] CODING: SUCCESS (Confidence: 0.8)
+- [2026-06-16] FRONTEND: SUCCESS (Confidence: 0.9)
 
 ---
 

@@ -79,20 +79,31 @@ def _save_checklist(domain: str, items: list):
 # and emit a loud warning if it was skipped.
 import time as _time
 _last_start_turn_ts: float = 0.0  # epoch seconds
-_GUARD_WINDOW_SECS = 120  # allow 2 minutes between start_turn and other tools
+_GUARD_WINDOWS = {1: 120, 2: 300, 3: 600}  # seconds per tier (Tier 3 = 10 min)
+_GUARD_VIOLATION_TEMPLATE = (
+    "\n⚠⚠⚠ PROTOCOL VIOLATION ⚠⚠⚠\n"
+    "You called a cognitive tool WITHOUT calling start_turn() first!\n"
+    "RULE ZERO: start_turn(user_message) MUST be your FIRST action every turn.\n"
+    "Call start_turn() NOW before proceeding.\n"
+    "⚠⚠⚠ END VIOLATION ⚠⚠⚠\n\n"
+)
 
 def _guard_check() -> str:
-    """Returns a protocol violation warning if start_turn() was not called recently."""
+    """Returns a protocol violation warning if start_turn() was not called recently.
+    The guard window scales with the active task's tier — Tier 3 gets 10 minutes."""
     global _last_start_turn_ts
+    if _last_start_turn_ts == 0.0:
+        return _GUARD_VIOLATION_TEMPLATE
+
     elapsed = _time.time() - _last_start_turn_ts
-    if _last_start_turn_ts == 0.0 or elapsed > _GUARD_WINDOW_SECS:
-        return (
-            "\n⚠⚠⚠ PROTOCOL VIOLATION ⚠⚠⚠\n"
-            "You called a cognitive tool WITHOUT calling start_turn() first!\n"
-            "RULE ZERO: start_turn(user_message) MUST be your FIRST action every turn.\n"
-            "Call start_turn() NOW before proceeding.\n"
-            "⚠⚠⚠ END VIOLATION ⚠⚠⚠\n\n"
-        )
+    try:
+        session = _load_session()
+        tier = (session.get("active_task") or {}).get("tier", 3)
+    except Exception:
+        tier = 3
+
+    if elapsed > _GUARD_WINDOWS.get(tier, 600):
+        return _GUARD_VIOLATION_TEMPLATE
     return ""
 
 
@@ -470,8 +481,15 @@ def start_turn(user_message: str) -> str:
     # Load checklist
     checklist = _load_checklist(domain)
 
-    # Session elevated checks (from recent failures)
-    elevated = session.get("elevated_checks", [])
+    # Session elevated checks (from recent failures in this domain)
+    raw_elevated = session.get("elevated_checks", {})
+    if isinstance(raw_elevated, list):
+        # Migrate old flat list to dict isolated by current domain
+        session["elevated_checks"] = {domain: raw_elevated}
+        _save_session(session)
+        elevated = raw_elevated
+    else:
+        elevated = raw_elevated.get(domain, [])
 
     # Adjust tier based on profile confidence and safety triggers
     if success_rate < 0.70 and tasks_done >= 3:
@@ -538,20 +556,25 @@ def start_turn(user_message: str) -> str:
     if tier == 1:
         lines.append("    1. Execute the task")
         lines.append("    2. Quick mental check against the checklist above")
-        lines.append("    3. learn(task_id, outcome) → Deliver")
+        lines.append("    3. Call learn(task_id, outcome, confidence_was, errors_found) → Deliver")
     elif tier == 2:
-        lines.append("    1. pre_mortem(task_id, summary) → Note risks")
-        lines.append("    2. Execute the task with risks in mind")
-        lines.append("    3. Evaluate output against checklist → reflect(task_id, summary, results)")
-        lines.append("    4. If REFINE recommended → fix → refine(task_id, issues, iteration)")
-        lines.append("    5. learn(task_id, outcome) → Deliver")
+        lines.append("    1. Predict risks and load failure memories: Call pre_mortem(task_id, summary)")
+        lines.append("    2. Execute the task carefully, avoiding known anti-patterns and weaknesses")
+        lines.append("    3. Evaluate output against all checklist criteria: Call reflect(task_id, summary, results)")
+        lines.append("    4. If reflect recommends REFINE, fix issues and call refine(task_id, issues, iteration)")
+        lines.append("    5. Record outcome and update capability weights: Call learn(task_id, outcome, confidence_was, errors_found) → Deliver")
     else:
-        lines.append("    1. pre_mortem(task_id, summary) → Note risks")
-        lines.append("    2. Execute with checkpoint() after each major sub-step")
-        lines.append("    3. Full checklist evaluation → reflect(task_id, summary, results)")
-        lines.append("    4. Run external verification → verify(task_id, results)")
-        lines.append("    5. If issues → refine() loop (max 3 iterations)")
-        lines.append("    6. learn(task_id, outcome) → Deliver")
+        lines.append("    1. Predict risks and load failure memories: Call pre_mortem(task_id, summary)")
+        lines.append("    2. Execute task step-by-step, calling checkpoint(task_id, sub_task, status) after each major step")
+        lines.append("    3. Evaluate output against all checklist criteria: Call reflect(task_id, summary, results)")
+        lines.append("    4. Run external checks (lint, test, build, run): Call verify(task_id, results)")
+        lines.append("    5. If issues found in reflect/verify, call refine(task_id, issues, iteration) and repeat up to 3 times")
+        lines.append("    6. Record outcome and update capability weights: Call learn(task_id, outcome, confidence_was, errors_found) → Deliver")
+
+    lines.append("\n  🧠 Metacognitive Directives:")
+    lines.append("    • SELF-CORRECTION: If you make a mistake, acknowledge it, analyze the root cause, and call user_corrected() immediately.")
+    lines.append("    • SELF-EVOLUTION: Update your behavior based on the known weak areas and anti-pattern warnings. Proactively avoid repeating past failures.")
+    lines.append("    • CRITICAL THINKING: Do not just tick checklists blindly. Perform honest self-critique. If a checklist item fails, fail it and refine.")
 
     return "\n".join(lines)
 
@@ -573,7 +596,7 @@ def pre_mortem(task_id: str, task_summary: str) -> str:
     """
     guard_warning = _guard_check()
     session = _load_session()
-    task = session.get("active_task", {})
+    task = session.get("active_task") or {}
     domain = task.get("domain", "coding")
 
     profile = _load_profile()
@@ -587,7 +610,11 @@ def pre_mortem(task_id: str, task_summary: str) -> str:
         if ap.get("domain") in (domain, "all")
     ]
 
-    elevated = session.get("elevated_checks", [])
+    raw_elevated = session.get("elevated_checks", {})
+    if isinstance(raw_elevated, list):
+        elevated = raw_elevated
+    else:
+        elevated = raw_elevated.get(domain, [])
 
     lines = [f"[COGNITIVE PRE-MORTEM] task: {task_id}", f"  Summary: {task_summary}", ""]
 
@@ -640,10 +667,20 @@ def checkpoint(task_id: str, sub_task: str, status: str, issues: str = "") -> st
     """
     guard_warning = _guard_check()
     session = _load_session()
+    task = session.get("active_task") or {}
+    domain = task.get("domain", "coding")
 
-    if "sub_tasks" not in session:
-        session["sub_tasks"] = []
-    session["sub_tasks"].append({
+    # Per-task sub-task tracking — isolated per task_id, not session-global
+    # Migrate old flat-list format to per-task dict if needed
+    raw = session.get("sub_tasks")
+    if isinstance(raw, list):
+        # Old format: wrap all existing sub-tasks under a legacy key
+        session["sub_tasks"] = {"__legacy__": raw}
+    elif raw is None:
+        session["sub_tasks"] = {}
+    if task_id not in session["sub_tasks"]:
+        session["sub_tasks"][task_id] = []
+    session["sub_tasks"][task_id].append({
         "name": sub_task,
         "status": status,
         "issues": issues,
@@ -654,17 +691,27 @@ def checkpoint(task_id: str, sub_task: str, status: str, issues: str = "") -> st
         # Add to session failures for elevated checking
         if issues not in session.get("current_session_failures", []):
             session["current_session_failures"].append(issues)
-        # Extract keywords from issues for elevated checks
+        # Extract keywords from issues for domain-isolated elevated checks
+        raw_elevated = session.get("elevated_checks", {})
+        if isinstance(raw_elevated, list):
+            session["elevated_checks"] = {domain: raw_elevated}
+            raw_elevated = session["elevated_checks"]
+        elif raw_elevated is None:
+            session["elevated_checks"] = {}
+            raw_elevated = session["elevated_checks"]
+        
+        domain_elevated = raw_elevated.setdefault(domain, [])
         words = re.findall(r'\b\w{4,}\b', issues.lower())
         for w in words[:3]:
-            if w not in session.get("elevated_checks", []):
-                session["elevated_checks"].append(w)
+            if w not in domain_elevated:
+                domain_elevated.append(w)
 
     _save_session(session)
 
-    completed = sum(1 for s in session["sub_tasks"] if s["status"] == "done")
-    total = len(session["sub_tasks"])
-    with_issues = sum(1 for s in session["sub_tasks"] if s["status"] == "issues")
+    current_sub_tasks = session["sub_tasks"].get(task_id, [])
+    completed = sum(1 for s in current_sub_tasks if s["status"] == "done")
+    total = len(current_sub_tasks)
+    with_issues = sum(1 for s in current_sub_tasks if s["status"] == "issues")
 
     lines = [
         f"[COGNITIVE CHECKPOINT] {sub_task}: {status.upper()}",
@@ -695,21 +742,44 @@ def reflect(task_id: str, output_summary: str, checklist_results: str) -> str:
     """
     guard_warning = _guard_check()
     session = _load_session()
-    task = session.get("active_task", {})
+    task = session.get("active_task") or {}
     domain = task.get("domain", "coding")
-    elevated = session.get("elevated_checks", [])
+    
+    # Load domain-isolated elevated checks
+    raw_elevated = session.get("elevated_checks", {})
+    if isinstance(raw_elevated, list):
+        elevated = raw_elevated
+    else:
+        elevated = raw_elevated.get(domain, [])
 
     # Parse checklist results
     passes = []
     fails = []
-    for item in checklist_results.split(","):
+    
+    # Load valid checklist items to filter out polluted arbitrary IDs
+    checklist = _load_checklist(domain)
+    valid_ids = {item["id"] for item in checklist} if checklist else set()
+    
+    # Split on both commas and newlines
+    raw_items = re.split(r'[,\n]', checklist_results)
+    for item in raw_items:
         item = item.strip()
         if not item:
             continue
         parts = item.split(":", 2)
         item_id = parts[0].strip()
+        
+        # Clean item_id to match snake_case checklist identifiers
+        item_id = re.sub(r'[^a-zA-Z0-9_\-]', '', item_id).strip()
+        if not item_id:
+            continue
+            
         status = parts[1].strip().lower() if len(parts) > 1 else "pass"
         reason = parts[2].strip() if len(parts) > 2 else ""
+
+        # Validate against known checklist IDs to avoid data pollution
+        if valid_ids and item_id not in valid_ids:
+            continue
 
         if status == "pass":
             passes.append(item_id)
@@ -790,23 +860,41 @@ def verify(task_id: str, verification_results: str) -> str:
     all_pass = True
     issues = []
     items = []
-    for item in verification_results.split(","):
+    
+    # Split on both commas and newlines
+    raw_items = re.split(r'[,\n]', verification_results)
+    for item in raw_items:
         item = item.strip()
         if not item:
             continue
         parts = item.split(":", 1)
         name = parts[0].strip()
-        result = parts[1].strip() if len(parts) > 1 else "pass"
-        items.append({"name": name, "result": result})
-        if "fail" in result.lower() or "error" in result.lower():
-            all_pass = False
-            issues.append(f"{name}: {result}")
+        
+        if len(parts) > 1:
+            result = parts[1].strip()
+            result_lower = result.lower()
+            is_pass = any(w in result_lower for w in ["pass", "success", "ok", "true", "yes"])
+            is_fail = any(w in result_lower for w in ["fail", "error", "invalid", "false", "no"])
+            
+            # Determine check mark
+            if is_fail:
+                mark = "❌"
+                all_pass = False
+                issues.append(f"{name}: {result}")
+            elif is_pass:
+                mark = "✅"
+            else:
+                mark = "ℹ️"
+        else:
+            result = ""
+            mark = "ℹ️"
+                
+        items.append({"name": name, "result": result, "mark": mark})
 
     lines = [f"[COGNITIVE VERIFY] task: {task_id}", ""]
 
     for v in items:
-        mark = "✅" if "pass" in v["result"].lower() or "success" in v["result"].lower() else "❌"
-        lines.append(f"  {mark} {v['name']}: {v['result']}")
+        lines.append(f"  {v['mark']} {v['name']}: {v['result']}")
 
     if all_pass:
         lines.append(f"\n  → Verification: ALL PASSED ✅")
@@ -821,7 +909,7 @@ def verify(task_id: str, verification_results: str) -> str:
     # Store in session
     session["last_verification"] = {
         "all_pass": all_pass,
-        "items": items,
+        "items": [{"name": i["name"], "result": i["result"]} for i in items],
         "issues": issues,
     }
     _save_session(session)
@@ -943,7 +1031,7 @@ def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found:
     """
     guard_warning = _guard_check()
     session = _load_session()
-    task = session.get("active_task", {})
+    task = session.get("active_task") or {}
     domain = task.get("domain", "coding")
 
     profile = _load_profile()
@@ -953,9 +1041,10 @@ def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found:
     dp = gp.get("domain_performance", {})
     if domain not in dp:
         dp[domain] = {"tasks": 0, "successes": 0, "common_errors": []}
-    dp[domain]["tasks"] += 1
+    # Guard against None values in stored profile (defensive)
+    dp[domain]["tasks"] = (dp[domain].get("tasks") or 0) + 1
     if outcome == "success":
-        dp[domain]["successes"] += 1
+        dp[domain]["successes"] = (dp[domain].get("successes") or 0) + 1
 
     # Add errors to common_errors (deduplicated, max 10)
     if errors_found:
@@ -975,7 +1064,7 @@ def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found:
         cats[fail_id]["last_seen"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         gp["error_categories"] = cats
 
-    gp["total_tasks_completed"] = gp.get("total_tasks_completed", 0) + 1
+    gp["total_tasks_completed"] = (gp.get("total_tasks_completed") or 0) + 1
     gp["domain_performance"] = dp
     profile["global_profile"] = gp
     _save_profile(profile)
@@ -998,7 +1087,7 @@ def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found:
         correct = sum(1 for p in preds if (p["stated"] >= 0.5) == p["actual_success"])
         cal["domains"][domain]["accuracy"] = round(correct / len(preds), 2)
         gp["confidence_calibration"] = round(
-            sum(cal["domains"][d].get("accuracy", 0.5) for d in cal["domains"])
+            sum((cal["domains"][d].get("accuracy") or 0.5) for d in cal["domains"])
             / max(len(cal["domains"]), 1), 2
         )
         profile["global_profile"] = gp
@@ -1018,16 +1107,30 @@ def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found:
     # Update session — mark task as complete, move to last_task
     session["last_task"] = task
     session["active_task"] = None
+    # Clean up this task's sub-tasks to prevent unbounded session growth
+    if "sub_tasks" in session and task_id in session["sub_tasks"]:
+        del session["sub_tasks"][task_id]
     # Write session failures to global profile if they persisted
     for failure in session.get("current_session_failures", []):
         if failure not in dp[domain].get("common_errors", []):
             dp[domain]["common_errors"].append(failure)
             dp[domain]["common_errors"] = dp[domain]["common_errors"][-10:]
+            
+    # Clear/prune domain-isolated elevated checks on successful task completion
+    if outcome == "success":
+        raw_elevated = session.get("elevated_checks", {})
+        if isinstance(raw_elevated, dict) and domain in raw_elevated:
+            raw_elevated[domain] = []
+        elif isinstance(raw_elevated, list):
+            session["elevated_checks"] = {}
+            
     _save_session(session)
     _consolidate_soul()
 
     # Response
-    success_rate = round(dp[domain]["successes"] / max(dp[domain]["tasks"], 1) * 100, 1)
+    success_rate = round(
+        (dp[domain].get("successes") or 0) / max(dp[domain].get("tasks") or 1, 1) * 100, 1
+    )
     cal_score = gp.get("confidence_calibration", 0.5)
     total = gp.get("total_tasks_completed", 0)
     corrections = gp.get("total_user_corrections", 0)
@@ -1063,7 +1166,7 @@ def user_corrected(task_id: str, correction: str, error_category: str = "") -> s
     """
     guard_warning = _guard_check()
     session = _load_session()
-    task = session.get("last_task") or session.get("active_task", {})
+    task = session.get("last_task") or session.get("active_task") or {}
     domain = task.get("domain", "coding")
 
     # Update profile

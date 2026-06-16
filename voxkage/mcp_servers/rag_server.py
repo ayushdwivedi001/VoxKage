@@ -82,8 +82,16 @@ _ALL_EXTS  = _TEXT_EXTS | _RICH_EXTS
 
 # Skip these in bulk directory indexing
 _SKIP_DIRS = {
-    "__pycache__", ".git", "node_modules", ".venv", "venv",
-    ".env", "dist", "build", ".next", "target", ".idea", ".vscode",
+    "__pycache__", ".git", "node_modules", ".venv", "venv", "env",
+    "dist", "build", ".next", ".nuxt", ".svelte-kit", "target",
+    ".idea", ".vscode", ".terraform", ".serverless", ".expo",
+    "vendor", ".cache", ".gemini", ".antigravitycli", "out",
+}
+
+_SKIP_FILES = {
+    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "cargo.lock",
+    "gemfile.lock", "composer.lock", "poetry.lock", "mix.lock",
+    "pipfile.lock", "tsconfig.tsbuildinfo", "gradle-wrapper.properties",
 }
 
 
@@ -344,6 +352,23 @@ def _do_index(file_path: str, force: bool = False) -> dict:
     if ext not in _ALL_EXTS:
         return {"status": "skipped", "message": f"Unsupported extension: {ext}"}
 
+    # Size check before text extraction to avoid CPU/memory hangs
+    file_size = os.path.getsize(file_path)
+    if ext in _TEXT_EXTS:
+        max_size = 512 * 1024  # 500 KB limit for code/text
+        if file_size > max_size:
+            return {
+                "status": "skipped",
+                "message": f"Text/code file size ({round(file_size/1024, 1)} KB) exceeds 500 KB limit."
+            }
+    elif ext in _RICH_EXTS:
+        max_size = 5 * 1024 * 1024  # 5 MB limit for rich docs/media
+        if file_size > max_size:
+            return {
+                "status": "skipped",
+                "message": f"Rich document size ({round(file_size/(1024*1024), 1)} MB) exceeds 5 MB limit."
+            }
+
     current_hash = _sha256(file_path)
     meta = _load_meta()
     existing = meta.get(file_path, {})
@@ -363,6 +388,10 @@ def _do_index(file_path: str, force: bool = False) -> dict:
     chunks = _smart_chunk(text, file_path)
     if not chunks:
         return {"status": "error", "message": "No content extracted from file"}
+
+    # Cap chunks to prevent sentence-transformer overhead and db locks
+    if len(chunks) > 250:
+        chunks = chunks[:250]
 
     # Time tracking to avoid timeout issues
     start_time = time.time()
@@ -653,6 +682,8 @@ def index_directory(
         if recursive:
             dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
         for fname in files:
+            if fname.lower() in _SKIP_FILES or fname.startswith("."):
+                continue
             ext = Path(fname).suffix.lower()
             if ext in target_exts:
                 all_target_files.append(os.path.join(root, fname))
