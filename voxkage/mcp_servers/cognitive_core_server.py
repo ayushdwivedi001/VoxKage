@@ -160,7 +160,7 @@ def _release_lock():
 def _auto_update_documentation(force=False):
     """
     Automatically updates CLAUDE.md, GEMINI.md.template, and AGENTS.md
-    with the latest cognitive core protocol definitions.
+    with the latest cognitive core protocol definitions using structured markers.
     """
     try:
         workspace_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -175,26 +175,71 @@ def _auto_update_documentation(force=False):
             with open(filepath, "r", encoding="utf-8") as f:
                 content = f.read()
                 
-            old_learn_pattern = r"\|\s*learn\(task_id,\s*outcome\)\s*\|\s*LAST cognitive call before delivering response\s*\|"
-            new_learn_row = "| `learn(task_id, outcome, confidence_was, errors_found, tool_sequence)` | LAST cognitive call before delivering response (include comma-separated tool trace) |"
-            content = re.sub(old_learn_pattern, new_learn_row, content)
+            start_marker = "<!-- COGNITIVE_PROTOCOL_START -->"
+            end_marker = "<!-- COGNITIVE_PROTOCOL_END -->"
             
-            old_learn_pattern_code = r"\|\s*`learn\(task_id,\s*outcome\)`\s*\|\s*LAST cognitive call before delivering response\s*\|"
-            content = re.sub(old_learn_pattern_code, new_learn_row, content)
-            
-            if "optimize_cognitive_core" not in content:
-                learn_match = re.search(r"(\|\s*(?:`)?learn.*?\|\s*.*?\s*\|)", content)
-                if learn_match:
-                    match_str = learn_match.group(0)
-                    optimize_row = "\n| `optimize_cognitive_core()` | Proactive self-optimization to deduplicate patterns and clean up rules |"
-                    content = content.replace(match_str, match_str + optimize_row)
-                    
-            old_learn_call = r"learn\(task_id,\s*outcome\)"
-            new_learn_call = "learn(task_id, outcome, confidence_was, errors_found, tool_sequence)"
-            content = re.sub(old_learn_call, new_learn_call, content)
-            content = re.sub(r"learn\(task_id,\s*outcome\)\s*→\s*Deliver", "learn(task_id, outcome, confidence_was, errors_found, tool_sequence) → Deliver", content)
-            
-            _atomic_write_file(filepath, content)
+            if start_marker in content and end_marker in content:
+                parts_before = content.split(start_marker)[0]
+                parts_after = content.split(end_marker)[1]
+                
+                protocol_content = """
+### If result type = "task"
+The response includes: `task_id`, `domain`, `tier`, `checklist`, `warnings`, `profile_snapshot`.
+Follow the metacognitive cycle based on the returned **tier**:
+
+**Tier 1 (Quick Task) — e.g., "open Chrome", "what time is it", "show git status", "how do I cook eggs":**
+- If `start_turn` returns `READ-ONLY task`: Execute directly, skip ALL cognitive tools. Zero overhead.
+- Otherwise: Execute → quick mental check → `learn(task_id, "success")` → Deliver
+
+**Tier 2 (Standard Task) — e.g., "write a Python script to sort files", "send this email":**
+1. `pre_mortem(task_id, summary)` → Note risks
+2. Execute the task with risks in mind
+3. `reflect(task_id, output_summary, checklist_results)` → Get structured critique
+   - **Use the EXACT IDs shown in the checklist from start_turn output**
+   - Format: `"plan_1:pass, plan_2:pass, clarity:pass, accuracy:fail:reason"`
+   - Shorthand `"plans:pass"` marks ALL plan_* items as passed at once
+4. If REFINE recommended → fix issues → `refine(task_id, issues, iteration)`
+5. `learn(task_id, outcome, confidence_was, errors_found)` → Deliver
+
+**Tier 3 (Complex Task) — e.g., "build me a dashboard", "research AI agents thoroughly", "deploy this feature":**
+1. `pre_mortem(task_id, summary)` → Note risks
+2. Execute with `checkpoint(task_id, sub_task, status)` after each major sub-step
+3. `reflect(task_id, output_summary, checklist_results)` → Get structured critique (use exact IDs)
+4. Run external verification (lint/test/check) → `verify(task_id, results)`
+5. If issues → `refine()` loop (max 3 iterations)
+6. `learn(task_id, outcome, confidence_was, errors_found)` → Deliver
+
+**Tier Classification (v3 — Risk-based, not length-based):**
+- Pure observation verbs ("tell me", "show me", "what is", "check status", "how do I") → **Tier 1**, even for long messages
+- State-change verbs ("build", "create", "write", "deploy", "delete", "commit") → **Tier 2 minimum**
+- State-change + complexity signals ("comprehensive", "production", "from scratch") → **Tier 3**
+
+### Follow-up Detection
+If the user says "make it blue", "also add X", "change that" — `start_turn()` detects this as a follow-up and returns the SAME task_id from the previous task. Continue in context, don't restart from scratch.
+
+### When the user corrects you:
+→ Call `user_corrected(task_id, correction, error_category)` IMMEDIATELY. This is the highest-value learning signal (10x weight). VoxKage will permanently remember this mistake and flag it in future tasks.
+
+### Cognitive Core Tools Reference
+
+| Tool | When to call |
+|---|---|
+| `start_turn(user_message)` | **EVERY TURN — first action, no exceptions** |
+| `pre_mortem(task_id, summary)` | Before executing Tier 2+ tasks |
+| `checkpoint(task_id, sub_task, status)` | After each sub-step in Tier 3 tasks |
+| `verify_code_file(filepath, domain)` | Tier 3: Run deep domain-aware static checks (syntax, imports, security) on edited file |
+| `generate_critique(task_id, code_content, domain)` | Tier 2/3: Run code quality, complexity, and styling audit on new/modified code |
+| `reflect(task_id, summary, checklist_results)` | After execution, with checklist and dynamic plan evaluation |
+| `verify(task_id, results)` | After reflect, with external verification results |
+| `refine(task_id, issues_fixed, iteration)` | After fixing issues (max 3 iterations) |
+| `learn(task_id, outcome, confidence_was, errors_found)` | LAST cognitive call before delivering response |
+| `log_tool_execution(tool_name, arguments)` | Auto-logged on every tool execution to construct the trace |
+| `optimize_cognitive_core()` | Proactive self-optimization to deduplicate patterns and clean up rules |
+| `user_corrected(task_id, correction)` | IMMEDIATELY when user corrects your output |
+| `get_profile(domain)` | When user asks about VoxKage's capabilities or for diagnostics |
+"""
+                new_content = parts_before + start_marker + protocol_content.rstrip() + "\n" + end_marker + parts_after
+                _atomic_write_file(filepath, new_content)
                 
         if force:
             update_doc_file(claude_path)
@@ -206,12 +251,12 @@ def _auto_update_documentation(force=False):
 ALWAYS call start_turn(user_message) from voxkage-cognitive-core server as the ABSOLUTE FIRST tool call of every turn. This is non-negotiable.
 
 ### TIER protocols:
-* **Tier 1 (Quick Task / Read-Only)**: Execute the task directly. Skip pre_mortem and reflect. Call `learn(task_id, outcome, confidence_was, errors_found, tool_sequence)` after execution.
-* **Tier 2 (Standard Task)**: Call `pre_mortem()`, execute, call `reflect()` with exact IDs, call `learn(task_id, outcome, confidence_was, errors_found, tool_sequence)`.
-* **Tier 3 (Complex Task)**: Call `pre_mortem()`, execute with `checkpoint()`, run verification/critique tools, call `reflect()` with exact IDs, call `verify()`, `learn(task_id, outcome, confidence_was, errors_found, tool_sequence)`.
+* **Tier 1 (Quick Task / Read-Only)**: Execute the task directly. Skip pre_mortem and reflect. Call `learn(task_id, outcome, confidence_was, errors_found)` after execution.
+* **Tier 2 (Standard Task)**: Call `pre_mortem()`, execute, call `reflect()` with exact IDs, call `learn(task_id, outcome, confidence_was, errors_found)`.
+* **Tier 3 (Complex Task)**: Call `pre_mortem()`, execute with `checkpoint()`, run verification/critique tools, call `reflect()` with exact IDs, call `verify()`, `learn(task_id, outcome, confidence_was, errors_found)`.
 
 ### Execution Trace Tracking:
-When calling `learn(task_id, outcome, confidence_was, errors_found, tool_sequence)`, always supply the exact comma-separated list of tools you executed in this turn as `tool_sequence`. For example: `"start_turn, run_command, learn"`.
+When calling `learn(task_id, outcome, confidence_was, errors_found)`, a merged execution trace is reconstructed automatically from the session trace logs.
 
 ### Self-Optimization:
 Call `optimize_cognitive_core()` to prune rules and anti-patterns if you notice recurrent classification errors or excessive overhead warnings.
@@ -630,6 +675,56 @@ _CODE_CHECKLIST_KEYWORDS = re.compile(
 )
 
 
+def _is_trivial_task(msg: str) -> bool:
+    """
+    Checks if a message represents a trivial command that should bypass heavy ceremony.
+    """
+    msg_lower = msg.lower().strip()
+
+    # If it is a direct shell command for git or package manager, it is ALWAYS trivial
+    direct_commands = [
+        r"^git\s+(commit|push|add|checkout|status|diff|log|branch|pull)\b",
+        r"^(npm|pip|yarn|pnpm|cargo|pipenv|poetry)\s+(install|add|update|remove|uninstall)\b",
+        r"^git\s+commit\s+-m\b",
+    ]
+    if any(re.search(pat, msg_lower) for pat in direct_commands):
+        return True
+
+    # Explicit implementation verbs (must NEVER bypass ceremony if any of these are present)
+    impl_verbs = [
+        r"\bcreate\b", r"\bwrite\b", r"\bdelete\b", r"\bmodify\b", r"\bfix\b", 
+        r"\brefactor\b", r"\bbuild\b", r"\bdeploy\b", r"\bdesign\b", r"\badd\b", 
+        r"\bremove\b", r"\bchange\b", r"\bupdate\b", r"\bupgrade\b", r"\bimplement\b", 
+        r"\bbump\b", r"\brename\b", r"\bchore\b", r"\bmake\b", r"\bgenerate\b", 
+        r"\bsetup\b", r"\bpatch\b", r"\bedit\b"
+    ]
+    if any(re.search(pat, msg_lower) for pat in impl_verbs):
+        return False
+
+    # Positive list of general trivial keywords / phrases
+    trivial_patterns = [
+        r"\b(commit|push|add|checkout|status|diff|log|branch|pull|install|uninstall)\b",
+    ]
+    return any(re.search(pat, msg_lower) for pat in trivial_patterns)
+
+
+def _log_cognitive_call(tool_name: str):
+    """Logs a cognitive core tool execution in the session's cognitive_trace and refreshes guard timestamp."""
+    global _last_start_turn_ts
+    _last_start_turn_ts = _time.time()
+    try:
+        session = _load_session()
+        cog_trace = session.setdefault("cognitive_trace", [])
+        cog_trace.append({
+            "tool": tool_name,
+            "timestamp": _time.time()
+        })
+        session["cognitive_trace"] = cog_trace
+        _save_session(session)
+    except Exception:
+        pass
+
+
 def _classify_intent(msg: str) -> dict:
     """
     Rule-based intent classification. Returns type, domain, tier, etc.
@@ -771,10 +866,14 @@ def _classify_intent(msg: str) -> dict:
     has_complexity = bool(_COMPLEXITY_HIGH.search(msg))
     multi_req_count = len(_MULTI_REQUIREMENT.findall(msg))
     msg_len = len(msg_stripped)
+    is_trivial = _is_trivial_task(msg_stripped)
 
     # Pure read-only observation → Tier 1, even if message is long
     # (e.g. "checkout the codebase and tell me the latest uncommitted changes")
     if has_read_only and not has_state_change:
+        tier = 1
+    # Trivial task -> Tier 1
+    elif is_trivial:
         tier = 1
     # State-change with high complexity signals → Tier 3
     elif has_state_change and (has_complexity or multi_req_count >= 3 or msg_len > 300):
@@ -794,7 +893,7 @@ def _classify_intent(msg: str) -> dict:
         "type": "task",
         "domain": domain,
         "tier": tier,
-        "is_read_only": has_read_only and not has_state_change,
+        "is_read_only": (has_read_only and not has_state_change) or is_trivial,
     }
 
 
@@ -1131,7 +1230,7 @@ def _analyze_execution_trace(task_id: str, domain: str, tier: int, tool_sequence
 # ═════════════════════════════════════════════════════════════════════════════
 
 @mcp.tool()
-def start_turn(user_message: str) -> str:
+def start_turn(user_message: str, refresh_only: bool = False) -> str:
     """
     COGNITIVE CORE — MANDATORY FIRST CALL EVERY SINGLE TURN.
 
@@ -1144,6 +1243,7 @@ def start_turn(user_message: str) -> str:
 
     Parameters:
       user_message : The user's raw message text for this turn.
+      refresh_only : If True, only update the active protocol timestamp to keep the gate open.
 
     Returns:
       - If conversation: { type: "conversation" } — respond normally, skip all other cognitive tools.
@@ -1163,6 +1263,17 @@ def start_turn(user_message: str) -> str:
     _last_start_turn_ts = _time.time()  # Mark gate as fired
 
     session = _load_session()
+
+    if refresh_only:
+        session["last_start_turn_ts"] = _time.time()
+        _save_session(session)
+        return "[COGNITIVE] Protocol window refreshed."
+
+    # Reset traces for a new turn
+    session["cognitive_trace"] = [{"tool": "start_turn", "timestamp": _time.time()}]
+    session["tool_trace"] = []
+    _save_session(session)
+
     classification = _classify_intent(user_message)
 
     if classification["type"] == "conversation":
@@ -1201,7 +1312,16 @@ def start_turn(user_message: str) -> str:
     # Score and sort by relevance
     for ap in all_aps:
         ap["_relevance_score"] = _score_anti_pattern(ap, user_message)
-    domain_anti_patterns = sorted(all_aps, key=lambda x: x["_relevance_score"], reverse=True)[:5]
+
+    # Deduplicate anti-patterns by pattern text, preserving order
+    seen_patterns = set()
+    deduped_aps = []
+    for ap in sorted(all_aps, key=lambda x: x["_relevance_score"], reverse=True):
+        pattern_str = ap.get("pattern", "").strip()
+        if pattern_str and pattern_str not in seen_patterns:
+            seen_patterns.add(pattern_str)
+            deduped_aps.append(ap)
+    domain_anti_patterns = deduped_aps[:5]
 
     # Load baseline checklist
     checklist = _load_checklist(domain)
@@ -1362,6 +1482,7 @@ def pre_mortem(task_id: str, task_summary: str) -> str:
     Returns predicted risks to keep in mind during execution.
     """
     guard_warning = _guard_check()
+    _log_cognitive_call("pre_mortem")
     session = _load_session()
     task = session.get("active_task") or {}
     domain = task.get("domain", "coding")
@@ -1379,7 +1500,16 @@ def pre_mortem(task_id: str, task_summary: str) -> str:
     # Score and rank by relevance to task_summary
     for ap in all_aps:
         ap["_relevance_score"] = _score_anti_pattern(ap, task_summary)
-    relevant_aps = sorted(all_aps, key=lambda x: x["_relevance_score"], reverse=True)[:5]
+
+    # Deduplicate anti-patterns by pattern text, preserving order
+    seen_patterns = set()
+    deduped_aps = []
+    for ap in sorted(all_aps, key=lambda x: x["_relevance_score"], reverse=True):
+        pattern_str = ap.get("pattern", "").strip()
+        if pattern_str and pattern_str not in seen_patterns:
+            seen_patterns.add(pattern_str)
+            deduped_aps.append(ap)
+    relevant_aps = deduped_aps[:5]
 
     raw_elevated = session.get("elevated_checks", {})
     if isinstance(raw_elevated, list):
@@ -1437,6 +1567,7 @@ def checkpoint(task_id: str, sub_task: str, status: str, issues: str = "") -> st
     Returns acknowledgment with progress update.
     """
     guard_warning = _guard_check()
+    _log_cognitive_call("checkpoint")
     session = _load_session()
     task = session.get("active_task") or {}
     domain = task.get("domain", "coding")
@@ -1513,6 +1644,7 @@ def reflect(task_id: str, output_summary: str, checklist_results: str) -> str:
     Returns structured critique with DELIVER or REFINE recommendation.
     """
     guard_warning = _guard_check()
+    _log_cognitive_call("reflect")
     session = _load_session()
     task = session.get("active_task") or {}
     domain = task.get("domain", "coding")
@@ -1735,6 +1867,7 @@ def verify(task_id: str, verification_results: str) -> str:
     Returns PASS (deliver) or FAIL (specific issues to refine).
     """
     guard_warning = _guard_check()
+    _log_cognitive_call("verify")
     session = _load_session()
 
     # Parse verification results
@@ -1815,6 +1948,7 @@ def refine(task_id: str, issues_fixed: str, iteration: int = 1) -> str:
     Returns CONTINUE (re-reflect) or MAX_ITERATIONS (deliver best-effort).
     """
     guard_warning = _guard_check()
+    _log_cognitive_call("refine")
     max_iterations = 3
 
     lines = [f"[COGNITIVE REFINE] task: {task_id}, iteration: {iteration}/{max_iterations}"]
@@ -1853,6 +1987,33 @@ def _consolidate_soul():
         
         ap_data = _load_anti_patterns()
         anti_patterns = ap_data.get("anti_patterns", [])
+        
+        # Deduplicate anti-patterns in the database before processing
+        merged_aps = {}
+        for ap in anti_patterns:
+            pat = ap.get("pattern", "").strip()
+            if not pat:
+                continue
+            if pat not in merged_aps:
+                merged_aps[pat] = ap
+            else:
+                existing = merged_aps[pat]
+                # Keep highest severity
+                if ap.get("severity") == "user_caught" and existing.get("severity") != "user_caught":
+                    existing["severity"] = "user_caught"
+                
+                # Keep newest timestamp
+                ts_existing = parse_timestamp(existing.get("timestamp"))
+                ts_current = parse_timestamp(ap.get("timestamp"))
+                if ts_current and ts_existing and ts_current > ts_existing:
+                    existing["timestamp"] = ap.get("timestamp")
+                elif ts_current and not ts_existing:
+                    existing["timestamp"] = ap.get("timestamp")
+                    
+                # Keep max frequency
+                existing["times_prevented"] = max(existing.get("times_prevented", 0), ap.get("times_prevented", 0))
+        
+        anti_patterns = list(merged_aps.values())
         
         now = datetime.now(timezone.utc)
         valid_aps = []
@@ -1934,7 +2095,7 @@ def _consolidate_soul():
 
 
 @mcp.tool()
-def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found: str = "", tool_sequence: str = "") -> str:
+def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found: str = "") -> str:
     """
     COGNITIVE CORE — Update global profile before delivering final output.
 
@@ -1947,11 +2108,11 @@ def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found:
       outcome        : "success", "partial", or "failed"
       confidence_was : Your confidence estimate before execution (0.0-1.0)
       errors_found   : Comma-separated error descriptions found during the task
-      tool_sequence  : Comma-separated list of tools called during the task (e.g. "start_turn,run_command,learn")
 
     Returns profile update confirmation and execution analysis.
     """
     guard_warning = _guard_check()
+    _log_cognitive_call("learn")
     session = _load_session()
     task = session.get("active_task") or {}
     domain = task.get("domain", "coding")
@@ -2084,11 +2245,34 @@ def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found:
             
     # Run execution trace analysis
     execution_warnings = []
-    if tool_sequence:
-        try:
-            execution_warnings = _analyze_execution_trace(task_id, domain, tier, tool_sequence)
-        except Exception:
-            pass
+    try:
+        cog_trace = session.get("cognitive_trace", [])
+        tool_trace = session.get("tool_trace", [])
+        
+        merged = []
+        for item in cog_trace:
+            if isinstance(item, dict):
+                merged.append(item)
+        for item in tool_trace:
+            if isinstance(item, dict):
+                merged.append(item)
+                
+        merged.sort(key=lambda x: x.get("timestamp", 0.0))
+        
+        sequence_items = []
+        for x in merged:
+            t_name = x.get("tool", "")
+            t_args = x.get("arguments", "")
+            if t_args:
+                sequence_items.append(f"{t_name}({t_args})")
+            else:
+                sequence_items.append(t_name)
+        
+        reconstructed_sequence = "; ".join(sequence_items)
+        if reconstructed_sequence:
+            execution_warnings = _analyze_execution_trace(task_id, domain, tier, reconstructed_sequence)
+    except Exception:
+        pass
 
     # Overfitting protection for Tier overrides
     orig_msg = task.get("user_message", "")
@@ -2158,6 +2342,7 @@ def user_corrected(task_id: str, correction: str, error_category: str = "") -> s
     Returns confirmation of the high-weight profile update.
     """
     guard_warning = _guard_check()
+    _log_cognitive_call("user_corrected")
     session = _load_session()
     task = session.get("last_task") or session.get("active_task") or {}
     domain = task.get("domain", "coding")
@@ -2331,6 +2516,7 @@ def optimize_cognitive_core() -> str:
     Returns summary of optimizations performed.
     """
     guard_warning = _guard_check()
+    _log_cognitive_call("optimize_cognitive_core")
     try:
         rules = _load_dynamic_rules()
         profile = _load_profile()
@@ -2365,6 +2551,54 @@ def optimize_cognitive_core() -> str:
 
 
 @mcp.tool()
+def log_tool_execution(tool_name: str, arguments: str = "") -> str:
+    """
+    COGNITIVE CORE — Auto-instrumented tool execution logger. Appends a tool execution to the session trace.
+
+    Parameters:
+      tool_name : Name of the executed tool.
+      arguments : JSON string or raw arguments passed to the tool.
+    """
+    global _last_start_turn_ts
+    _last_start_turn_ts = _time.time()
+    try:
+        session = _load_session()
+        tool_trace = session.setdefault("tool_trace", [])
+        
+        # Clean arguments if it is a JSON string
+        args_cleaned = arguments
+        if isinstance(arguments, str) and arguments.strip():
+            try:
+                # Try to parse and format it compactly
+                parsed = json.loads(arguments)
+                args_cleaned = json.dumps(parsed, ensure_ascii=False)
+            except Exception:
+                pass
+        elif not isinstance(arguments, str):
+            try:
+                args_cleaned = json.dumps(arguments, ensure_ascii=False)
+            except Exception:
+                args_cleaned = str(arguments)
+
+        # Truncate args_cleaned if too long
+        if args_cleaned and len(args_cleaned) > 200:
+            args_cleaned = args_cleaned[:200] + "..."
+
+        tool_trace.append({
+            "tool": tool_name,
+            "arguments": args_cleaned,
+            "timestamp": _time.time()
+        })
+        session["tool_trace"] = tool_trace
+        _save_session(session)
+    except Exception:
+        pass
+    return f"Logged tool execution: {tool_name}"
+
+
+
+
+@mcp.tool()
 def verify_code_file(filepath: str, domain: str = "") -> str:
     """
     COGNITIVE CORE — Deep domain-aware file verification tool.
@@ -2386,6 +2620,7 @@ def verify_code_file(filepath: str, domain: str = "") -> str:
     import subprocess
     
     guard_warning = _guard_check()
+    _log_cognitive_call("verify_code_file")
     
     # Resolve absolute path
     abs_path = os.path.abspath(filepath)
@@ -2565,6 +2800,7 @@ def generate_critique(task_id: str, code_content: str, domain: str = "") -> str:
     Returns critique report.
     """
     guard_warning = _guard_check()
+    _log_cognitive_call("generate_critique")
     import re
     
     report_lines = [
@@ -2665,6 +2901,7 @@ def get_profile(domain: str = "") -> str:
       domain : Optional. If specified, show detailed stats for that domain only.
                If empty, show all domains in compact format.
     """
+    _log_cognitive_call("get_profile")
     profile = _load_profile()
     gp = profile.get("global_profile", {})
     dp = gp.get("domain_performance", {})

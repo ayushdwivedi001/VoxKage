@@ -76,6 +76,7 @@ This is the metacognitive gate that makes VoxKage self-correcting and self-evolv
 ### If result type = "conversation"
 → Respond normally with personality. Skip all other cognitive tools. Zero overhead.
 
+<!-- COGNITIVE_PROTOCOL_START -->
 ### If result type = "task"
 The response includes: `task_id`, `domain`, `tier`, `checklist`, `warnings`, `profile_snapshot`.
 Follow the metacognitive cycle based on the returned **tier**:
@@ -92,7 +93,7 @@ Follow the metacognitive cycle based on the returned **tier**:
    - Format: `"plan_1:pass, plan_2:pass, clarity:pass, accuracy:fail:reason"`
    - Shorthand `"plans:pass"` marks ALL plan_* items as passed at once
 4. If REFINE recommended → fix issues → `refine(task_id, issues, iteration)`
-5. `learn(task_id, outcome, confidence_was, errors_found, tool_sequence)` → Deliver
+5. `learn(task_id, outcome, confidence_was, errors_found)` → Deliver
 
 **Tier 3 (Complex Task) — e.g., "build me a dashboard", "research AI agents thoroughly", "deploy this feature":**
 1. `pre_mortem(task_id, summary)` → Note risks
@@ -100,7 +101,7 @@ Follow the metacognitive cycle based on the returned **tier**:
 3. `reflect(task_id, output_summary, checklist_results)` → Get structured critique (use exact IDs)
 4. Run external verification (lint/test/check) → `verify(task_id, results)`
 5. If issues → `refine()` loop (max 3 iterations)
-6. `learn(task_id, outcome, confidence_was, errors_found, tool_sequence)` → Deliver
+6. `learn(task_id, outcome, confidence_was, errors_found)` → Deliver
 
 **Tier Classification (v3 — Risk-based, not length-based):**
 - Pure observation verbs ("tell me", "show me", "what is", "check status", "how do I") → **Tier 1**, even for long messages
@@ -125,10 +126,12 @@ If the user says "make it blue", "also add X", "change that" — `start_turn()` 
 | `reflect(task_id, summary, checklist_results)` | After execution, with checklist and dynamic plan evaluation |
 | `verify(task_id, results)` | After reflect, with external verification results |
 | `refine(task_id, issues_fixed, iteration)` | After fixing issues (max 3 iterations) |
-| `learn(task_id, outcome, confidence_was, errors_found, tool_sequence)` | LAST cognitive call before delivering response (include comma-separated tool trace) |
+| `learn(task_id, outcome, confidence_was, errors_found)` | LAST cognitive call before delivering response |
+| `log_tool_execution(tool_name, arguments)` | Auto-logged on every tool execution to construct the trace |
 | `optimize_cognitive_core()` | Proactive self-optimization to deduplicate patterns and clean up rules |
 | `user_corrected(task_id, correction)` | IMMEDIATELY when user corrects your output |
 | `get_profile(domain)` | When user asks about VoxKage's capabilities or for diagnostics |
+<!-- COGNITIVE_PROTOCOL_END -->
 
 ---
 

@@ -123,5 +123,47 @@ class TestCognitiveCoreRecurrent(unittest.TestCase):
         _release_lock()
         _release_lock()
 
+    def test_triviality_gating(self):
+        from voxkage.mcp_servers.cognitive_core_server import _is_trivial_task, _classify_intent
+        # Trivial command
+        self.assertTrue(_is_trivial_task("git commit -m 'Initial commit'"))
+        self.assertTrue(_is_trivial_task("npm install lodash"))
+        self.assertTrue(_is_trivial_task("push changes"))
+        
+        # Non-trivial command (contains implementation verbs)
+        self.assertFalse(_is_trivial_task("commit changes and write tests"))
+        self.assertFalse(_is_trivial_task("create file and commit it"))
+        
+        # Verify classification intent
+        res = _classify_intent("git commit -m 'fix syntax'")
+        self.assertEqual(res["tier"], 1)
+        self.assertTrue(res["is_read_only"])
+        
+        res = _classify_intent("write code and commit it")
+        self.assertGreaterEqual(res["tier"], 2)
+        
+    def test_trace_logger_and_merging_in_learn(self):
+        from voxkage.mcp_servers.cognitive_core_server import start_turn, log_tool_execution, learn, _load_session
+        
+        # Initialize a task
+        start_turn("test task for trace logging")
+        
+        # Log some tools
+        log_tool_execution("search_web", '{"query": "test query"}')
+        log_tool_execution("edit_file", '{"file": "test.txt"}')
+        
+        # Let's verify session trace
+        session = _load_session()
+        self.assertEqual(len(session.get("tool_trace", [])), 2)
+        
+        # Run learn - should run successfully and reconstruct sequence
+        res = learn(task_id="test_task", outcome="success")
+        self.assertIn("COGNITIVE LEARN", res)
+        
+    def test_window_refresh(self):
+        from voxkage.mcp_servers.cognitive_core_server import start_turn
+        res = start_turn("ignored", refresh_only=True)
+        self.assertEqual(res, "[COGNITIVE] Protocol window refreshed.")
+
 if __name__ == "__main__":
     unittest.main()

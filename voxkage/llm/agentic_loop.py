@@ -421,6 +421,21 @@ async def tool_node(state: AgentState):
         result_preview = result_str[:120].replace("\n", " ")
         log_to_hud("VoxKage", f"🔧 [{tool_name}] {result_preview}")
 
+        # Auto-log execution to cognitive core session state
+        cognitive_tools = {
+            "start_turn", "pre_mortem", "checkpoint", "reflect", "verify",
+            "refine", "learn", "user_corrected", "get_profile", "log_tool_execution",
+            "verify_code_file", "generate_critique", "optimize_cognitive_core"
+        }
+        if tool_name not in cognitive_tools:
+            try:
+                args_str = ""
+                if arguments:
+                    args_str = json.dumps(arguments)
+                execute_tool_call("log_tool_execution", {"tool_name": tool_name, "arguments": args_str})
+            except Exception:
+                pass
+
         # ── Detect validation / argument errors and self-correct ──────────
         is_validation_error = any(k in result_str.lower() for k in [
             "validation error", "field required", "input should be",

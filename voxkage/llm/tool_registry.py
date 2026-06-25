@@ -65,9 +65,25 @@ def _gui(fn_name: str, **kwargs):
     }
     return _fns[fn_name](**kwargs)
 
-
-
-
+# Cognitive Core — imported lazily
+def _cognitive(fn_name: str, **kwargs):
+    from voxkage.mcp_servers.cognitive_core_server import (
+        start_turn, pre_mortem, checkpoint, reflect, verify,
+        refine, learn, user_corrected, get_profile, log_tool_execution
+    )
+    _fns = {
+        "start_turn": start_turn,
+        "pre_mortem": pre_mortem,
+        "checkpoint": checkpoint,
+        "reflect": reflect,
+        "verify": verify,
+        "refine": refine,
+        "learn": learn,
+        "user_corrected": user_corrected,
+        "get_profile": get_profile,
+        "log_tool_execution": log_tool_execution
+    }
+    return _fns[fn_name](**kwargs)
 
 # Map tool names to actual functions in the codebase
 def execute_tool_call(tool_name: str, arguments: dict):
@@ -612,6 +628,13 @@ def execute_tool_call(tool_name: str, arguments: dict):
 
         elif tool_name in ("create_session_log", "list_sessions", "get_session_log", "search_sessions"):
             return _session(tool_name, **arguments)
+
+        elif tool_name in (
+            "start_turn", "pre_mortem", "checkpoint", "reflect", "verify",
+            "refine", "learn", "user_corrected", "get_profile", "log_tool_execution",
+            "verify_code_file", "generate_critique", "optimize_cognitive_core"
+        ):
+            return _cognitive(tool_name, **arguments)
 
         else:
             return f"Tool {tool_name} not found in registry."
