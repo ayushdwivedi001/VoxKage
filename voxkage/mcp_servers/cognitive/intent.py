@@ -133,6 +133,27 @@ def _classify_intent(msg: str) -> dict:
     declared_domains = []
     declared_tier = None
 
+    # v8: Structural task header detection — forces Tier 3 immediately
+    # These patterns appear in well-specified task prompts and are unambiguous task signals
+    _STRUCTURAL_TASK_HEADERS = re.compile(
+        r"\b(task\s*breakdown|phase\s*\d|step\s*\d|requirements?:|phases:|steps:|breakdown:|"
+        r"objective:|goal:|instructions?:|sub[\s-]?tasks?:|deliverables?:)\b",
+        re.I
+    )
+    if _STRUCTURAL_TASK_HEADERS.search(msg_stripped):
+        domain_scores, domain, secondary_domains = _score_domains(msg_stripped)
+        ranked_domains = sorted(
+            [(d, s) for d, s in domain_scores.items()], key=lambda x: x[1], reverse=True
+        )
+        return {
+            "type": "task",
+            "domain": domain,
+            "secondary_domains": secondary_domains,
+            "ranked_domains": ranked_domains,
+            "tier": 3,
+            "is_read_only": False,
+        }
+
     for line in msg_lines:
         dom_match = re.search(r"^\s*(?:Domains?|Categories|Domain):\s*([a-zA-Z\s,;➔→\-\(\)>]+)", line, re.I)
         if dom_match:
@@ -217,6 +238,38 @@ def _classify_intent(msg: str) -> dict:
     # Questions asking for information/action
     if re.match(r"^(what|how|where|when|why|can\s*you|could\s*you|please|show|tell\s*me)\b", msg_stripped, re.I):
         task_score += 1
+
+    # v8: Informal human speech task patterns
+    # These fire regardless of message length — people speak to VoxKage this way naturally.
+    # "i want you to", "can you just", "yo can you", "soo basically" wrapping a task request
+    _INFORMAL_TASK_PATTERNS = [
+        # Direct delegation patterns — human asking AI to do something
+        (r"\bi\s+(?:want|need|would\s+like)\s+(?:you\s+)?to\s+\w", 3),
+        (r"\bcan\s+you\s+(?:please\s+|just\s+|quickly\s+|help\s+me\s+)?(?:do|go|check|find|get|look|run|write|build|make|create|test|research|compare|search|set up|pull|push|fix)\b", 3),
+        (r"\bcould\s+you\s+(?:please\s+|just\s+)?(?:do|go|check|find|get|look|run|write|build|make|create|test|research|compare|search)\b", 2),
+        (r"\b(?:yo|hey)\s+can\s+you\b", 2),
+        # Informal openers that wrap a task
+        (r"\bso+\s+(?:basically|i|can|could|let|like)\b", 1),
+        (r"\balright\s+so+\b", 1),
+        (r"\bokay\s+so+\b", 1),
+        # Multi-step sequencing — strong signal that this is a task not a conversation
+        (r"(?:once\s+you(?:'re|\s+are)?\s+done|after\s+(?:that|this|doing\s+that)|and\s+then\s+(?:also\s+)?(?:i\s+want|make sure|check))", 3),
+        (r"\bthen\s+i\s+(?:want|need)\s+you\s+to\b", 2),
+        (r"\bmake\s+sure\s+(?:the|it|that|you)\b", 1),
+        (r"\band\s+also\s+(?:double\s+check|verify|make\s+sure|check)\b", 2),
+    ]
+    informal_task_boost = 0
+    for pattern, weight in _INFORMAL_TASK_PATTERNS:
+        if re.search(pattern, msg_stripped, re.I):
+            informal_task_boost += weight
+    # Cap informal boost at 5 so a casual message can't blow past a strong conv_score
+    task_score += min(informal_task_boost, 5)
+
+    # v8: Numbered list detection — multi-step task breakdown signal
+    # Works on inline numbering ("1. do this 2. do that") and multi-line
+    numbered_items = re.findall(r"(?:^|\n|\s)\d+[\.\.\)]\s+\w", msg_stripped)
+    if len(numbered_items) >= 2:
+        task_score += min(len(numbered_items), 4)  # cap at 4 bonus points
 
     # Task wins when both present (social wrapping rule)
     if task_score > 0 and conv_score > 0:

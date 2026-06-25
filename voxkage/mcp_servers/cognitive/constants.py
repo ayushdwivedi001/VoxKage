@@ -185,6 +185,7 @@ OUTPUT_TYPE_FILTERS = {
             "env_config", "security", "error_handling", "edge_cases",
             "no_duplication", "codebase_style", "responsive", "accessible"
         ],
+        "exclude_prefixes": ["corr_"],
         "downgrade": {}
     },
     "command": {
@@ -192,6 +193,7 @@ OUTPUT_TYPE_FILTERS = {
             "imports_correct", "types_correct", "responsive", "accessible",
             "database", "tests", "security", "error_handling"
         ],
+        "exclude_prefixes": [],
         "downgrade": {},
     },
     "research": {
@@ -201,6 +203,7 @@ OUTPUT_TYPE_FILTERS = {
             "env_config", "security", "error_handling", "edge_cases",
             "no_duplication", "codebase_style", "responsive", "accessible"
         ],
+        "exclude_prefixes": ["corr_"],
         "downgrade": {},
     },
     "general": {
@@ -210,14 +213,17 @@ OUTPUT_TYPE_FILTERS = {
             "env_config", "security", "error_handling", "edge_cases",
             "no_duplication", "codebase_style", "responsive", "accessible"
         ],
+        "exclude_prefixes": ["corr_"],
         "downgrade": {},
     },
     "code": {
         "exclude": [],
+        "exclude_prefixes": [],
         "downgrade": {}
     },
     "config": {
         "exclude": ["tests", "database", "imports_correct", "types_correct"],
+        "exclude_prefixes": [],
         "downgrade": {}
     }
 }

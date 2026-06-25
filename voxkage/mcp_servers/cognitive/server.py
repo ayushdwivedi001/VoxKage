@@ -56,8 +56,9 @@ def start_turn(
     user_message: str,
     refresh_only: bool = False,
     suggested_domain: str = "",
-    suggested_tier: int = 0,                    # NEW: 1-3 overrides classifier
-    suggested_secondary_domains: str = ""       # NEW: Comma-separated list (e.g. "general,coding")
+    suggested_tier: int = 0,                    # 1-3 overrides classifier
+    suggested_secondary_domains: str = "",      # Comma-separated list (e.g. "general,coding")
+    primary_only: bool = False                  # v8: If True, strip secondary checklists entirely
 ) -> str:
     """
     COGNITIVE CORE — MANDATORY FIRST CALL EVERY SINGLE TURN.
@@ -99,6 +100,16 @@ def start_turn(
         _save_session(session)
         return "[COGNITIVE] Protocol window refreshed."
 
+    # v8: Detect classification retry (start_turn called again with no cognitive tools in between)
+    cog_trace = session.get("cognitive_trace", [])
+    is_retry = (
+        len(cog_trace) >= 1
+        and cog_trace[-1].get("tool") == "start_turn"
+        and suggested_tier > 0  # Only flag as retry when caller explicitly overrides
+    )
+    if is_retry:
+        session["start_turn_retry"] = True
+
     # Reset traces for a new turn
     session["cognitive_trace"] = [{"tool": "start_turn", "timestamp": _time.time()}]
     session["tool_trace"] = []
@@ -134,6 +145,13 @@ def start_turn(
         session["tier_was_suggested"] = True
         session["classifier_tier"] = classification["tier"]
         session["model_tier"] = suggested_tier
+
+    # v8: primary_only — strip secondary domains entirely so they never pollute checklists
+    if primary_only:
+        secondary_domains = []
+        session["primary_only"] = True
+    else:
+        session["primary_only"] = False
 
     # Follow-up detection
     is_followup = _detect_followup(user_message, session)
@@ -329,6 +347,8 @@ def start_turn(
         lines.append("    4. If reflect recommends REFINE, fix issues and call refine(task_id, issues, iteration)")
         lines.append("    5. Record outcome and update capability weights: Call learn(task_id, outcome, confidence_was, errors_found) → Deliver")
     else:
+        lines.append("    0. ⚡ MEMORY CHECK (REQUIRED): Call search_memory('domain + task type keywords') BEFORE any execution")
+        lines.append("       └ Failure to call search_memory will be flagged as high-severity in reflect()")
         lines.append("    1. Predict risks and load failure memories: Call pre_mortem(task_id, summary)")
         lines.append("    2. Execute task step-by-step, calling checkpoint(task_id, sub_task, status) after each major step")
         lines.append("    3. Run file verification checks: Call verify_code_file(filepath)")
@@ -337,7 +357,17 @@ def start_turn(
         lines.append("       └ Format: \"plan_1:pass, plan_2:pass, syntax_ok:pass, error_handling:fail:no try/catch\"")
         lines.append("    6. Run external checks (lint, test, build, run): Call verify(task_id, results)")
         lines.append("    7. If issues found in reflect/verify, call refine(task_id, issues, iteration) and repeat up to 3 times")
-        lines.append("    8. Record outcome and update capability weights: Call learn(task_id, outcome, confidence_was, errors_found) → Deliver")
+        lines.append("    8. Record outcome and update capability weights: Call learn(task_id, outcome, confidence_was, errors_found)")
+        lines.append("    9. ⚡ ALWAYS call optimize_cognitive_core() after learn() for Tier 3 tasks — commits evolved rules and prunes stale anti-patterns")
+        lines.append("    10. Deliver")
+
+    # v8: Surface classification override instructions on every task turn
+    lines.append("\n  ℹ️  Classification Override: If this domain/tier is wrong, re-call start_turn() with:")
+    lines.append(f"       suggested_domain='correct_domain', suggested_tier=N")
+    lines.append(f"       primary_only=True  ← strips secondary domain checklists entirely from scoring")
+
+    if primary_only:
+        lines.append("\n  🎯 primary_only=True: Secondary domain checklists excluded from scoring.")
 
     # Universal Metacognitive Axioms
     try:
@@ -558,6 +588,9 @@ def reflect(
 
     # Load baseline checklist and active plan with domain metadata
     secondary_domains = task.get("secondary_domains", [])
+    # v8: Respect primary_only flag set by start_turn()
+    if session.get("primary_only"):
+        secondary_domains = []
     checklist = _load_checklist(domain)
     for item in checklist:
         item["origin_domain"] = domain
@@ -565,6 +598,10 @@ def reflect(
     existing_ids = {item["id"] for item in checklist}
     for sec_domain in secondary_domains:
         for item in _load_checklist(sec_domain):
+            # v8: Skip items with domain_scope:isolated — they are user corrections specific
+            # to one domain and must NEVER bleed into other domain scoring
+            if item.get("domain_scope") == "isolated":
+                continue
             if item["id"] not in existing_ids:
                 item["origin_domain"] = sec_domain
                 checklist.append(item)
@@ -603,12 +640,18 @@ def reflect(
 
     filters = OUTPUT_TYPE_FILTERS.get(output_type, {})
     excluded_ids = set(filters.get("exclude", []))
+    exclude_prefixes = filters.get("exclude_prefixes", [])  # v8: prefix-based exclusion
     downgrade_map = filters.get("downgrade", {})
 
     filtered_map = {}
     filter_log = {"excluded": [], "downgraded": []}
     for item_id, item in combined_items_map.items():
+        # v8: Exclude by exact ID
         if item_id in excluded_ids:
+            filter_log["excluded"].append(item_id)
+            continue
+        # v8: Exclude by prefix (e.g. all corr_ items for research/markdown outputs)
+        if any(item_id.startswith(pfx) for pfx in exclude_prefixes):
             filter_log["excluded"].append(item_id)
             continue
         if item_id in downgrade_map:
@@ -717,9 +760,8 @@ def reflect(
                 high_severity_failed = True
                 break
             
-    recommend_deliver = (quality_score >= 0.85) and not high_severity_failed
-
-    # Calculate per-domain scores
+    # v8: PRIMARY-DOMAIN GATED DELIVERY DECISION
+    # First: compute per-domain score breakdown (needed for primary gating)
     domain_scores = {}
     domain_scores[domain] = {"achieved": 0, "possible": 0, "passed_ids": [], "failed_ids": []}
     for sd in secondary_domains:
@@ -742,6 +784,43 @@ def reflect(
         domain_scores[orig_dom]["possible"] += weight
         domain_scores[orig_dom]["failed_ids"].append(fail_item["id"])
 
+    # Separate chk_fails early so secondary/primary split can reference it
+    chk_fails = [f for f in fails if not f["id"].startswith("plan_")]
+
+    # Compute primary domain score separately from secondary domains.
+    # DELIVER if primary domain score >= 0.85 — secondary domain failures are informational.
+    primary_ds = domain_scores.get(domain, {"achieved": 0, "possible": 0})
+    primary_possible = primary_ds["possible"]
+    primary_achieved = primary_ds["achieved"]
+    primary_score = round(primary_achieved / max(primary_possible, 1), 2)
+
+    # Check for high-severity failures in PRIMARY domain only
+    primary_high_failed = False
+    for fail_item in fails:
+        item = combined_items_map.get(fail_item["id"])
+        if item and item.get("origin_domain", domain) == domain:
+            severity = item.get("severity", "low")
+            if severity == "high" and "Not reported" not in fail_item.get("reason", ""):
+                primary_high_failed = True
+                break
+
+    # Primary gates delivery — secondary is informational
+    if primary_possible > 0:
+        recommend_deliver = (primary_score >= 0.85) and not primary_high_failed
+    else:
+        # No primary items scored — fall back to combined score
+        recommend_deliver = (quality_score >= 0.85) and not high_severity_failed
+
+    # Separate secondary failures for informational display
+    secondary_chk_fails = [
+        f for f in chk_fails
+        if combined_items_map.get(f["id"], {}).get("origin_domain", domain) != domain
+    ]
+    primary_chk_fails = [
+        f for f in chk_fails
+        if combined_items_map.get(f["id"], {}).get("origin_domain", domain) == domain
+    ]
+
     lines = [
         f"[COGNITIVE REFLECT] task: {task_id}",
         f"  Domain: {domain}",
@@ -750,6 +829,8 @@ def reflect(
         lines.append(f"  Secondary Domains: {', '.join(secondary_domains)}")
     lines.append(f"  Output: {output_summary[:150]}")
     lines.append(f"  Checklist Quality Score: {quality_score}/1.0 ({quality_percent}%)")
+    if primary_possible > 0:
+        lines.append(f"  Primary Domain Score ({domain}): {round(primary_score*100)}% — gates DELIVER decision")
 
     lines.append("\n  Score Breakdown:")
     for dom_name, d_score in domain_scores.items():
@@ -761,7 +842,8 @@ def reflect(
             pct = round((ach / pos) * 100)
             passed_checks = len(d_score["passed_ids"])
             total_checks = passed_checks + len(d_score["failed_ids"])
-            lines.append(f"    • {dom_name.capitalize()}: {pct}% ({passed_checks}/{total_checks} checks)")
+            role = " (primary — gates delivery)" if dom_name == domain else " (secondary — informational)"
+            lines.append(f"    • {dom_name.capitalize()}: {pct}% ({passed_checks}/{total_checks} checks){role}")
 
     if output_type != "auto" and (filter_log["excluded"] or filter_log["downgraded"]):
         lines.append(
@@ -775,7 +857,6 @@ def reflect(
     chk_passes = [p for p in passes if not p.startswith("plan_")]
     
     plan_fails = [f for f in fails if f["id"].startswith("plan_")]
-    chk_fails = [f for f in fails if not f["id"].startswith("plan_")]
 
     if plan_passes or chk_passes:
         lines.append("  ✅ PASSED:")
@@ -784,21 +865,30 @@ def reflect(
         if chk_passes:
             lines.append(f"    • Standard Checklist: {', '.join(chk_passes)}")
 
-    if plan_fails or chk_fails:
-        lines.append("\n  ❌ FAILED / UNADDRESSED:")
+    if plan_fails or primary_chk_fails:
+        lines.append("\n  ❌ FAILED / UNADDRESSED (Primary Domain):")
         if plan_fails:
             lines.append("    • Plan Requirements:")
             for f_item in plan_fails:
                 item = combined_items_map.get(f_item["id"])
                 check_text = item["check"] if item else f_item["id"]
                 lines.append(f"      - {f_item['id']}: {check_text} → {f_item['reason']}")
-        if chk_fails:
-            lines.append("    • Standard Checklist:")
-            for f_item in chk_fails:
+        if primary_chk_fails:
+            lines.append("    • Standard Checklist (Primary):")
+            for f_item in primary_chk_fails:
                 item = combined_items_map.get(f_item["id"])
                 check_text = item["check"] if item else f_item["id"]
                 elevated_mark = " 🔺" if f_item["id"] in elevated else ""
                 lines.append(f"      - {f_item['id']}{elevated_mark}: {check_text} → {f_item['reason']}")
+
+    # v8: Secondary domain failures are informational — they do NOT block delivery
+    if secondary_chk_fails:
+        lines.append("\n  ℹ️  Secondary Domain Gaps (informational — do NOT block delivery):")
+        for f_item in secondary_chk_fails:
+            item = combined_items_map.get(f_item["id"])
+            check_text = item["check"] if item else f_item["id"]
+            sec_dom = item.get("origin_domain", "?") if item else "?"
+            lines.append(f"    • [{sec_dom}] {f_item['id']}: {check_text}")
 
     # Check if any elevated items were missed
     elevated_missed = [e for e in elevated if e not in passes and not any(f["id"] == e for f in fails)]
@@ -808,11 +898,51 @@ def reflect(
     # Recommendation
     if recommend_deliver:
         lines.append(f"\n  → Recommendation: DELIVER ✅")
+        if secondary_chk_fails:
+            lines.append(f"    (Primary domain passed — {len(secondary_chk_fails)} secondary gaps are informational)")
     else:
-        reason_msg = "high-severity failure(s) present" if high_severity_failed else f"score {quality_percent}% is below 85% threshold"
+        if primary_possible > 0:
+            reason_msg = "primary domain high-severity failure" if primary_high_failed else f"primary domain score {round(primary_score*100)}% is below 85% threshold"
+        else:
+            reason_msg = "high-severity failure(s) present" if high_severity_failed else f"score {quality_percent}% is below 85% threshold"
         lines.append(f"\n  → Recommendation: REFINE ❌ ({reason_msg})")
         
-    lines.append(f"  → Score: {quality_score} (threshold: 0.85)")
+    lines.append(f"  → Primary Score: {primary_score} | Combined Score: {quality_score} (threshold: 0.85)")
+
+    # v8: Auto-evolve trigger — when secondary domain fails badly but primary passes
+    # This captures the exact mismatch pattern and persists a rule automatically
+    auto_evolved_note = ""
+    try:
+        sec_fail_count = len(secondary_chk_fails)
+        if sec_fail_count >= 3 and recommend_deliver and secondary_domains:
+            worst_sec_domain = secondary_domains[0] if secondary_domains else ""
+            if worst_sec_domain:
+                proposed = (
+                    f"When primary domain is '{domain}' and output type is '{output_type}', "
+                    f"exclude '{worst_sec_domain}' secondary checklist items from scoring — "
+                    f"they are not applicable to {output_type} deliverables"
+                )
+                evidence = (
+                    f"{sec_fail_count} secondary domain failures from '{worst_sec_domain}' "
+                    f"on a {domain} task with {round(primary_score*100)}% primary score"
+                )
+                evolve_result = evolve_cognitive_rules(
+                    domain=domain,
+                    evolution_type="domain_reclassification",
+                    evidence=evidence,
+                    proposed_rule=proposed,
+                    confidence=min(0.7 + sec_fail_count * 0.05, 0.95),
+                    observation_count=sec_fail_count,
+                    dry_run=False
+                )
+                if "persisted" in evolve_result.lower() or "observation" in evolve_result.lower():
+                    session["auto_evolved"] = True
+                    auto_evolved_note = f"\n  🔄 Auto-evolved rule: {proposed[:120]}"
+    except Exception:
+        pass
+
+    if auto_evolved_note:
+        lines.append(auto_evolved_note)
 
     # Store reflection data in session for learn()
     session["last_reflection"] = {
@@ -821,6 +951,8 @@ def reflect(
         "fail_details": fails,
         "confidence": quality_score,
         "pass_rate": quality_score,
+        "primary_score": primary_score,
+        "recommend_deliver": recommend_deliver,
     }
     _save_session(session)
 
@@ -1307,22 +1439,84 @@ def learn(
     total = gp.get("total_tasks_completed", 0)
     corrections = gp.get("total_user_corrections", 0)
 
+    # v8: Detect classification retry and auto-log it as an error
+    auto_errors = list(errors_found) if isinstance(errors_found, (list, tuple)) else (
+        [errors_found] if errors_found else []
+    )
+    if session.get("start_turn_retry"):
+        auto_errors.append("start_turn_conversation_misclassification")
+        # Also log as a domain mismatch so optimize() can pick it up
+        try:
+            _append_domain_mismatch({
+                "task_id": task_id,
+                "assigned_domain": domain,
+                "corrected_domain": domain,  # same domain, just wrong type (conversation vs task)
+                "error_type": "conversation_misclassification",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            pass
+        session["start_turn_retry"] = False
+
+    errors_display = ", ".join(auto_errors) if auto_errors else errors_found
+
+    # v8: Auto-evolve on false-alarm REFINE (task succeeded despite REFINE recommendation)
+    false_alarm_note = ""
+    try:
+        last_reflect = session.get("last_reflection", {})
+        reflect_recommended_deliver = last_reflect.get("recommend_deliver", True)
+        primary_score_was = last_reflect.get("primary_score", 1.0)
+        if outcome == "success" and not reflect_recommended_deliver and primary_score_was >= 0.85:
+            # Reflect said REFINE but task actually succeeded and primary was fine
+            proposed = (
+                f"When primary domain '{domain}' score >= 85% and task outcome is success, "
+                f"do not REFINE \u2014 combined secondary domain failures are not blocking"
+            )
+            evidence = (
+                f"Task {task_id} succeeded with primary_score={primary_score_was} "
+                f"despite REFINE recommendation \u2014 false alarm confirmed"
+            )
+            evolve_result = evolve_cognitive_rules(
+                domain=domain,
+                evolution_type="domain_rule",
+                evidence=evidence,
+                proposed_rule=proposed,
+                confidence=0.85,
+                observation_count=2,
+                dry_run=False
+            )
+            if "persisted" in evolve_result.lower() or "observation" in evolve_result.lower():
+                session["auto_evolved"] = True
+                false_alarm_note = "\n  \ud83d\udd04 Auto-evolved rule: false-alarm REFINE pattern captured and persisted."
+    except Exception:
+        pass
+
     lines = [
-        f"[COGNITIVE LEARN] task: {task_id} → {outcome.upper()}",
+        f"[COGNITIVE LEARN] task: {task_id} \u2192 {outcome.upper()}",
         f"  Domain {domain}: {success_rate}% success rate ({dp[domain]['successes']}/{dp[domain]['tasks']})",
         f"  Calibration: {cal_score}",
         f"  Lifetime: {total} tasks, {corrections} user corrections",
     ]
-    if errors_found:
-        lines.append(f"  Errors logged: {errors_found}")
+    if errors_display:
+        lines.append(f"  Errors logged: {errors_display}")
+
+    if false_alarm_note:
+        lines.append(false_alarm_note)
 
     if execution_warnings:
-        lines.append("\n  ⚠️ Execution Anti-Patterns Detected:")
+        lines.append("\n  \u26a0\ufe0f Execution Anti-Patterns Detected:")
         for warn in execution_warnings:
-            lines.append(f"    • [{warn['type'].upper()}]: {warn['pattern']}")
-            lines.append(f"      → Suggested Fix: {warn['suggested_fix']}")
+            lines.append(f"    \u2022 [{warn['type'].upper()}]: {warn['pattern']}")
+            lines.append(f"      \u2192 Suggested Fix: {warn['suggested_fix']}")
 
-    lines.append(f"\n  → Profile updated. Deliver your response now.")
+    # v8: Optimize directive when mismatch or auto-evolved rule was detected
+    if session.get("auto_evolved") or "misclassification" in str(auto_errors):
+        lines.append(
+            "\n  \u26a1 AUTO-OPTIMIZE REQUIRED: Call optimize_cognitive_core() before delivering "
+            "\u2014 domain mismatch or auto-evolved rule detected this session."
+        )
+    else:
+        lines.append(f"\n  \u2192 Profile updated. Deliver your response now.")
     return guard_warning + "\n".join(lines)
 
 
@@ -1444,7 +1638,10 @@ def user_corrected(
         items.append({
             "id": check_id,
             "check": check_text,
-            "severity": severity if severity in ["high", "medium", "low"] else "high"
+            "severity": severity if severity in ["high", "medium", "low"] else "high",
+            # v8: Isolated scope — this item must NEVER bleed into secondary domain scoring
+            # It is a correction specific to this exact domain and context.
+            "domain_scope": "isolated",
         })
         _save_checklist(resolved_domain, items)
     except Exception:
