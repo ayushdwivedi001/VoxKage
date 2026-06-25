@@ -72,7 +72,13 @@ _auto_update_documentation(force=False)
 # ── FastMCP Tool Registrations ───────────────────────────────────────────────
 
 @mcp.tool()
-def start_turn(user_message: str, refresh_only: bool = False, suggested_domain: str = "") -> str:
+def start_turn(
+    user_message: str,
+    refresh_only: bool = False,
+    suggested_domain: str = "",
+    suggested_tier: int = 0,
+    suggested_secondary_domains: str = ""
+) -> str:
     """
     COGNITIVE CORE — MANDATORY FIRST CALL EVERY SINGLE TURN.
 
@@ -87,6 +93,8 @@ def start_turn(user_message: str, refresh_only: bool = False, suggested_domain: 
       user_message : The user's raw message text for this turn.
       refresh_only : If True, only update the active protocol timestamp to keep the gate open.
       suggested_domain : Optional. Model hints the correct domain to override classifier.
+      suggested_tier   : Optional. Model overrides tier (1-3).
+      suggested_secondary_domains : Optional. Model overrides secondary domains (comma-separated).
 
     Returns:
       - If conversation: { type: "conversation" } — respond normally, skip all other cognitive tools.
@@ -102,7 +110,13 @@ def start_turn(user_message: str, refresh_only: bool = False, suggested_domain: 
       If this is a follow-up to a recent task ("make it blue", "also add X"),
       returns the previous task_id so you continue the same context.
     """
-    return server.start_turn(user_message, refresh_only=refresh_only, suggested_domain=suggested_domain)
+    return server.start_turn(
+        user_message,
+        refresh_only=refresh_only,
+        suggested_domain=suggested_domain,
+        suggested_tier=suggested_tier,
+        suggested_secondary_domains=suggested_secondary_domains
+    )
 
 
 @mcp.tool()
@@ -201,7 +215,13 @@ def refine(task_id: str, issues_fixed: str, iteration: int = 1) -> str:
 
 
 @mcp.tool()
-def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found: str = "") -> str:
+def learn(
+    task_id: str,
+    outcome: str,
+    confidence_was: float = 0.5,
+    errors_found: str = "",
+    evolved_checklist_item: dict = None
+) -> str:
     """
     COGNITIVE CORE — Update global profile before delivering final output.
 
@@ -214,14 +234,28 @@ def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found:
       outcome        : "success", "partial", or "failed"
       confidence_was : Your confidence estimate before execution (0.0-1.0)
       errors_found   : Comma-separated error descriptions found during the task
+      evolved_checklist_item : Optional structured checklist item to add (dict)
 
     Returns profile update confirmation and execution analysis.
     """
-    return server.learn(task_id, outcome, confidence_was, errors_found)
+    return server.learn(
+        task_id=task_id,
+        outcome=outcome,
+        confidence_was=confidence_was,
+        errors_found=errors_found,
+        evolved_checklist_item=evolved_checklist_item
+    )
 
 
 @mcp.tool()
-def user_corrected(task_id: str, correction: str, error_category: str = "") -> str:
+def user_corrected(
+    task_id: str,
+    correction: str,
+    error_category: str = "",
+    descriptive_id: str = "",
+    target_domain: str = "",
+    severity: str = "high"
+) -> str:
     """
     COGNITIVE CORE — High-weight learning from user corrections.
 
@@ -233,10 +267,20 @@ def user_corrected(task_id: str, correction: str, error_category: str = "") -> s
       task_id        : The task_id of the corrected task
       correction     : What the user said was wrong and what the fix should be
       error_category : Optional category (e.g., "logic_error", "api_design", "missing_feature")
+      descriptive_id : Optional descriptive ID for checklist (e.g. corr_respect_read_only)
+      target_domain  : Optional target domain to store correction (e.g. coding)
+      severity       : Optional severity of checklist item (high, medium, low)
 
     Returns confirmation of the high-weight profile update.
     """
-    return server.user_corrected(task_id, correction, error_category)
+    return server.user_corrected(
+        task_id=task_id,
+        correction=correction,
+        error_category=error_category,
+        descriptive_id=descriptive_id,
+        target_domain=target_domain,
+        severity=severity
+    )
 
 
 @mcp.tool()

@@ -114,35 +114,35 @@ Use these facts to guide your decisions and personalize your responses immediate
 ### VoxKage Consolidated Soul History & Performance
 
 **Domain Metrics**:
-- **FRONTEND**: 98.8% success rate (80/81 tasks)
+- **FRONTEND**: 98.9% success rate (86/87 tasks)
   - Common Weaknesses: dependency_issue, In agent_loop.py, used lowercase 'false' instead of Python's capitalized 'False'
-- **BACKEND**: 96.0% success rate (48/50 tasks)
-  - Common Weaknesses: None, none
-- **RESEARCH**: 97.2% success rate (35/36 tasks)
-  - Common Weaknesses: The user requested not to check the EAS build status, but to simply run deploy.p, missing_feature
+- **BACKEND**: 96.1% success rate (49/51 tasks)
+  - Common Weaknesses: None - identified shared IP rate-limiting issue via local server test., None - diagnosed WebSocket error handling omission.
+- **RESEARCH**: 97.9% success rate (47/48 tasks)
+  - Common Weaknesses: None, None — research task completed successfully
 - **SYSTEM**: 97.5% success rate (39/40 tasks)
-  - Common Weaknesses: api_payload_error, None
-- **CODING**: 98.6% success rate (70/71 tasks)
-  - Common Weaknesses: FileSystem downloadAsync is deprecated in modern expo-file-system SDK 56 and thr, BTW queries failing on backend with 500 error; Drill failing with 'NoneType' obj
-- **GENERAL**: 100.0% success rate (13/13 tasks)
+  - Common Weaknesses: Ensure we verify the system disk before deletion, api_payload_error
+- **CODING**: 98.9% success rate (88/89 tasks)
+  - Common Weaknesses: none, Ngrok outage caused --tunnel to fail
+- **GENERAL**: 100.0% success rate (42/42 tasks)
   - Common Weaknesses: false_positive, none
 
 **Learned Negative Constraints (Anti-Patterns)**:
+- **ALL**: Avoid repeating: Completed Tier 3 task but skipped reflect() quality check.
+- **ALL**: Avoid repeating: Wasted Tier 3 overhead for simple task. Assigned Tier 3 but only used basic tools: run_command
 - **ALL**: Avoid repeating: Stubborn consecutive calls to tool 'view_file' (3 times).
 - **ALL**: Avoid repeating: Called heavy cognitive tools (pre_mortem/reflect) on a Tier 1 (Quick/Read-only) task.
-- **ALL**: Avoid repeating: Wasted Tier 3 overhead for simple task. Assigned Tier 3 but only used basic tools: run_command
-- **ALL**: Avoid repeating: Completed Tier 3 task but skipped reflect() quality check.
-- **FRONTEND**: Avoid repeating: I failed to call start_turn() before every turn, skipping it for multiple queries about git status, commits, RAG indexing, and follow-up questions. The user expects it as the ABSOLUTE FIRST action eve
 - **CODING**: Avoid repeating: BTW queries failing on backend with 500 error; Drill failing with 'NoneType' object has no attribute 'startswith'.
+- **FRONTEND**: Avoid repeating: I failed to call start_turn() before every turn, skipping it for multiple queries about git status, commits, RAG indexing, and follow-up questions. The user expects it as the ABSOLUTE FIRST action eve
 - **SYSTEM**: Avoid repeating: DeepSeek API fails with HTTP 400 because message history contains messages with role 'laptop', which is not a supported API role (should be mapped to 'user' or 'assistant' or skipped).
 - **FRONTEND**: Avoid repeating: In agent_loop.py, used lowercase 'false' instead of Python's capitalized 'False' inside the mobile_print_pdf tool schema dictionary default value, which caused a NameError at runtime.
 - **BACKEND**: Avoid repeating: Metro builder does not support dynamic require calls with variables like require(name); it requires static string literals. Refactored the code to use separate require functions for each module.
 - **BACKEND**: Avoid repeating: Agent loop failed: name 'get_tool_label' is not defined
 
 **Recent Tasks Summary**:
-- [2026-06-25] GENERAL: SUCCESS (Confidence: 0.95)
-- [2026-06-25] FRONTEND: SUCCESS (Confidence: 0.95)
-- [2026-06-25] GENERAL: SUCCESS (Confidence: 0.95)
+- [2026-06-25] FRONTEND: SUCCESS (Confidence: 0.5)
+- [2026-06-25] GENERAL: SUCCESS (Confidence: 0.5)
+- [2026-06-25] CODING: SUCCESS (Confidence: 0.95)
 
 ---
 

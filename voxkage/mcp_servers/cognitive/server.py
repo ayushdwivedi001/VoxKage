@@ -52,7 +52,9 @@ from .utils import (
 def start_turn(
     user_message: str,
     refresh_only: bool = False,
-    suggested_domain: str = ""    # NEW: Model hints the correct domain before classification
+    suggested_domain: str = "",
+    suggested_tier: int = 0,                    # NEW: 1-3 overrides classifier
+    suggested_secondary_domains: str = ""       # NEW: Comma-separated list (e.g. "general,coding")
 ) -> str:
     """
     COGNITIVE CORE — MANDATORY FIRST CALL EVERY SINGLE TURN.
@@ -68,6 +70,8 @@ def start_turn(
       user_message : The user's raw message text for this turn.
       refresh_only : If True, only update the active protocol timestamp to keep the gate open.
       suggested_domain : Optional. Model hints the correct domain to override classifier.
+      suggested_tier   : Optional. Model overrides tier (1-3).
+      suggested_secondary_domains : Optional. Model overrides secondary domains (comma-separated).
 
     Returns:
       - If conversation: { type: "conversation" } — respond normally, skip all other cognitive tools.
@@ -106,6 +110,7 @@ def start_turn(
 
     # ── Task detected ──────────────────────────────────────────────
     domain = classification["domain"]
+    secondary_domains = list(classification.get("secondary_domains", []))
     tier = classification["tier"]
     is_read_only = classification.get("is_read_only", False)
 
@@ -115,6 +120,17 @@ def start_turn(
         session["domain_was_suggested"] = True
         session["classifier_domain"] = classification["domain"]
         session["model_domain"] = suggested_domain
+
+    if suggested_secondary_domains:
+        sec_list = [d.strip().lower() for d in suggested_secondary_domains.split(",")]
+        secondary_domains = [d for d in sec_list if d in _DOMAIN_KEYWORDS]
+        classification["secondary_domains"] = secondary_domains
+
+    if suggested_tier in [1, 2, 3]:
+        tier = suggested_tier
+        session["tier_was_suggested"] = True
+        session["classifier_tier"] = classification["tier"]
+        session["model_tier"] = suggested_tier
 
     # Follow-up detection
     is_followup = _detect_followup(user_message, session)
@@ -154,7 +170,6 @@ def start_turn(
     domain_anti_patterns = deduped_aps[:5]
 
     # Load baseline checklist and merge secondary domains
-    secondary_domains = classification.get("secondary_domains", [])
     checklist = _load_checklist(domain)
     existing_ids = {item["id"] for item in checklist}
     for sec_domain in secondary_domains:
@@ -368,9 +383,12 @@ def pre_mortem(task_id: str, task_summary: str) -> str:
     common_errors = domain_perf.get("common_errors", [])
 
     ap_data = _load_anti_patterns()
+    secondary_domains = task.get("secondary_domains", [])
+    active_domains = [domain] + list(secondary_domains) + ["all", "general"]
+    
     all_aps = [
         ap for ap in ap_data.get("anti_patterns", [])
-        if ap.get("domain") in (domain, "all")
+        if ap.get("domain") in active_domains
     ]
     # Score and rank by relevance to task_summary
     for ap in all_aps:
@@ -917,7 +935,13 @@ def refine(task_id: str, issues_fixed: str, iteration: int = 1) -> str:
     return guard_warning + "\n".join(lines)
 
 
-def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found: str = "") -> str:
+def learn(
+    task_id: str,
+    outcome: str,
+    confidence_was: float = 0.5,
+    errors_found: str = "",
+    evolved_checklist_item: dict = None
+) -> str:
     """
     COGNITIVE CORE — Update global profile before delivering final output.
 
@@ -930,6 +954,7 @@ def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found:
       outcome        : "success", "partial", or "failed"
       confidence_was : Your confidence estimate before execution (0.0-1.0)
       errors_found   : Comma-separated error descriptions found during the task
+      evolved_checklist_item : Optional structured checklist item to add (dict)
 
     Returns profile update confirmation and execution analysis.
     """
@@ -997,11 +1022,32 @@ def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found:
                 if outcome == "success":
                     dp[corrected_domain]["successes"] = dp[corrected_domain].get("successes", 0) + 1
 
-        # NEW: P3 Checklist Self-Evolution via learn()
+    # NEW: P3 Checklist Self-Evolution via learn()
+    if evolved_checklist_item and isinstance(evolved_checklist_item, dict):
+        e_id = evolved_checklist_item.get("id", "").strip()
+        e_check = evolved_checklist_item.get("check", "").strip()
+        e_domain = evolved_checklist_item.get("domain", domain).strip().lower()
+        e_severity = evolved_checklist_item.get("severity", "medium").strip().lower()
+        
+        if e_id and e_check:
+            if not e_id.startswith("evolved_"):
+                e_id = f"evolved_{e_id}"
+            e_id = re.sub(r"[^a-zA-Z0-9_]", "", e_id)
+            
+            candidate = {
+                "id": e_id,
+                "check": e_check,
+                "severity": e_severity if e_severity in ["high", "medium", "low"] else "medium",
+                "source": "model_evolved",
+                "first_seen": datetime.now(timezone.utc).isoformat(),
+            }
+            _store_pending_checklist_item(e_domain, candidate)
+    elif errors_found:
+        # Fallback to regex patterns
         STRUCTURAL_GAP_PATTERNS = [
             (r"domain[\s_](?:mismatch|applicability|filter)", "domain_applicability"),
             (r"checklist[\s_](?:wrong|inapplicable|missing)", "checklist_mismatch"),
-            (r"no[\s_]check[\s_]for\s+(.{5,40})", None),       # dynamic label from match
+            (r"no[\s_]check[\s_]for\s+(.{5,40})", None),
             (r"missing[\s_](?:check|validation)\s+for\s+(.{5,40})", None),
         ]
         for pattern, fixed_label in STRUCTURAL_GAP_PATTERNS:
@@ -1230,7 +1276,14 @@ def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found:
     return guard_warning + "\n".join(lines)
 
 
-def user_corrected(task_id: str, correction: str, error_category: str = "") -> str:
+def user_corrected(
+    task_id: str,
+    correction: str,
+    error_category: str = "",
+    descriptive_id: str = "",
+    target_domain: str = "",
+    severity: str = "high"
+) -> str:
     """
     COGNITIVE CORE — High-weight learning from user corrections.
 
@@ -1242,6 +1295,9 @@ def user_corrected(task_id: str, correction: str, error_category: str = "") -> s
       task_id        : The task_id of the corrected task
       correction     : What the user said was wrong and what the fix should be
       error_category : Optional category (e.g., "logic_error", "api_design", "missing_feature")
+      descriptive_id : Optional descriptive ID for checklist (e.g. corr_respect_read_only)
+      target_domain  : Optional target domain to store correction (e.g. coding)
+      severity       : Optional severity of checklist item (high, medium, low)
 
     Returns confirmation of the high-weight profile update.
     """
@@ -1251,6 +1307,11 @@ def user_corrected(task_id: str, correction: str, error_category: str = "") -> s
     task = session.get("last_task") or session.get("active_task") or {}
     domain = task.get("domain", "coding")
 
+    # 1. Determine Target Domain (with fallback to task domain)
+    resolved_domain = target_domain.strip().lower() if target_domain else domain
+    if resolved_domain not in _DOMAIN_KEYWORDS and resolved_domain != "all":
+        resolved_domain = "general"
+
     # Update profile
     profile = _load_profile()
     gp = profile.get("global_profile", {})
@@ -1258,11 +1319,11 @@ def user_corrected(task_id: str, correction: str, error_category: str = "") -> s
 
     # Add to common errors (high priority)
     dp = gp.get("domain_performance", {})
-    if domain in dp:
+    if resolved_domain in dp:
         err_text = error_category if error_category else correction[:80]
-        if err_text not in dp[domain].get("common_errors", []):
-            dp[domain]["common_errors"].insert(0, err_text)
-            dp[domain]["common_errors"] = dp[domain]["common_errors"][:10]
+        if err_text not in dp[resolved_domain].get("common_errors", []):
+            dp[resolved_domain]["common_errors"].insert(0, err_text)
+            dp[resolved_domain]["common_errors"] = dp[resolved_domain]["common_errors"][:10]
 
     gp["domain_performance"] = dp
     profile["global_profile"] = gp
@@ -1283,7 +1344,7 @@ def user_corrected(task_id: str, correction: str, error_category: str = "") -> s
             same_task = ap.get("learned_from") == task_id
             
             keyword_match = False
-            if ap.get("domain") == domain or ap.get("domain") == "all":
+            if ap.get("domain") == resolved_domain or ap.get("domain") == "all":
                 hits = sum(1 for kw in keywords if kw in pat_lower)
                 if len(keywords) > 0 and hits >= min(2, len(keywords)):
                     keyword_match = True
@@ -1307,7 +1368,7 @@ def user_corrected(task_id: str, correction: str, error_category: str = "") -> s
         ap_data = _load_anti_patterns()
         ap_data["anti_patterns"].append({
             "pattern": correction[:200],
-            "domain": domain,
+            "domain": resolved_domain,
             "severity": "user_caught",
             "learned_from": task_id,
             "error_category": error_category,
@@ -1319,28 +1380,35 @@ def user_corrected(task_id: str, correction: str, error_category: str = "") -> s
 
     # Update checklist dynamic rules
     try:
-        items = _load_checklist(domain)
-        check_id = f"corr_{task_id}"
+        items = _load_checklist(resolved_domain)
+        check_id = descriptive_id.strip() if descriptive_id else f"corr_{task_id}"
+        if not check_id.startswith("corr_"):
+            check_id = f"corr_{check_id}"
+        check_id = re.sub(r"[^a-zA-Z0-9_]", "", check_id)
+        
         check_text = f"Did we avoid repeating: {correction[:120]}?"
-        if not any(it.get("id") == check_id for it in items):
-            items.append({
-                "id": check_id,
-                "check": check_text,
-                "severity": "high"
-            })
-            _save_checklist(domain, items)
+        
+        # Remove any existing item with the same ID
+        items = [it for it in items if it.get("id") != check_id]
+        
+        items.append({
+            "id": check_id,
+            "check": check_text,
+            "severity": severity if severity in ["high", "medium", "low"] else "high"
+        })
+        _save_checklist(resolved_domain, items)
     except Exception:
         pass
 
     # Update session elevated checks
     raw_elevated = session.get("elevated_checks", {})
     if isinstance(raw_elevated, list):
-        raw_elevated = {domain: raw_elevated}
+        raw_elevated = {resolved_domain: raw_elevated}
         session["elevated_checks"] = raw_elevated
     elif not isinstance(raw_elevated, dict):
         raw_elevated = {}
         session["elevated_checks"] = raw_elevated
-    domain_elevated = raw_elevated.setdefault(domain, [])
+    domain_elevated = raw_elevated.setdefault(resolved_domain, [])
     if error_category and error_category not in domain_elevated:
         domain_elevated.append(error_category)
     

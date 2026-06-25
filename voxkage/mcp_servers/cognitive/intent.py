@@ -62,6 +62,43 @@ def _classify_intent(msg: str) -> dict:
     if not msg_stripped:
         return {"type": "conversation"}
 
+    # NEW: Explicit Header & Metadata Parsing
+    msg_lines = msg_stripped.split("\n")[:5]
+    declared_domains = []
+    declared_tier = None
+
+    for line in msg_lines:
+        dom_match = re.search(r"^(?:Domains?|Categories|Domain):\s*([a-zA-Z\s,;➔→\-\(\)>]+)", line, re.I)
+        if dom_match:
+            # Split on arrows and delimiters
+            raw_doms = re.split(r"[,;➔→\-<>]+", dom_match.group(1))
+            for rd in raw_doms:
+                clean_d = re.sub(r"\(.*?\)", "", rd).strip().lower()
+                if not clean_d:
+                    continue
+                for standard_domain in _DOMAIN_KEYWORDS.keys():
+                    if standard_domain in clean_d or clean_d in standard_domain:
+                        if standard_domain not in declared_domains:
+                            declared_domains.append(standard_domain)
+                            break
+        
+        tier_match = re.search(r"^(?:Tiers?|Complexity):\s*([1-3])", line, re.I)
+        if tier_match:
+            declared_tier = int(tier_match.group(1))
+
+    if declared_domains:
+        primary_domain = declared_domains[0]
+        secondary_domains = declared_domains[1:3]
+        tier = declared_tier if declared_tier is not None else 1
+        return {
+            "type": "task",
+            "domain": primary_domain,
+            "secondary_domains": secondary_domains,
+            "ranked_domains": [(d, 5.0) for d in declared_domains],
+            "tier": tier,
+            "is_read_only": False,
+        }
+
     # Load dynamic rules
     rules = _load_dynamic_rules()
 

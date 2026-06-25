@@ -225,5 +225,142 @@ class TestCognitiveCoreRecurrent(unittest.TestCase):
         )
         self.assertIn("DRY RUN — Not persisted", res)
 
+    def test_metadata_header_parsing(self):
+        msg = "Domains: RESEARCH (primary) -> GENERAL (synthesis)\nTier: 3\nWrite a comparison report."
+        res = _classify_intent(msg)
+        self.assertEqual(res["domain"], "research")
+        self.assertIn("general", res["secondary_domains"])
+        self.assertEqual(res["tier"], 3)
+
+    def test_suggested_tier_and_secondary_override(self):
+        from voxkage.mcp_servers.cognitive_core_server import start_turn, _load_session
+        from voxkage.mcp_servers.cognitive.storage import _save_session
+        session = _load_session()
+        session["last_task"] = None
+        session["active_task"] = None
+        _save_session(session)
+
+        start_turn("create a new config file and write system settings, then commit", suggested_domain="coding", suggested_tier=3, suggested_secondary_domains="research,general")
+        session = _load_session()
+        task = session.get("active_task") or {}
+        self.assertEqual(task.get("domain"), "coding")
+        self.assertEqual(task.get("tier"), 3)
+        self.assertIn("research", task.get("secondary_domains", []))
+        self.assertIn("general", task.get("secondary_domains", []))
+
+    def test_pre_mortem_domain_filtering(self):
+        from voxkage.mcp_servers.cognitive_core_server import start_turn, pre_mortem
+        from voxkage.mcp_servers.cognitive.storage import _load_session, _save_session, _load_anti_patterns, _save_anti_patterns
+        
+        # Save a coding-specific anti-pattern
+        ap_data = _load_anti_patterns()
+        # Clean current anti-patterns to avoid pollution
+        old_aps = list(ap_data.setdefault("anti_patterns", []))
+        ap_data["anti_patterns"] = [{
+            "pattern": "Test coding-specific anti-pattern risk warning",
+            "domain": "coding",
+            "severity": "high",
+            "times_prevented": 1
+        }]
+        _save_anti_patterns(ap_data)
+
+        try:
+            session = _load_session()
+            session["last_task"] = None
+            session["active_task"] = None
+            _save_session(session)
+
+            # Start a research task (which has no coding domain)
+            start_turn("do some web research on climate data", suggested_domain="research", suggested_secondary_domains="general")
+            res = pre_mortem(task_id="test_pm_task", task_summary="research summary")
+            # Verify that the coding anti-pattern is NOT in the pre-mortem output
+            self.assertNotIn("Test coding-specific anti-pattern risk warning", res)
+        finally:
+            # Restore anti-patterns
+            ap_data = _load_anti_patterns()
+            ap_data["anti_patterns"] = old_aps
+            _save_anti_patterns(ap_data)
+
+    def test_custom_user_correction(self):
+        from voxkage.mcp_servers.cognitive_core_server import start_turn, user_corrected
+        from voxkage.mcp_servers.cognitive.storage import _load_session, _save_session, _load_checklist
+        
+        session = _load_session()
+        session["last_task"] = None
+        session["active_task"] = None
+        _save_session(session)
+
+        start_turn("some system work", suggested_domain="system")
+        user_corrected(
+            task_id="test_correction_task",
+            correction="Ensure we verify the system disk before deletion",
+            descriptive_id="corr_verify_system_disk",
+            target_domain="system",
+            severity="high"
+        )
+        
+        items = _load_checklist("system")
+        found = [it for it in items if it.get("id") == "corr_verify_system_disk"]
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["severity"], "high")
+
+    def test_structured_checklist_evolution(self):
+        from voxkage.mcp_servers.cognitive_core_server import start_turn, learn
+        from voxkage.mcp_servers.cognitive.storage import _load_json, _save_session, _load_session
+        from voxkage.mcp_servers.cognitive.constants import _CHECKLISTS_PENDING_FILE
+        
+        session = _load_session()
+        session["last_task"] = None
+        session["active_task"] = None
+        _save_session(session)
+
+        # Clear checklists pending
+        import json
+        if os.path.exists(_CHECKLISTS_PENDING_FILE):
+            try:
+                os.remove(_CHECKLISTS_PENDING_FILE)
+            except OSError:
+                pass
+
+        start_turn("do some frontend work", suggested_domain="frontend")
+        learn(
+            task_id="test_evolve_task",
+            outcome="success",
+            evolved_checklist_item={
+                "id": "verify_mobile_viewport",
+                "check": "Did we check mobile viewport responsiveness?",
+                "severity": "medium",
+                "domain": "frontend"
+            }
+        )
+        
+        data = _load_json(_CHECKLISTS_PENDING_FILE, lambda: {"pending": []})
+        pending = data.get("pending", [])
+        found = [p for p in pending if p.get("id") == "evolved_verify_mobile_viewport"]
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["severity"], "medium")
+        self.assertEqual(found[0]["domain"], "frontend")
+
+    def test_reflect_output_type_normalization(self):
+        from voxkage.mcp_servers.cognitive_core_server import start_turn, reflect
+        from voxkage.mcp_servers.cognitive.storage import _load_session, _save_session
+        
+        session = _load_session()
+        session["last_task"] = None
+        session["active_task"] = None
+        _save_session(session)
+
+        # Start coding task
+        start_turn("write python code", suggested_domain="coding")
+        # Under output_type='markdown', all coding items (like syntax_valid, security, edge_cases) should be excluded
+        # Let's verify that the output results in items excluded
+        res = reflect(task_id="test_norm_task", output_summary="markdown report", checklist_results="documentation:pass", output_type="markdown")
+        self.assertIn("items excluded", res)
+        # Excluded items should not be in failed or passed sections
+        self.assertNotIn("syntax_valid", res)
+        self.assertNotIn("security", res)
+        self.assertNotIn("edge_cases", res)
+        self.assertNotIn("imports_correct", res)
+
 if __name__ == "__main__":
     unittest.main()

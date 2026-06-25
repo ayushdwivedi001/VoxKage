@@ -187,19 +187,45 @@ _CODE_CHECKLIST_KEYWORDS = re.compile(
 
 OUTPUT_TYPE_FILTERS = {
     "markdown": {
-        "exclude":   ["imports_correct", "types_correct", "lint_clean", "tests_exist"],
-        "downgrade": {"security": "low", "error_handling": "low"},
+        "exclude": [
+            "imports_correct", "types_correct", "lint_clean", "tests_exist",
+            "syntax_valid", "database", "tests", "input_validation",
+            "env_config", "security", "error_handling", "edge_cases",
+            "no_duplication", "codebase_style", "responsive", "accessible"
+        ],
+        "downgrade": {}
     },
     "command": {
-        "exclude":   ["imports_correct", "types_correct", "responsive", "accessible"],
+        "exclude": [
+            "imports_correct", "types_correct", "responsive", "accessible",
+            "database", "tests", "security", "error_handling"
+        ],
         "downgrade": {},
     },
     "research": {
-        "exclude":   ["imports_correct", "types_correct", "lint_clean", "tests_exist"],
-        "downgrade": {"security": "low", "error_handling": "low"},
+        "exclude": [
+            "imports_correct", "types_correct", "lint_clean", "tests_exist",
+            "syntax_valid", "database", "tests", "input_validation",
+            "env_config", "security", "error_handling", "edge_cases",
+            "no_duplication", "codebase_style", "responsive", "accessible"
+        ],
+        "downgrade": {},
     },
     "general": {
-        "exclude":   ["imports_correct", "types_correct", "lint_clean", "tests_exist"],
-        "downgrade": {"security": "low", "error_handling": "low"},
+        "exclude": [
+            "imports_correct", "types_correct", "lint_clean", "tests_exist",
+            "syntax_valid", "database", "tests", "input_validation",
+            "env_config", "security", "error_handling", "edge_cases",
+            "no_duplication", "codebase_style", "responsive", "accessible"
+        ],
+        "downgrade": {},
     },
+    "code": {
+        "exclude": [],
+        "downgrade": {}
+    },
+    "config": {
+        "exclude": ["tests", "database", "imports_correct", "types_correct"],
+        "downgrade": {}
+    }
 }
