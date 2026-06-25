@@ -52,50 +52,120 @@ def _is_trivial_task(msg: str) -> bool:
     return any(re.search(pat, msg_lower) for pat in trivial_patterns)
 
 
+_TYPO_MAP = {
+    "soo": "so",
+    "dont": "don't",
+    "wanna": "want to",
+    "gonna": "going to",
+    "gotta": "got to",
+}
+
+
+def _preprocess_message(msg: str) -> str:
+    """Preprocesses user messages to normalize spelling, repeated letters, and spacing."""
+    if not msg:
+        return ""
+    # Normalize whitespace
+    msg = re.sub(r"\s+", " ", msg)
+    # Deduplicate 3+ consecutive identical characters (e.g. 'sooooo' -> 'so')
+    msg = re.sub(r"([a-zA-Z])\1{2,}", r"\1", msg)
+    
+    words = msg.split()
+    for i, w in enumerate(words):
+        w_low = w.lower()
+        clean_w = re.sub(r"^[^\w']+|[^\w']+$", "", w_low)
+        if clean_w in _TYPO_MAP:
+            words[i] = w_low.replace(clean_w, _TYPO_MAP[clean_w])
+            
+    return " ".join(words)
+
+
 def _score_domains(msg: str) -> tuple:
     """
     Computes domain scores using semantic verb (5.0 weight) and noun (1.0 weight) matches.
-    Applies active evolved rules reclassifications.
+    Applies active evolved rules, negations, verb-noun mappings, and example-based adjustments.
     Returns:
-      (domain_scores, primary_domain, secondary_domains)
+      (domain_scores, primary_domain, secondary_domains, reason_codes)
     """
+    preprocessed_msg = _preprocess_message(msg)
     domain_scores = {}
+    reason_codes = []
+    
+    # 1. Base keyword scoring
     for d, sem in _DOMAIN_SEMANTICS.items():
-        verb_matches = len(sem["verbs"].findall(msg))
-        noun_matches = len(sem["nouns"].findall(msg))
+        verb_matches = len(sem["verbs"].findall(preprocessed_msg))
+        noun_matches = len(sem["nouns"].findall(preprocessed_msg))
         score = (verb_matches * 5.0) + (noun_matches * 1.0)
         if score > 0:
             domain_scores[d] = score
+            reason_codes.append(f"{d}_keywords: +{score:.1f}")
 
-    # Active Write-Back / Self-Repair rule adjustments
+    # 2. Active Evolved rules adjustments
     try:
         evolved_rules = _load_evolved_rules().get("rules", [])
         for rule in evolved_rules:
             if rule.get("status") == "active" and rule.get("type") in ["domain_reclassification", "domain_rule"]:
                 pattern = rule.get("pattern")
                 if pattern:
-                    if re.search(pattern, msg, re.I):
+                    if re.search(pattern, preprocessed_msg, re.I):
                         target_domain = rule.get("domain")
-                        # Boost the evolved domain by 20.0 to override any keyword score
                         domain_scores[target_domain] = domain_scores.get(target_domain, 0.0) + 20.0
+                        reason_codes.append(f"evolved_rule_{target_domain}: +20.0")
     except Exception:
         pass
 
-    # Context-aware overrides to prevent topic nouns from hijacking action domains
-    # E.g. "report about coding" is research, not coding.
-    # E.g. "research how to deploy" is research, not devops.
+    # 3. Verb-Noun mapping semantic boost
+    from .constants import _VERB_NOUN_DOMAIN_MAP
+    for verb_pat, noun_pat, target_domain in _VERB_NOUN_DOMAIN_MAP:
+        if verb_pat.search(preprocessed_msg) and noun_pat.search(preprocessed_msg):
+            domain_scores[target_domain] = domain_scores.get(target_domain, 0.0) + 8.0
+            reason_codes.append(f"verb_noun_match_{target_domain}: +8.0")
+
+    # 4. Domain negation pattern checks
+    from .constants import _DOMAIN_NEGATION_PATTERNS
+    if _DOMAIN_NEGATION_PATTERNS.search(preprocessed_msg):
+        if "coding" in domain_scores:
+            domain_scores["coding"] = max(0.0, domain_scores["coding"] - 20.0)
+            reason_codes.append("coding_negation: -20.0")
+
+    # 5. Context-aware overrides (e.g. report about coding is research)
     report_signals = re.compile(r"\b(report|summary|article|comparison|matrix|comparison matrix|review|list|paper|essay|poem|guide|tutorial|weather|news)\b", re.I)
-    if report_signals.search(msg):
-        # Boost research / analysis / creative
+    if report_signals.search(preprocessed_msg):
         if "research" in domain_scores:
             domain_scores["research"] = domain_scores.get("research", 0.0) + 8.0
+            reason_codes.append("report_signals_research: +8.0")
         else:
             domain_scores["research"] = 8.0
+            reason_codes.append("report_signals_research: +8.0")
             
-        # Penalize coding if it is not actually requesting code development
         code_dev_signals = re.compile(r"\b(write\s+code|implement\s+function|write\s+function|write\s+class|refactor\s+code|debug\s+code|syntax\s+error)\b", re.I)
-        if not code_dev_signals.search(msg) and "coding" in domain_scores:
+        if not code_dev_signals.search(preprocessed_msg) and "coding" in domain_scores:
             domain_scores["coding"] = max(0.0, domain_scores["coding"] - 12.0)
+            reason_codes.append("coding_report_penalty: -12.0")
+
+    # 6. LAYER 1.5: Similarity-based adjustments
+    try:
+        from .classification_examples import _get_fingerprint, _find_similar_examples
+        fingerprint = _get_fingerprint(preprocessed_msg)
+        similar = _find_similar_examples(fingerprint, top_n=1)
+        if similar:
+            best_match = similar[0]
+            if best_match["similarity"] >= 0.4:
+                correct_d = best_match["correct_domain"]
+                classifier_said = best_match["classifier_said"]
+                was_corrected = best_match["was_corrected"]
+                
+                if was_corrected:
+                    if classifier_said in domain_scores:
+                        domain_scores[classifier_said] = max(0.0, domain_scores[classifier_said] - 15.0)
+                        reason_codes.append(f"similarity_penalty_{classifier_said}: -15.0")
+                    domain_scores[correct_d] = domain_scores.get(correct_d, 0.0) + 15.0
+                    reason_codes.append(f"similarity_boost_{correct_d}: +15.0")
+                else:
+                    domain_scores[correct_d] = domain_scores.get(correct_d, 0.0) + 5.0
+                    reason_codes.append(f"similarity_reinforce_{correct_d}: +5.0")
+    except Exception:
+        pass
 
     ranked_domains = sorted(
         [(d, s) for d, s in domain_scores.items()],
@@ -114,7 +184,40 @@ def _score_domains(msg: str) -> tuple:
             if len(secondary_domains) == 2:
                 break
 
-    return domain_scores, domain, secondary_domains
+    return domain_scores, domain, secondary_domains, reason_codes
+
+
+def _make_task_response(domain: str, secondary_domains: list, ranked_domains: list, tier: int, is_read_only: bool, reason_codes: list, msg_stripped: str) -> dict:
+    """Helper to construct a standardized task response with confidence, reason codes, and similar examples."""
+    if ranked_domains:
+        top_score = ranked_domains[0][1]
+        second_score = ranked_domains[1][1] if len(ranked_domains) > 1 else 0.0
+        if top_score + second_score > 0.0:
+            confidence = float(top_score / (top_score + second_score))
+        else:
+            confidence = 1.0
+    else:
+        confidence = 0.0
+
+    similar_examples = []
+    try:
+        from .classification_examples import _get_fingerprint, _find_similar_examples
+        fingerprint = _get_fingerprint(msg_stripped)
+        similar_examples = _find_similar_examples(fingerprint, top_n=1)
+    except Exception:
+        pass
+
+    return {
+        "type": "task",
+        "domain": domain,
+        "secondary_domains": secondary_domains,
+        "ranked_domains": ranked_domains,
+        "tier": tier,
+        "is_read_only": is_read_only,
+        "confidence": confidence,
+        "reason_codes": reason_codes,
+        "similar_examples": similar_examples
+    }
 
 
 def _classify_intent(msg: str) -> dict:
@@ -141,18 +244,11 @@ def _classify_intent(msg: str) -> dict:
         re.I
     )
     if _STRUCTURAL_TASK_HEADERS.search(msg_stripped):
-        domain_scores, domain, secondary_domains = _score_domains(msg_stripped)
+        domain_scores, domain, secondary_domains, reason_codes = _score_domains(msg_stripped)
         ranked_domains = sorted(
             [(d, s) for d, s in domain_scores.items()], key=lambda x: x[1], reverse=True
         )
-        return {
-            "type": "task",
-            "domain": domain,
-            "secondary_domains": secondary_domains,
-            "ranked_domains": ranked_domains,
-            "tier": 3,
-            "is_read_only": False,
-        }
+        return _make_task_response(domain, secondary_domains, ranked_domains, 3, False, reason_codes, msg_stripped)
 
     for line in msg_lines:
         dom_match = re.search(r"^\s*(?:Domains?|Categories|Domain):\s*([a-zA-Z\s,;➔→\-\(\)>]+)", line, re.I)
@@ -177,14 +273,15 @@ def _classify_intent(msg: str) -> dict:
         primary_domain = declared_domains[0]
         secondary_domains = declared_domains[1:3]
         tier = declared_tier if declared_tier is not None else 1
-        return {
-            "type": "task",
-            "domain": primary_domain,
-            "secondary_domains": secondary_domains,
-            "ranked_domains": [(d, 5.0) for d in declared_domains],
-            "tier": tier,
-            "is_read_only": False,
-        }
+        return _make_task_response(
+            primary_domain,
+            secondary_domains,
+            [(d, 5.0) for d in declared_domains],
+            tier,
+            False,
+            [f"declared_header: {primary_domain}"],
+            msg_stripped
+        )
 
     # Load dynamic rules
     rules = _load_dynamic_rules()
@@ -193,19 +290,12 @@ def _classify_intent(msg: str) -> dict:
     for pat in rules.get("force_tier_1_patterns", []):
         try:
             if re.search(pat, msg_stripped, re.I):
-                domain_scores, domain, secondary_domains = _score_domains(msg)
+                domain_scores, domain, secondary_domains, reason_codes = _score_domains(msg)
                 ranked_domains = sorted(
                     [(d, s) for d, s in domain_scores.items()],
                     key=lambda x: x[1], reverse=True
                 )
-                return {
-                    "type": "task",
-                    "domain": domain,
-                    "secondary_domains": secondary_domains,
-                    "ranked_domains": ranked_domains,
-                    "tier": 1,
-                    "is_read_only": True,
-                }
+                return _make_task_response(domain, secondary_domains, ranked_domains, 1, True, reason_codes, msg_stripped)
         except Exception:
             pass
 
@@ -279,7 +369,7 @@ def _classify_intent(msg: str) -> dict:
         return {"type": "conversation"}
 
     # ── Domain classification ──
-    domain_scores, domain, secondary_domains = _score_domains(msg)
+    domain_scores, domain, secondary_domains, reason_codes = _score_domains(msg)
     ranked_domains = sorted(
         [(d, s) for d, s in domain_scores.items()],
         key=lambda x: x[1], reverse=True
@@ -374,14 +464,15 @@ def _classify_intent(msg: str) -> dict:
     except Exception:
         pass
 
-    return {
-        "type": "task",
-        "domain": domain,
-        "secondary_domains": secondary_domains,
-        "ranked_domains": ranked_domains,
-        "tier": tier,
-        "is_read_only": (has_read_only and not has_state_change) or is_trivial,
-    }
+    return _make_task_response(
+        domain,
+        secondary_domains,
+        ranked_domains,
+        tier,
+        (has_read_only and not has_state_change) or is_trivial,
+        reason_codes,
+        msg_stripped
+    )
 
 
 def _detect_followup(msg: str, session: dict) -> bool:

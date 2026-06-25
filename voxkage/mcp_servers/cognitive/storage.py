@@ -533,3 +533,46 @@ def _promote_pending_evolved_rules() -> int:
     _save_json(_EVOLVED_RULES_PENDING_FILE, data)
     return promoted_count
 
+
+def _load_classification_examples() -> dict:
+    from .constants import _CLASSIFICATION_EXAMPLES_FILE
+    return _load_json(_CLASSIFICATION_EXAMPLES_FILE, lambda: {"examples": []})
+
+
+def _save_classification_examples(data: dict):
+    from .constants import _CLASSIFICATION_EXAMPLES_FILE
+    _save_json(_CLASSIFICATION_EXAMPLES_FILE, data)
+
+
+def _append_classification_example(message: str, correct_domain: str, correct_tier: int, classifier_said: str, was_corrected: bool = False, correction_source: str = "model"):
+    from .classification_examples import _get_fingerprint
+    data = _load_classification_examples()
+    examples = data.setdefault("examples", [])
+    
+    fingerprint = _get_fingerprint(message)
+    found = False
+    for ex in examples:
+        if ex.get("message_fingerprint") == fingerprint:
+            ex["correct_domain"] = correct_domain
+            ex["correct_tier"] = correct_tier
+            ex["classifier_said"] = classifier_said
+            ex["was_corrected"] = was_corrected or ex.get("was_corrected", False)
+            ex["correction_source"] = correction_source
+            ex["timestamp"] = datetime.now(timezone.utc).isoformat()
+            found = True
+            break
+            
+    if not found:
+        examples.append({
+            "message_fingerprint": fingerprint,
+            "message_sample": message[:200],
+            "correct_domain": correct_domain,
+            "correct_tier": correct_tier,
+            "classifier_said": classifier_said,
+            "was_corrected": was_corrected,
+            "correction_source": correction_source,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "times_matched": 0
+        })
+    _save_classification_examples(data)
+

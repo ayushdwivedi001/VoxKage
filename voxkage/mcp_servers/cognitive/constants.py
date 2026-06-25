@@ -34,6 +34,21 @@ _DOMAIN_MISMATCHES_FILE = os.path.join(_COG_DIR, "domain_mismatches.json")
 _EVOLVED_RULES_FILE = os.path.join(_COG_DIR, "evolved_rules.json")
 _EVOLVED_RULES_PENDING_FILE = os.path.join(_COG_DIR, "evolved_rules_pending.json")
 _CHECKLISTS_PENDING_FILE = os.path.join(_COG_DIR, "checklists_pending.json")
+_CLASSIFICATION_EXAMPLES_FILE = os.path.join(_COG_DIR, "classification_examples.json")
+
+# Negation of domains to avoid false positives (e.g. 'coding no', 'dont code')
+_DOMAIN_NEGATION_PATTERNS = re.compile(
+    r"\b(coding\s+no|not\s+coding|no\s+code|dont\s+code|don't\s+code|code\s+not|no\s+coding|skip\s+code|without\s+code)\b",
+    re.I
+)
+
+# Semantic verb-noun pair mappings to handle fallback domain classification
+_VERB_NOUN_DOMAIN_MAP = [
+    (re.compile(r"\b(build|write|create|make|generate)\b", re.I), re.compile(r"\b(report|summary|article|matrix|comparison|doc|document|text|notes)\b", re.I), "research"),
+    (re.compile(r"\b(build|write|create|make|generate|implement)\b", re.I), re.compile(r"\b(code|function|class|script|program|app|application|server|mcp|tool|backend|frontend)\b", re.I), "coding"),
+    (re.compile(r"\b(search|find|look\s+up|research|fetch|get|scrape|query)\b", re.I), re.compile(r".*"), "research"),
+    (re.compile(r"\b(analyze|audit|check|evaluate|inspect)\b", re.I), re.compile(r"\b(codebase|repo|file|quality|bug|error|issue|warning|lint|mismatch|performance|trace)\b", re.I), "analysis"),
+]
 
 # Create necessary directories
 os.makedirs(_COG_DIR, exist_ok=True)

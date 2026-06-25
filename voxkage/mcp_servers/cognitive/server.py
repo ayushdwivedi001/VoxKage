@@ -240,6 +240,10 @@ def start_turn(
         tier = min(3, tier + 1)
 
     # Build task context
+    conf = classification.get("confidence", 0.0)
+    reason_codes = classification.get("reason_codes", [])
+    similar_examples = classification.get("similar_examples", [])
+
     task_context = {
         "task_id": task_id,
         "domain": domain,
@@ -248,6 +252,9 @@ def start_turn(
         "is_followup": is_followup,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "user_message": user_message,
+        "classification_confidence": conf,
+        "reason_codes": reason_codes,
+        "similar_examples": similar_examples,
     }
 
     # Update session state
@@ -269,6 +276,30 @@ def start_turn(
         f"  tier: {tier} ({'Quick' if tier == 1 else 'Standard' if tier == 2 else 'Complex'})",
         f"  followup: {is_followup}",
     ])
+
+    # Classification Transparency
+    lines.append("\n  Classification Transparency:")
+    lines.append(f"    Confidence: {round(conf * 100)}%")
+    if reason_codes:
+        lines.append(f"    Reason Codes: {', '.join(reason_codes)}")
+    if similar_examples:
+        best_ex = similar_examples[0]
+        lines.append(f"    Similar Past: \"{best_ex.get('message_sample', '')[:60]}...\" ➔ {best_ex.get('correct_domain')} (sim: {round(best_ex.get('similarity', 0.0)*100)}%)")
+
+    # Classification Gate
+    lines.append("\n  ⚠️ CLASSIFICATION GATE:")
+    if conf >= 0.80:
+        lines.append("    Status: PASS (Advisory only)")
+        lines.append("    Review the checklist. If correct, proceed to pre_mortem().")
+        lines.append("    If wrong, call verify_classification(task_id, override_domain=\"X\", reason=\"why\")")
+    elif 0.60 <= conf < 0.80:
+        lines.append("    Status: ⚠️ WARNING (Low Confidence)")
+        lines.append("    verify_classification() is strongly suggested if the domain looks incorrect.")
+        lines.append("    If checklists are irrelevant, call declare_task_context(task_id, output_type=\"X\", primary_domain=\"Y\") to customize.")
+    else:
+        lines.append("    Status: 🔴 CRITICAL (Ambiguous / Garbled Intent)")
+        lines.append("    You MUST review this classification before calling pre_mortem().")
+        lines.append("    If incorrect, call verify_classification(task_id, override_domain=\"correct_domain\", reason=\"override\") first.")
 
     # Profile snapshot
     lines.append(f"\n  Profile — {domain}:")
@@ -437,17 +468,35 @@ def pre_mortem(task_id: str, task_summary: str) -> str:
             deduped_aps.append(ap)
     relevant_aps = deduped_aps[:5]
     session["premortem_shown_aps"] = [ap.get("pattern", "") for ap in relevant_aps]
-    _save_session(session)
-
     raw_elevated = session.get("elevated_checks", {})
     if isinstance(raw_elevated, list):
         elevated = raw_elevated
     else:
         elevated = raw_elevated.get(domain, [])
 
+    # Track all premortem risks in session
+    premortem_risks = []
+    if task.get("classification_overridden"):
+        premortem_risks.append(f"Classification overridden to {domain}: {task.get('override_reason')}")
+    if relevant_aps:
+        premortem_risks.extend([ap.get('pattern', '?') for ap in relevant_aps[:5]])
+    if common_errors:
+        premortem_risks.extend(common_errors[:5])
+    if elevated:
+        premortem_risks.extend(elevated[:3])
+        
+    session["premortem_risks"] = premortem_risks
+    _save_session(session)
+
     lines = [f"[COGNITIVE PRE-MORTEM] task: {task_id}", f"  Summary: {task_summary}", ""]
 
     risk_count = 0
+
+    if task.get("classification_overridden"):
+        risk_count += 1
+        lines.append(f"  ⚠️  Risk {risk_count} (Classification Override):")
+        lines.append(f"      Intent was overridden to {domain} because: {task.get('override_reason')}")
+        lines.append("")
 
     if relevant_aps:
         lines.append("  🚫 Anti-Pattern Risks (you have done these before):")
@@ -586,47 +635,57 @@ def reflect(
     else:
         elevated = raw_elevated.get(domain, [])
 
-    # Load baseline checklist and active plan with domain metadata
     secondary_domains = task.get("secondary_domains", [])
-    # v8: Respect primary_only flag set by start_turn()
     if session.get("primary_only"):
         secondary_domains = []
-    checklist = _load_checklist(domain)
-    for item in checklist:
-        item["origin_domain"] = domain
 
-    existing_ids = {item["id"] for item in checklist}
-    for sec_domain in secondary_domains:
-        for item in _load_checklist(sec_domain):
-            # v8: Skip items with domain_scope:isolated — they are user corrections specific
-            # to one domain and must NEVER bleed into other domain scoring
-            if item.get("domain_scope") == "isolated":
-                continue
-            if item["id"] not in existing_ids:
-                item["origin_domain"] = sec_domain
-                checklist.append(item)
-                existing_ids.add(item["id"])
-            else:
-                existing = next(i for i in checklist if i["id"] == item["id"])
-                w = {"high": 3, "medium": 2, "low": 1}
-                if w.get(item["severity"], 1) > w.get(existing["severity"], 1):
-                    existing["severity"] = item["severity"]
-                    existing["origin_domain"] = sec_domain
+    # Check if a tailored task context was explicitly declared
+    declared_checklist = session.get("declared_checklist")
+    if declared_checklist:
+        combined_items_map = {}
+        for item in declared_checklist:
+            item_copy = dict(item)
+            if "origin_domain" not in item_copy:
+                item_copy["origin_domain"] = domain
+            combined_items_map[item_copy["id"]] = item_copy
+    else:
+        # Load baseline checklist and active plan with domain metadata
+        checklist = _load_checklist(domain)
+        for item in checklist:
+            item["origin_domain"] = domain
 
-    active_plan = session.get("active_plan") or []
-    
-    # Map all valid IDs to their definitions
-    checklist_map = {item["id"]: item for item in checklist}
-    
-    plan_map = {}
-    for item in active_plan:
-        item = dict(item)
-        item["origin_domain"] = domain
-        plan_map[item["id"]] = item
-    
-    combined_items_map = {}
-    combined_items_map.update(checklist_map)
-    combined_items_map.update(plan_map)
+        existing_ids = {item["id"] for item in checklist}
+        for sec_domain in secondary_domains:
+            for item in _load_checklist(sec_domain):
+                # v8: Skip items with domain_scope:isolated — they are user corrections specific
+                # to one domain and must NEVER bleed into other domain scoring
+                if item.get("domain_scope") == "isolated":
+                    continue
+                if item["id"] not in existing_ids:
+                    item["origin_domain"] = sec_domain
+                    checklist.append(item)
+                    existing_ids.add(item["id"])
+                else:
+                    existing = next(i for i in checklist if i["id"] == item["id"])
+                    w = {"high": 3, "medium": 2, "low": 1}
+                    if w.get(item["severity"], 1) > w.get(existing["severity"], 1):
+                        existing["severity"] = item["severity"]
+                        existing["origin_domain"] = sec_domain
+
+        active_plan = session.get("active_plan") or []
+        
+        # Map all valid IDs to their definitions
+        checklist_map = {item["id"]: item for item in checklist}
+        
+        plan_map = {}
+        for item in active_plan:
+            item = dict(item)
+            item["origin_domain"] = domain
+            plan_map[item["id"]] = item
+        
+        combined_items_map = {}
+        combined_items_map.update(checklist_map)
+        combined_items_map.update(plan_map)
 
     # NEW: P2 Output-Type Checklist Filtering
     if output_type == "auto":
@@ -895,6 +954,21 @@ def reflect(
     if elevated_missed:
         lines.append(f"\n  🔺 Elevated checks NOT addressed: {', '.join(elevated_missed)}")
 
+    # Check premortem risks
+    premortem_risks = session.get("premortem_risks", [])
+    if premortem_risks:
+        lines.append("\n  🔮 Premortem Risk Mitigation Check:")
+        for risk in premortem_risks:
+            failed_match = False
+            for f_item in fails:
+                item = combined_items_map.get(f_item["id"])
+                check_text = item["check"].lower() if item else ""
+                if f_item["id"].lower() in risk.lower() or check_text in risk.lower() or risk.lower() in check_text:
+                    failed_match = True
+                    break
+            status_str = "❌ UNADDRESSED" if failed_match else "✅ ADDRESSED/SAFE"
+            lines.append(f"    • {risk[:80]} → {status_str}")
+
     # Recommendation
     if recommend_deliver:
         lines.append(f"\n  → Recommendation: DELIVER ✅")
@@ -1156,6 +1230,17 @@ def learn(
                 dp[corrected_domain]["tasks"] = dp[corrected_domain].get("tasks", 0) + 1
                 if outcome == "success":
                     dp[corrected_domain]["successes"] = dp[corrected_domain].get("successes", 0) + 1
+                # P0: Save to classification examples so future queries with similar fingerprints
+                # get pre-emptively reclassified — breaks the mismatch recurrence cycle.
+                from .storage import _append_classification_example
+                _append_classification_example(
+                    message=task.get("user_message", ""),
+                    correct_domain=corrected_domain,
+                    correct_tier=task.get("tier", 1),
+                    classifier_said=domain,
+                    was_corrected=True,
+                    correction_source="auto_learn"
+                )
 
     # NEW: P3 Checklist Self-Evolution via learn()
     if evolved_checklist_item and isinstance(evolved_checklist_item, dict):
@@ -1214,6 +1299,16 @@ def learn(
                 "outcome": outcome,
                 "correction_source": "suggested_domain"
             })
+            # Save to classification examples to prevent recurrence
+            from .storage import _append_classification_example
+            _append_classification_example(
+                message=task.get("user_message", ""),
+                correct_domain=model_domain,
+                correct_tier=task.get("tier", 1),
+                classifier_said=classifier_domain,
+                was_corrected=True,
+                correction_source="auto_learn_suggested"
+            )
 
     # Update error categories from reflection data
     reflection = session.get("last_reflection", {})
@@ -1644,6 +1739,32 @@ def user_corrected(
             "domain_scope": "isolated",
         })
         _save_checklist(resolved_domain, items)
+    except Exception:
+        pass
+
+    # Save original query to classification examples (CRITICAL) and trigger rule evolution
+    try:
+        from .storage import _append_classification_example
+        orig_msg = task.get("user_message", "")
+        if orig_msg:
+            _append_classification_example(
+                message=orig_msg,
+                correct_domain=resolved_domain,
+                correct_tier=task.get("tier", 1),
+                classifier_said=domain,
+                was_corrected=True,
+                correction_source="user"
+            )
+            evolve_cognitive_rules(
+                domain=resolved_domain,
+                evolution_type="domain_reclassification",
+                evidence=f"User correction: {correction[:100]} for query: {orig_msg[:100]}",
+                proposed_rule=f"Reclassify matching pattern to {resolved_domain}",
+                confidence=0.9,
+                observation_count=2,
+                dry_run=False,
+                force_persist=True
+            )
     except Exception:
         pass
 
@@ -2299,7 +2420,8 @@ def evolve_cognitive_rules(
     proposed_rule: str,     # The rule text
     confidence: float = 0.7,
     observation_count: int = 1,   # Guardrail 1: >= 2 required for persistence
-    dry_run: bool = True           # Guardrail 2: Default True, never auto-disabled
+    dry_run: bool = True,          # Guardrail 2: Default True, never auto-disabled
+    force_persist: bool = False   # NEW: Bypass pending state and force persist immediately
 ) -> str:
     """
     COGNITIVE CORE — Proactive self-evolution of rules.
@@ -2318,7 +2440,7 @@ def evolve_cognitive_rules(
             f"  → Call with dry_run=False and observation_count>=2 to persist."
         )
 
-    if observation_count < 2:
+    if observation_count < 2 and not force_persist:
         _store_pending_evolved_rule({
             "domain": domain, "type": evolution_type,
             "evidence": evidence, "proposed_rule": proposed_rule,
@@ -2331,7 +2453,7 @@ def evolve_cognitive_rules(
             f"  → Call again with observation_count=2 when pattern repeats."
         )
 
-    if confidence < 0.7 or len(evidence.strip()) < 20:
+    if not force_persist and (confidence < 0.7 or len(evidence.strip()) < 20):
         return (
             f"[COGNITIVE EVOLVE] Rejected — "
             f"confidence {confidence} < 0.7 or evidence too short ({len(evidence.strip())} chars)."
@@ -2354,3 +2476,231 @@ def evolve_cognitive_rules(
         f"  Rule: {proposed_rule[:150]}\n"
         f"  → optimize_cognitive_core() will health-check this rule after 5+ tasks."
     )
+
+
+def verify_classification(
+    task_id: str,
+    override_domain: str,
+    override_tier: int,
+    reason: str,
+    remove_domains: str = ""
+) -> str:
+    """
+    COGNITIVE CORE — Override intent domain or tier.
+    Saves the corrected query to example database and force-persists evolved rules immediately.
+    """
+    _log_cognitive_call("verify_classification")
+    session = _load_session()
+    task = session.get("active_task")
+    if not task:
+        return "[COGNITIVE ERROR] No active task found in session to override classification."
+        
+    if task.get("task_id") != task_id:
+        return f"[COGNITIVE ERROR] Active task ID mismatch ({task.get('task_id')} vs override request {task_id})."
+
+    old_domain = task.get("domain", "general")
+    old_tier = task.get("tier", 1)
+    
+    # Apply override
+    task["domain"] = override_domain
+    task["tier"] = override_tier
+    task["classification_overridden"] = True
+    task["override_domain"] = override_domain
+    task["override_reason"] = reason
+    session["active_task"] = task
+    
+    # 1. Regenerate checklist
+    checklist = _load_checklist(override_domain)
+    existing_ids = {item["id"] for item in checklist}
+    
+    # Get secondary domains
+    secondary_domains = task.get("secondary_domains", [])
+    # Strip remove_domains
+    if remove_domains:
+        rem_set = {d.strip().lower() for d in remove_domains.split(",")}
+        secondary_domains = [d for d in secondary_domains if d not in rem_set]
+        task["secondary_domains"] = secondary_domains
+        
+    for sec_domain in secondary_domains:
+        for item in _load_checklist(sec_domain):
+            if item["id"] not in existing_ids:
+                checklist.append(item)
+                existing_ids.add(item["id"])
+            else:
+                existing = next(i for i in checklist if i["id"] == item["id"])
+                w = {"high": 3, "medium": 2, "low": 1}
+                if w.get(item["severity"], 1) > w.get(existing["severity"], 1):
+                    existing["severity"] = item["severity"]
+
+    # Regenerate task-specific plan items and prepend
+    plan_items = _generate_task_plan(task.get("user_message", ""), override_domain)
+    checklist = plan_items + checklist
+    session["active_plan"] = plan_items
+    
+    # Exclude remove_domains items if any matching IDs or keywords
+    if remove_domains:
+        rem_set = {d.strip().lower() for d in remove_domains.split(",")}
+        filtered_checklist = []
+        for item in checklist:
+            item_id = item["id"]
+            if any(ex_dom in item_id for ex_dom in rem_set):
+                continue
+            filtered_checklist.append(item)
+        checklist = filtered_checklist
+
+    session["declared_checklist"] = checklist
+    _save_session(session)
+    
+    # 2. Append original query to classification examples (CRITICAL)
+    try:
+        from .storage import _append_classification_example
+        _append_classification_example(
+            message=task.get("user_message", ""),
+            correct_domain=override_domain,
+            correct_tier=override_tier,
+            classifier_said=old_domain,
+            was_corrected=True,
+            correction_source="model"
+        )
+    except Exception:
+        pass
+        
+    # 3. Call evolve_cognitive_rules to force-persist immediately
+    evolve_msg = ""
+    try:
+        evolve_msg = evolve_cognitive_rules(
+            domain=override_domain,
+            evolution_type="domain_reclassification",
+            evidence=f"Model override from {old_domain} to {override_domain} for task: {task.get('user_message', '')[:100]}",
+            proposed_rule=f"Reclassify matching pattern to {override_domain}",
+            confidence=0.9,
+            observation_count=2,
+            dry_run=False,
+            force_persist=True
+        )
+    except Exception as e:
+        evolve_msg = f"Evolve failed: {str(e)}"
+        
+    # Build result output
+    lines = [
+        f"[COGNITIVE VERIFY] Classification overridden successfully.",
+        f"  Task ID: {task_id}",
+        f"  Domain: {old_domain} ➔ {override_domain}",
+        f"  Tier: {old_tier} ➔ {override_tier}",
+        f"  Reason: {reason}",
+        f"  Evolve output: {evolve_msg}",
+        f"\n  New Checklist ({override_domain}, {len(checklist)} items):"
+    ]
+    for item in checklist:
+        is_plan = item["id"].startswith("plan_")
+        tag = "PLAN" if is_plan else item['severity'].upper()
+        lines.append(f"    \u25a1 [{tag}] {item['id']}: {item['check']}")
+        
+    return "\n".join(lines)
+
+
+def declare_task_context(
+    task_id: str,
+    output_type: str,
+    primary_domain: str,
+    include_items: str = "",
+    exclude_domains: str = "",
+    custom_items: str = ""
+) -> str:
+    """
+    COGNITIVE CORE — Explicitly declare task parameters to build a tailored checklist.
+    Strips coding checks for non-coding tasks (e.g. markdown outputs), and applies exclusions.
+    The resulting checklist is stored in the session and used by reflect().
+    """
+    _log_cognitive_call("declare_task_context")
+    session = _load_session()
+    task = session.get("active_task")
+    if not task:
+        return "[COGNITIVE ERROR] No active task found in session to declare context."
+        
+    if task.get("task_id") != task_id:
+        return f"[COGNITIVE ERROR] Active task ID mismatch ({task.get('task_id')} vs request {task_id})."
+        
+    # Rebuild checklist
+    # Start with plan items
+    plan_items = session.get("active_plan") or []
+    
+    # Load primary checklist
+    checklist = _load_checklist(primary_domain)
+    
+    # Parse exclusions
+    exclusions = {d.strip().lower() for d in exclude_domains.split(",")} if exclude_domains else set()
+    
+    # 1. Apply Output Type filters
+    if output_type in OUTPUT_TYPE_FILTERS:
+        filters = OUTPUT_TYPE_FILTERS[output_type]
+        exclude_ids = set(filters.get("exclude", []))
+        exclude_prefixes = filters.get("exclude_prefixes", [])
+        
+        filtered_checklist = []
+        for item in checklist:
+            item_id = item["id"]
+            # Check exclusions
+            if item_id in exclude_ids:
+                continue
+            if any(item_id.startswith(p) for p in exclude_prefixes):
+                continue
+            filtered_checklist.append(item)
+        checklist = filtered_checklist
+
+    # 2. Strip excluded domains
+    if exclusions:
+        filtered_checklist = []
+        for item in checklist:
+            item_id = item["id"]
+            if any(ex_dom in item_id for ex_dom in exclusions):
+                continue
+            filtered_checklist.append(item)
+        checklist = filtered_checklist
+
+    # 3. Include requested items from other checklists
+    if include_items:
+        inc_ids = {i.strip() for i in include_items.split(",")}
+        for domain_name in _DOMAIN_KEYWORDS.keys():
+            if domain_name == primary_domain:
+                continue
+            other_checklist = _load_checklist(domain_name)
+            for item in other_checklist:
+                if item["id"] in inc_ids:
+                    if not any(x["id"] == item["id"] for x in checklist):
+                        checklist.append(item)
+
+    # 4. Add custom items
+    if custom_items:
+        for c_item in custom_items.split("|"):
+            parts = c_item.split(":", 2)
+            if len(parts) == 3:
+                c_id, c_sev, c_check = parts
+                checklist.append({
+                    "id": c_id.strip(),
+                    "severity": c_sev.strip().lower(),
+                    "check": c_check.strip()
+                })
+
+    # Combine plan items + filtered items
+    checklist = plan_items + checklist
+    
+    # Store in session
+    session["declared_checklist"] = checklist
+    _save_session(session)
+    
+    # Format output
+    lines = [
+        f"[COGNITIVE CONTEXT] Task context declared successfully.",
+        f"  Task ID: {task_id}",
+        f"  Output Type: {output_type}",
+        f"  Primary Domain: {primary_domain}",
+        f"  Excluding domains: {exclude_domains or 'None'}",
+        f"\n  Declared Checklist ({len(checklist)} items):"
+    ]
+    for item in checklist:
+        is_plan = item["id"].startswith("plan_")
+        tag = "PLAN" if is_plan else item['severity'].upper()
+        lines.append(f"    \u25a1 [{tag}] {item['id']}: {item['check']}")
+        
+    return "\n".join(lines)
