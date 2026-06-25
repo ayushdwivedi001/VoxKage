@@ -114,18 +114,20 @@ Use these facts to guide your decisions and personalize your responses immediate
 ### VoxKage Consolidated Soul History & Performance
 
 **Domain Metrics**:
-- **FRONTEND**: 98.9% success rate (86/87 tasks)
+- **FRONTEND**: 98.9% success rate (91/92 tasks)
   - Common Weaknesses: dependency_issue, In agent_loop.py, used lowercase 'false' instead of Python's capitalized 'False'
 - **BACKEND**: 96.1% success rate (49/51 tasks)
   - Common Weaknesses: None - identified shared IP rate-limiting issue via local server test., None - diagnosed WebSocket error handling omission.
-- **RESEARCH**: 97.9% success rate (47/48 tasks)
-  - Common Weaknesses: None, None — research task completed successfully
+- **RESEARCH**: 98.2% success rate (54/55 tasks)
+  - Common Weaknesses: None — research task completed successfully, none — thorough codebase analysis completed
 - **SYSTEM**: 97.5% success rate (39/40 tasks)
   - Common Weaknesses: Ensure we verify the system disk before deletion, api_payload_error
-- **CODING**: 98.9% success rate (88/89 tasks)
-  - Common Weaknesses: none, Ngrok outage caused --tunnel to fail
-- **GENERAL**: 100.0% success rate (42/42 tasks)
+- **CODING**: 94.0% success rate (110/117 tasks)
+  - Common Weaknesses: Ngrok outage caused --tunnel to fail, so we fell back to LAN.
+- **GENERAL**: 100.0% success rate (44/44 tasks)
   - Common Weaknesses: false_positive, none
+- **ANALYSIS**: 100.0% success rate (1/1 tasks)
+  - Common Weaknesses: Domain classification mismatch: Cognitive core classified task as 'coding' when actual work was RESEARCH (primary) → GENERAL (synthesis). 8 coding-specific checklist items were excluded as inapplicable to markdown output. Minor: visualization checklist item reported as failed though visualizations are not applicable to text/markdown reports. The verification phase revealed Claude Opus 4.8 (May 28) had superseded Opus 4.7 during the report generation — caught during cross-check and corrected.
 
 **Learned Negative Constraints (Anti-Patterns)**:
 - **ALL**: Avoid repeating: Completed Tier 3 task but skipped reflect() quality check.
@@ -140,9 +142,9 @@ Use these facts to guide your decisions and personalize your responses immediate
 - **BACKEND**: Avoid repeating: Agent loop failed: name 'get_tool_label' is not defined
 
 **Recent Tasks Summary**:
-- [2026-06-25] FRONTEND: SUCCESS (Confidence: 0.5)
-- [2026-06-25] GENERAL: SUCCESS (Confidence: 0.5)
+- [2026-06-25] CODING: SUCCESS (Confidence: 0.5)
 - [2026-06-25] CODING: SUCCESS (Confidence: 0.95)
+- [2026-06-25] GENERAL: SUCCESS (Confidence: 0.95)
 
 ---
 

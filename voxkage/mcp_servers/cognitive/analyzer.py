@@ -356,3 +356,136 @@ def _consolidate_soul():
         
     except Exception:
         pass
+
+
+def _cluster_and_aggregate_failures(entries: list) -> list:
+    """
+    Groups failure/mismatch entries into clusters sharing 2+ keywords.
+    Returns a list of cluster dicts:
+      {
+         "size": int,
+         "representative_text": str,
+         "keywords": list,
+         "pattern": str  # regex pattern derived from keywords
+         "entries": list
+      }
+    """
+    if not entries:
+        return []
+        
+    ignored_words = {
+        "the", "and", "but", "for", "with", "this", "that", "should", "not",
+        "been", "have", "has", "was", "were", "are", "about", "tool", "task",
+        "mismatch", "error", "failed", "success", "domain", "check", "checklist",
+        "actual", "assigned", "corrected", "mismatches", "classification", "classified"
+    }
+    
+    # Preprocess each entry: extract text and clean keywords
+    processed = []
+    for entry in entries:
+        text = entry.get("errors_found_excerpt") or entry.get("correction") or entry.get("pattern") or ""
+        if not text:
+            continue
+        # Extract alphanumeric words >= 4 chars
+        words = set(re.findall(r'\b[a-zA-Z]{4,}\b', text.lower()))
+        clean_words = words - ignored_words
+        processed.append({"entry": entry, "text": text, "keywords": clean_words})
+        
+    clusters = []  # List of {"keywords": set, "texts": list, "entries": list}
+    
+    for p in processed:
+        kw = p["keywords"]
+        if not kw:
+            continue
+        # Find matching cluster
+        matched = False
+        for c in clusters:
+            intersection = c["keywords"].intersection(kw)
+            if len(intersection) >= 2:
+                c["entries"].append(p["entry"])
+                c["texts"].append(p["text"])
+                # Narrow cluster keywords to the intersection to ensure cohesion
+                c["keywords"] = intersection
+                matched = True
+                break
+        if not matched:
+            clusters.append({
+                "keywords": set(kw),
+                "texts": [p["text"]],
+                "entries": [p["entry"]]
+            })
+            
+    # Filter and format clusters with size >= 3
+    result = []
+    for c in clusters:
+        size = len(c["entries"])
+        if size >= 3:
+            kws = sorted(list(c["keywords"]))
+            # Derive regex pattern
+            pattern = r"\b(" + "|".join(re.escape(k) for k in kws[:3]) + r")\b"
+            result.append({
+                "size": size,
+                "representative_text": c["texts"][0],
+                "keywords": kws,
+                "pattern": pattern,
+                "entries": c["entries"]
+            })
+            
+    return result
+
+
+def _generate_calibration_report(cal: dict) -> str:
+    """
+    Generates an ASCII calibration curve report across all domains.
+    """
+    all_preds = []
+    if "domains" in cal:
+        for d, data in cal["domains"].items():
+            if isinstance(data, dict) and "predictions" in data:
+                all_preds.extend(data["predictions"])
+                
+    if not all_preds:
+        return "  No calibration data available yet (requires >= 5 predictions)."
+        
+    bins = [
+        {"name": "[0.0 - 0.4)", "min": 0.0, "max": 0.4, "stated_sum": 0.0, "success_count": 0, "count": 0},
+        {"name": "[0.4 - 0.7)", "min": 0.4, "max": 0.7, "stated_sum": 0.0, "success_count": 0, "count": 0},
+        {"name": "[0.7 - 1.0]", "min": 0.7, "max": 1.01, "stated_sum": 0.0, "success_count": 0, "count": 0},
+    ]
+    
+    for p in all_preds:
+        stated = p.get("stated", 0.5)
+        success = p.get("actual_success", False)
+        for b in bins:
+            if b["min"] <= stated < b["max"]:
+                b["count"] += 1
+                b["stated_sum"] += stated
+                if success:
+                    b["success_count"] += 1
+                break
+                
+    lines = [
+        "  Stated Confidence Bins vs Actual Success:",
+        "  ┌───────────────┬───────┬────────────┬────────────────┬─────────────────┐",
+        "  │ Confidence    │ Count │ Avg Stated │ Actual Success │ Status          │",
+        "  ├───────────────┼───────┼────────────┼────────────────┼─────────────────┤",
+    ]
+    
+    for b in bins:
+        if b["count"] > 0:
+            avg_stated = round(b["stated_sum"] / b["count"], 2)
+            success_rate = round(b["success_count"] / b["count"], 2)
+            diff = abs(avg_stated - success_rate)
+            if diff <= 0.15:
+                status = "✅ Well Calibrated"
+            elif avg_stated > success_rate:
+                status = "⚠ Overconfident"
+            else:
+                status = "⚠ Underconfident (Sandbagging)"
+            
+            lines.append(f"  │ {b['name']:<13} │ {b['count']:<5} │ {avg_stated:<10} │ {success_rate:<14} │ {status:<15} │")
+        else:
+            lines.append(f"  │ {b['name']:<13} │ 0     │ N/A        │ N/A            │ N/A             │")
+            
+    lines.append("  └───────────────┴───────┴────────────┴────────────────┴─────────────────┘")
+    return "\n".join(lines)

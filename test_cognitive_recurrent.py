@@ -362,5 +362,100 @@ class TestCognitiveCoreRecurrent(unittest.TestCase):
         self.assertNotIn("edge_cases", res)
         self.assertNotIn("imports_correct", res)
 
+    def test_exact_battle_test_prompt_classification(self):
+        msg = (" alright soo i want you to test out your complete cognitive MCP server performance "
+               "to test out your recursive self improvement architecture and to see if it actually perfectly works or not. "
+               "and for this i have a task for you. now your task - Title: \"Comprehensive Comparison: Top 5 AI Coding Assistants in June 2026\"\n\n"
+               "      Domains: RESEARCH (primary) → GENERAL (synthesis) → CODING (optional deliverable)\n\n"
+               "      Task Breakdown:\n"
+               "      1. Research phase — Web-search each of 5 tools (Claude Code, Copilot, Cursor, Windsurf, Codeium) for latest pricing, features, and reviews\n"
+               "      2. Comparison phase — Build a structured comparison matrix (pricing, strengths, weaknesses, ideal use-case)\n"
+               "      3. Synthesis phase — Write a concise report to C:\\Users\\AYUSH\\.voxkage\\output\\ai-assistants-comparison.md\n"
+               "      4. Verification phase — Cross-check specific claims against fresh sources\n"
+               "      5. Refinement phase — Fix any inaccuracies or missing categories. work on this properly and show me the work done in this directory. "
+               "soo once you are done with this, i want you to tell me how much of this has actually been effective enough for recursive self improvement.")
+        res = _classify_intent(msg)
+        self.assertEqual(res["domain"], "research")
+        self.assertIn("general", res["secondary_domains"])
+        self.assertIn("coding", res["secondary_domains"])
+
+    def test_confusing_human_like_prompt_classification(self):
+        # Human prompt mixing verbs/topics
+        msg = "build me a report in your feed while telling me about top 5 AI coding agents right now. do research to build this"
+        res = _classify_intent(msg)
+        # Main intent is research/report generation, not writing source code
+        self.assertEqual(res["domain"], "research")
+
+    def test_autonomous_evolved_rule_promotion(self):
+        from voxkage.mcp_servers.cognitive.storage import (
+            _store_pending_evolved_rule, 
+            _promote_pending_evolved_rules, 
+            _load_evolved_rules,
+            _save_evolved_rules
+        )
+        # Clean up existing test rules first to ensure test isolation
+        evolved = _load_evolved_rules()
+        evolved["rules"] = [r for r in evolved.get("rules", []) if r.get("proposed_rule") != "test promotion rule"]
+        _save_evolved_rules(evolved)
+
+        # Store a pending evolved rule with count 3
+        rule = {
+            "domain": "research",
+            "proposed_rule": "test promotion rule",
+            "evidence": "testing promotion logic in unit test",
+            "observation_count": 3
+        }
+        _store_pending_evolved_rule(rule)
+        
+        # Promote
+        promoted = _promote_pending_evolved_rules()
+        self.assertGreaterEqual(promoted, 1)
+        
+        # Check active evolved rules
+        evolved = _load_evolved_rules()
+        found = [r for r in evolved.get("rules", []) if r.get("proposed_rule") == "test promotion rule"]
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["status"], "active")
+
+        # Clean up after test
+        evolved["rules"] = [r for r in evolved.get("rules", []) if r.get("proposed_rule") != "test promotion rule"]
+        _save_evolved_rules(evolved)
+
+    def test_confidence_calibration_brier_score(self):
+        from voxkage.mcp_servers.cognitive.storage import _load_calibration, _save_calibration, _load_session, _save_session
+        from voxkage.mcp_servers.cognitive_core_server import learn, start_turn
+        
+        # Reset calibration database for coding domain
+        cal = _load_calibration()
+        cal["domains"]["coding"] = {"predictions": [], "accuracy": None}
+        _save_calibration(cal)
+        
+        # Log 5 tasks with various confidence levels and outcomes
+        # Prediction 1: stated 0.8, success -> (0.8 - 1.0)^2 = 0.04
+        start_turn("task 1", suggested_domain="coding")
+        learn("task_1", "success", confidence_was=0.8)
+        
+        # Prediction 2: stated 0.9, success -> (0.9 - 1.0)^2 = 0.01
+        start_turn("task 2", suggested_domain="coding")
+        learn("task_2", "success", confidence_was=0.9)
+        
+        # Prediction 3: stated 0.7, failed -> (0.7 - 0.0)^2 = 0.49
+        start_turn("task 3", suggested_domain="coding")
+        learn("task_3", "failed", confidence_was=0.7)
+        
+        # Prediction 4: stated 0.5, success -> (0.5 - 1.0)^2 = 0.25
+        start_turn("task 4", suggested_domain="coding")
+        learn("task_4", "success", confidence_was=0.5)
+        
+        # Prediction 5: stated 0.6, failed -> (0.6 - 0.0)^2 = 0.36
+        start_turn("task 5", suggested_domain="coding")
+        learn("task_5", "failed", confidence_was=0.6)
+        
+        # Total Brier Sum = 0.04 + 0.01 + 0.49 + 0.25 + 0.36 = 1.15
+        # Expected Brier Score = 1.15 / 5 = 0.23
+        cal_after = _load_calibration()
+        d_cal = cal_after["domains"]["coding"]
+        self.assertAlmostEqual(d_cal["brier_score"], 0.23, places=2)
+
 if __name__ == "__main__":
     unittest.main()

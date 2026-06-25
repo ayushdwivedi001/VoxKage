@@ -500,3 +500,36 @@ def _load_evolved_rules() -> dict:
 def _save_evolved_rules(rules: dict):
     _save_json(_EVOLVED_RULES_FILE, rules)
 
+
+def _promote_pending_evolved_rules() -> int:
+    """
+    Promotes pending evolved rules to active evolved rules if observation_count >= 3.
+    Returns:
+      The number of promoted rules.
+    """
+    data = _load_json(_EVOLVED_RULES_PENDING_FILE, lambda: {"pending": []})
+    pending_list = data.setdefault("pending", [])
+    
+    still_pending = []
+    promoted_count = 0
+    
+    evolved_rules = _load_evolved_rules()
+    rules_list = evolved_rules.setdefault("rules", [])
+    
+    for rule in pending_list:
+        if rule.get("observation_count", 0) >= 3:
+            # Promote
+            rule["confirmed_at"] = datetime.now(timezone.utc).isoformat()
+            rule["status"] = "active"
+            rules_list.append(rule)
+            promoted_count += 1
+        else:
+            still_pending.append(rule)
+            
+    if promoted_count > 0:
+        _save_evolved_rules(evolved_rules)
+        
+    data["pending"] = still_pending
+    _save_json(_EVOLVED_RULES_PENDING_FILE, data)
+    return promoted_count
+

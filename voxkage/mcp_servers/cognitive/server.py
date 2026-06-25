@@ -30,7 +30,8 @@ from .storage import (
     _load_recent_task_history,
     _store_pending_evolved_rule,
     _load_evolved_rules,
-    _save_evolved_rules
+    _save_evolved_rules,
+    _promote_pending_evolved_rules
 )
 from .constants import _DOMAIN_KEYWORDS, OUTPUT_TYPE_FILTERS
 from .intent import (
@@ -42,7 +43,9 @@ from .intent import (
 from .analyzer import (
     _score_anti_pattern,
     _analyze_execution_trace,
-    _consolidate_soul
+    _consolidate_soul,
+    _cluster_and_aggregate_failures,
+    _generate_calibration_report
 )
 from .utils import (
     _auto_update_documentation
@@ -1128,26 +1131,73 @@ def learn(
         pass
     # Update confidence calibration
     cal = _load_calibration()
-    if domain not in cal["domains"]:
-        cal["domains"][domain] = {"predictions": [], "accuracy": None}
-    cal["domains"][domain]["predictions"].append({
+    if "domains" not in cal or not isinstance(cal["domains"], dict):
+        cal["domains"] = {}
+        
+    if domain not in cal["domains"] or not isinstance(cal["domains"][domain], dict):
+        cal["domains"][domain] = {
+            "predictions": [], 
+            "accuracy": None,
+            "brier_score": None,
+            "overconfidence_index": None,
+            "underconfidence_index": None
+        }
+    
+    domain_data = cal["domains"][domain]
+    if "predictions" not in domain_data or not isinstance(domain_data["predictions"], list):
+        domain_data["predictions"] = []
+        
+    domain_data["predictions"].append({
         "stated": round(confidence_was, 2),
         "actual_success": outcome == "success",
         "task_id": task_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
-    cal["domains"][domain]["predictions"] = cal["domains"][domain]["predictions"][-50:]
+    domain_data["predictions"] = domain_data["predictions"][-50:]
     
-    preds = cal["domains"][domain]["predictions"]
+    preds = domain_data["predictions"]
     if len(preds) >= 5:
         correct = sum(1 for p in preds if (p["stated"] >= 0.5) == p["actual_success"])
-        cal["domains"][domain]["accuracy"] = round(correct / len(preds), 2)
-        gp["confidence_calibration"] = round(
-            sum((cal["domains"][d].get("accuracy") or 0.5) for d in cal["domains"])
-            / max(len(cal["domains"]), 1), 2
-        )
+        domain_data["accuracy"] = round(correct / len(preds), 2)
+        
+        # Brier Score calculation: average of (stated - actual)^2
+        brier_sum = 0.0
+        for p in preds:
+            actual_val = 1.0 if p["actual_success"] else 0.0
+            brier_sum += (p["stated"] - actual_val) ** 2
+        domain_data["brier_score"] = round(brier_sum / len(preds), 3)
+        
+        # Over/Under confidence index calculation
+        failed_tasks = [p for p in preds if not p["actual_success"]]
+        if failed_tasks:
+            over_sum = sum(p["stated"] for p in failed_tasks)
+            domain_data["overconfidence_index"] = round(over_sum / len(failed_tasks), 3)
+        else:
+            domain_data["overconfidence_index"] = 0.0
+            
+        success_tasks = [p for p in preds if p["actual_success"]]
+        if success_tasks:
+            under_sum = sum(1.0 - p["stated"] for p in success_tasks)
+            domain_data["underconfidence_index"] = round(under_sum / len(success_tasks), 3)
+        else:
+            domain_data["underconfidence_index"] = 0.0
+            
+        # Global calibration score: 1.0 - average_brier_score
+        brier_scores = []
+        for d in cal["domains"]:
+            if isinstance(cal["domains"][d], dict):
+                d_brier = cal["domains"][d].get("brier_score")
+                if d_brier is not None:
+                    brier_scores.append(d_brier)
+                
+        if brier_scores:
+            gp["confidence_calibration"] = round(1.0 - (sum(brier_scores) / len(brier_scores)), 2)
+        else:
+            gp["confidence_calibration"] = 0.5
+            
         profile["global_profile"] = gp
         _save_profile(profile)
+        
     _save_calibration(cal)
 
     # Append to task history
@@ -1553,27 +1603,61 @@ def optimize_cognitive_core() -> str:
             if _days_since(m.get("timestamp", "")) <= 30.0
         ]
         
-        mismatch_groups = {}
-        for m in recent_mismatches:
-            orig = m.get("assigned_domain", "unknown")
-            mismatch_groups.setdefault(orig, []).append(m)
+        # Temporal decay rate analysis
+        recent_7d = [m for m in recent_mismatches if _days_since(m.get("timestamp", "")) <= 7.0]
+        recent_older = [m for m in recent_mismatches if 7.0 < _days_since(m.get("timestamp", "")) <= 30.0]
+        rate_7d = len(recent_7d)
+        rate_older_weekly = len(recent_older) / (23.0 / 7.0) if len(recent_older) > 0 else 0.0
+        
+        rate_warning = ""
+        if rate_7d >= 3 and rate_7d > rate_older_weekly:
+            rate_warning = f"  ⚠ WARNING: Domain mismatch rate acceleration detected! (Last 7d: {rate_7d} vs previous weekly avg: {round(rate_older_weekly, 1)})\n"
+
+        # Failure Clustering & Autonomous Evolution
+        mismatch_clusters = _cluster_and_aggregate_failures(recent_mismatches)
+        auto_evolved_count = 0
+        for cluster in mismatch_clusters:
+            assigned_counts = {}
+            corrected_counts = {}
+            for entry in cluster["entries"]:
+                a = entry.get("assigned_domain", "unknown")
+                c = entry.get("corrected_domain", "unknown")
+                assigned_counts[a] = assigned_counts.get(a, 0) + 1
+                corrected_counts[c] = corrected_counts.get(c, 0) + 1
+                
+            orig_domain = max(assigned_counts, key=assigned_counts.get) if assigned_counts else "unknown"
+            dest_domain = max(corrected_counts, key=corrected_counts.get) if corrected_counts else "unknown"
             
-        for orig_domain, entries in mismatch_groups.items():
-            if len(entries) >= 3:
-                _store_pending_evolved_rule({
-                    "domain": orig_domain,
-                    "type": "domain_reclassification",
-                    "evidence": f"{len(entries)} domain mismatches for '{orig_domain}' in 30 days",
-                    "proposed_rule": (
-                        f"Messages classified as '{orig_domain}' may actually be research/general. "
-                        f"Consider checking secondary_domains before applying checklist."
-                    ),
-                    "observation_count": len(entries),
-                    "confidence": min(0.6 + len(entries) * 0.08, 0.90),
-                })
+            keywords_str = ", ".join(cluster["keywords"][:4])
+            pattern = cluster["pattern"]
+            
+            # Propose and autonomously persist rule (dry_run=False)
+            proposed = f"Messages containing keywords [{keywords_str}] should classify as '{dest_domain}' instead of '{orig_domain}'"
+            evidence = f"Cluster of {cluster['size']} mismatches containing keywords: {keywords_str}"
+            
+            res = evolve_cognitive_rules(
+                domain=dest_domain,
+                evolution_type="domain_reclassification",
+                evidence=evidence,
+                proposed_rule=proposed,
+                confidence=min(0.6 + cluster["size"] * 0.08, 0.95),
+                observation_count=cluster["size"],
+                dry_run=False
+            )
+            # Add pattern regex field to rule for matching in intent.py
+            if "Rule persisted" in res or "Observation" in res:
+                evolved_rules = _load_evolved_rules()
+                for rule in evolved_rules.setdefault("rules", []):
+                    if rule.get("proposed_rule") == proposed and "pattern" not in rule:
+                        rule["pattern"] = pattern
+                _save_evolved_rules(evolved_rules)
+                auto_evolved_count += 1
 
         # NEW: P4 Checklist Promotion
         pending_promoted = _promote_pending_checklist_items()
+
+        # NEW: Evolved Rule Promotion
+        pending_rules_promoted = _promote_pending_evolved_rules()
 
         # NEW: P4 Rule Health Check + Rollback
         evolved_rules = _load_evolved_rules()
@@ -1609,6 +1693,14 @@ def optimize_cognitive_core() -> str:
 
         _save_evolved_rules(evolved_rules)
 
+        # NEW: Calibration report
+        calibration_curve = ""
+        try:
+            cal = _load_calibration()
+            calibration_curve = _generate_calibration_report(cal)
+        except Exception:
+            pass
+
         # NEW: P4 Self-Audit Score
         total_tasks = gp.get("total_tasks_completed", 0)
         corrections = gp.get("total_user_corrections", 0)
@@ -1625,11 +1717,18 @@ def optimize_cognitive_core() -> str:
             f"  - Verified {aps_count} active anti-patterns",
             f"  - Archived {stale_count} stale anti-patterns",
             f"  - Domain mismatches (last 30d): {len(recent_mismatches)}",
+            f"  - Domain mismatch clusters: {len(mismatch_clusters)}",
+            f"  - Autonomous rules evolved: {auto_evolved_count}",
             f"  - Evolved rules health-checked: {len(rule_health_checked_domains)} domains",
             f"  - Rules quarantined: {len(quarantined)}",
             f"  - Pending checklist items promoted: {pending_promoted}",
+            f"  - Pending evolved rules promoted: {pending_rules_promoted}",
             f"  - Total completed tasks cataloged: {total_tasks}",
         ]
+        if rate_warning:
+            summary.insert(2, rate_warning.strip())
+        if calibration_curve:
+            summary.append("\n" + calibration_curve)
         if quarantined:
             summary.append("  ⚠ Quarantined rules:")
             for q in quarantined:

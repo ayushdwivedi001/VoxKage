@@ -12,10 +12,11 @@ from .constants import (
     _READ_ONLY_VERBS,
     _STATE_CHANGE_VERBS,
     _DOMAIN_KEYWORDS,
+    _DOMAIN_SEMANTICS,
     _COMPLEXITY_HIGH,
     _MULTI_REQUIREMENT
 )
-from .storage import _load_dynamic_rules
+from .storage import _load_dynamic_rules, _load_evolved_rules
 
 
 def _is_trivial_task(msg: str) -> bool:
@@ -51,6 +52,71 @@ def _is_trivial_task(msg: str) -> bool:
     return any(re.search(pat, msg_lower) for pat in trivial_patterns)
 
 
+def _score_domains(msg: str) -> tuple:
+    """
+    Computes domain scores using semantic verb (5.0 weight) and noun (1.0 weight) matches.
+    Applies active evolved rules reclassifications.
+    Returns:
+      (domain_scores, primary_domain, secondary_domains)
+    """
+    domain_scores = {}
+    for d, sem in _DOMAIN_SEMANTICS.items():
+        verb_matches = len(sem["verbs"].findall(msg))
+        noun_matches = len(sem["nouns"].findall(msg))
+        score = (verb_matches * 5.0) + (noun_matches * 1.0)
+        if score > 0:
+            domain_scores[d] = score
+
+    # Active Write-Back / Self-Repair rule adjustments
+    try:
+        evolved_rules = _load_evolved_rules().get("rules", [])
+        for rule in evolved_rules:
+            if rule.get("status") == "active" and rule.get("type") in ["domain_reclassification", "domain_rule"]:
+                pattern = rule.get("pattern")
+                if pattern:
+                    if re.search(pattern, msg, re.I):
+                        target_domain = rule.get("domain")
+                        # Boost the evolved domain by 20.0 to override any keyword score
+                        domain_scores[target_domain] = domain_scores.get(target_domain, 0.0) + 20.0
+    except Exception:
+        pass
+
+    # Context-aware overrides to prevent topic nouns from hijacking action domains
+    # E.g. "report about coding" is research, not coding.
+    # E.g. "research how to deploy" is research, not devops.
+    report_signals = re.compile(r"\b(report|summary|article|comparison|matrix|comparison matrix|review|list|paper|essay|poem|guide|tutorial|weather|news)\b", re.I)
+    if report_signals.search(msg):
+        # Boost research / analysis / creative
+        if "research" in domain_scores:
+            domain_scores["research"] = domain_scores.get("research", 0.0) + 8.0
+        else:
+            domain_scores["research"] = 8.0
+            
+        # Penalize coding if it is not actually requesting code development
+        code_dev_signals = re.compile(r"\b(write\s+code|implement\s+function|write\s+function|write\s+class|refactor\s+code|debug\s+code|syntax\s+error)\b", re.I)
+        if not code_dev_signals.search(msg) and "coding" in domain_scores:
+            domain_scores["coding"] = max(0.0, domain_scores["coding"] - 12.0)
+
+    ranked_domains = sorted(
+        [(d, s) for d, s in domain_scores.items()],
+        key=lambda x: x[1], reverse=True
+    )
+
+    if domain_scores:
+        domain = ranked_domains[0][0]
+    else:
+        domain = "general"
+
+    secondary_domains = []
+    for d, s in ranked_domains:
+        if d != domain and s >= 1.0:
+            secondary_domains.append(d)
+            if len(secondary_domains) == 2:
+                break
+
+    return domain_scores, domain, secondary_domains
+
+
 def _classify_intent(msg: str) -> dict:
     """
     Rule-based intent classification. Returns type, domain, tier, etc.
@@ -68,7 +134,7 @@ def _classify_intent(msg: str) -> dict:
     declared_tier = None
 
     for line in msg_lines:
-        dom_match = re.search(r"^(?:Domains?|Categories|Domain):\s*([a-zA-Z\s,;➔→\-\(\)>]+)", line, re.I)
+        dom_match = re.search(r"^\s*(?:Domains?|Categories|Domain):\s*([a-zA-Z\s,;➔→\-\(\)>]+)", line, re.I)
         if dom_match:
             # Split on arrows and delimiters
             raw_doms = re.split(r"[,;➔→\-<>]+", dom_match.group(1))
@@ -82,7 +148,7 @@ def _classify_intent(msg: str) -> dict:
                             declared_domains.append(standard_domain)
                             break
         
-        tier_match = re.search(r"^(?:Tiers?|Complexity):\s*([1-3])", line, re.I)
+        tier_match = re.search(r"^\s*(?:Tiers?|Complexity):\s*([1-3])", line, re.I)
         if tier_match:
             declared_tier = int(tier_match.group(1))
 
@@ -106,24 +172,11 @@ def _classify_intent(msg: str) -> dict:
     for pat in rules.get("force_tier_1_patterns", []):
         try:
             if re.search(pat, msg_stripped, re.I):
-                # Classify domain using the keywords (same as below)
-                domain_scores = {}
-                for d, pattern in _DOMAIN_KEYWORDS.items():
-                    matches = len(pattern.findall(msg))
-                    if matches > 0:
-                        domain_scores[d] = matches
-                domain = max(domain_scores, key=domain_scores.get) if domain_scores else "general"
-                
+                domain_scores, domain, secondary_domains = _score_domains(msg)
                 ranked_domains = sorted(
                     [(d, s) for d, s in domain_scores.items()],
                     key=lambda x: x[1], reverse=True
                 )
-                secondary_domains = []
-                for d, s in ranked_domains:
-                    if d != domain and s >= 1:
-                        secondary_domains.append(d)
-                        if len(secondary_domains) == 2:
-                            break
                 return {
                     "type": "task",
                     "domain": domain,
@@ -173,32 +226,11 @@ def _classify_intent(msg: str) -> dict:
         return {"type": "conversation"}
 
     # ── Domain classification ──
-    domain_scores = {}
-    for d, pattern in _DOMAIN_KEYWORDS.items():
-        matches = len(pattern.findall(msg))
-        if matches > 0:
-            domain_scores[d] = matches
-
+    domain_scores, domain, secondary_domains = _score_domains(msg)
     ranked_domains = sorted(
         [(d, s) for d, s in domain_scores.items()],
         key=lambda x: x[1], reverse=True
     )
-
-    if domain_scores:
-        max_score = max(domain_scores.values())
-        if max_score <= 1:
-            domain = "general"
-        else:
-            domain = max(domain_scores, key=domain_scores.get)
-    else:
-        domain = "general"
-
-    secondary_domains = []
-    for d, s in ranked_domains:
-        if d != domain and s >= 1:
-            secondary_domains.append(d)
-            if len(secondary_domains) == 2:
-                break
 
     # ── v3 Tier classification — ACTION RISK, not message length ──
     # Step 1: detect read-only (observation) vs state-change (mutation) intent
@@ -275,6 +307,19 @@ def _classify_intent(msg: str) -> dict:
         tier = 2
     else:
         tier = 1
+
+    # Apply active evolved tier rule overrides
+    try:
+        evolved_rules = _load_evolved_rules().get("rules", [])
+        for rule in evolved_rules:
+            if rule.get("status") == "active" and rule.get("type") in ["tier_rule", "tier_adjustment"]:
+                pattern = rule.get("pattern")
+                if pattern and re.search(pattern, msg, re.I):
+                    rule_tier = rule.get("tier")
+                    if rule_tier in [1, 2, 3]:
+                        tier = rule_tier
+    except Exception:
+        pass
 
     return {
         "type": "task",

@@ -102,73 +102,65 @@ _STATE_CHANGE_VERBS = re.compile(
     re.I
 )
 
-# Domain classification keywords
+# Domain classification keywords (separated into intent verbs and topic nouns)
+_DOMAIN_SEMANTICS_RAW = {
+    "frontend": {
+        "verbs": ["render", "style", "animate", "align", "format", "layout", "design", "paint", "draw", "theme"],
+        "nouns": ["frontend", "front-end", "ui", "ux", "css", "html", "react", "vue", "angular", "svelte", "responsive", "component", "page", "button", "form", "modal", "navbar", "sidebar", "footer", "header", "card", "grid", "flex", "tailwind", "bootstrap", "color", "font", "web\\s*app", "website", "landing\\s*page", "dashboard"]
+    },
+    "backend": {
+        "verbs": ["serve", "route", "authenticate", "cache", "query", "connect", "listen"],
+        "nouns": ["backend", "back-end", "api", "server", "endpoint", "database", "express", "django", "flask", "fastapi", "node", "rest", "graphql", "grpc", "auth", "middleware", "session", "jwt", "oauth", "microservice", "docker", "nginx", "kubernetes", "lambda", "serverless"]
+    },
+    "research": {
+        "verbs": ["search", "research", "find\\s*(out|info|about)", "look\\s*up", "compare", "review", "summarize", "explain", "learn", "investigate", "browse", "scrape", "fetch", "query", "check\\s*out"],
+        "nouns": ["latest", "news", "weather", "price", "stock", "article", "paper", "blog", "documentation", "wiki", "guide", "tutorial", "comparison", "difference", "information"]
+    },
+    "system": {
+        "verbs": ["restart", "shutdown", "sleep", "kill", "install", "uninstall", "ping", "backup", "restore", "set\\s*wallpaper", "set\\s*volume", "set\\s*brightness"],
+        "nouns": ["system", "os", "windows", "process", "battery", "disk", "memory", "cpu", "ram", "wifi", "bluetooth", "network", "volume", "brightness", "wallpaper", "screenshot", "clipboard", "registry", "driver", "uncommitted", "staged", "terminal", "powershell", "bash", "shell", "folder", "directory", "file"]
+    },
+    "coding": {
+        "verbs": ["code", "program", "script", "debug", "refactor", "optimize", "test", "lint", "compile", "build", "fix\\s*(the\\s*)?bug", "implement", "write\\s*(a\\s*)?(function|script|class|code|program)", "develop", "commit", "push", "pull", "merge", "clone"],
+        "nouns": ["variable", "constant", "class", "function", "method", "interface", "generic", "inheritance", "algorithm", "data\\s*structure", "bug", "error", "exception", "crash", "syntax", "repo", "pr", "pull\\s*request", "dependency", "import", "export"]
+    },
+    "creative": {
+        "verbs": ["cook", "bake", "write\\s*(a\\s*)?(story|poem|essay|letter|email|blog|caption|joke|song|script|speech)", "brainstorm", "draft", "imagine", "compose"],
+        "nouns": ["recipe", "food", "meal", "dish", "ingredient", "story", "poem", "essay", "song", "lyrics", "art", "craft", "creative", "idea", "fiction", "narrative", "character", "plot"]
+    },
+    "analysis": {
+        "verbs": ["analyze", "evaluate", "inspect", "audit", "profile", "diagnose", "graph", "plot", "measure"],
+        "nouns": ["analysis", "metrics", "logs", "diagnostics", "profile", "report", "trend", "performance", "chart", "plot", "graph"]
+    },
+    "planning": {
+        "verbs": ["plan", "design", "outline", "map", "schedule", "roadmap"],
+        "nouns": ["planning", "milestones", "phases", "todo", "task\\s*list", "strategy", "flowchart", "architecture", "plan"]
+    },
+    "general": {
+        "verbs": ["help", "greet", "chat", "socialize"],
+        "nouns": ["general", "chitchat", "info", "status", "version", "plugins", "about", "uptime", "date", "time", "spotify", "media"]
+    },
+    "data": {
+        "verbs": ["clean", "preprocess", "predict", "train", "etl", "ingest"],
+        "nouns": ["data", "dataset", "dataframe", "pandas", "numpy", "ml", "machine\\s*learning", "sql", "json", "csv", "xml", "parquet", "tensor", "torch", "sklearn"]
+    },
+    "devops": {
+        "verbs": ["deploy", "build", "publish", "ssh", "ssl"],
+        "nouns": ["devops", "ci", "cd", "pipeline", "github\\s*action", "docker", "kubernetes", "aws", "gcp", "azure", "terraform", "ansible", "nginx", "server\\s*config"]
+    }
+}
+
+_DOMAIN_SEMANTICS = {
+    d: {
+        "verbs": re.compile(r"\b(" + "|".join(s["verbs"]) + r")\b", re.I),
+        "nouns": re.compile(r"\b(" + "|".join(s["nouns"]) + r")\b", re.I)
+    }
+    for d, s in _DOMAIN_SEMANTICS_RAW.items()
+}
+
 _DOMAIN_KEYWORDS = {
-    "frontend": re.compile(
-        r"\b(frontend|front-end|ui|ux|css|html|react|vue|angular|svelte|"
-        r"responsive|layout|style|animation|component|page|button|form|"
-        r"modal|navbar|sidebar|footer|header|card|grid|flex|tailwind|"
-        r"bootstrap|design|color|font|theme|dark\s*mode|mobile|tablet|"
-        r"web\s*app|website|landing\s*page|dashboard)\b", re.I
-    ),
-    "backend": re.compile(
-        r"\b(backend|back-end|api|server|endpoint|database|sql|mongo|"
-        r"redis|express|django|flask|fastapi|node|rest|graphql|grpc|"
-        r"auth|authentication|middleware|route|controller|model|schema|"
-        r"migration|orm|query|table|index|cache|session|jwt|oauth|"
-        r"microservice|docker|deploy|nginx|kubernetes|lambda|serverless)\b", re.I
-    ),
-    "research": re.compile(
-        r"\b(search|research|find\s*(out|info|about)|look\s*up|what\s*is|"
-        r"who\s*is|when\s*(did|was|is)|where\s*(is|can)|how\s*(to|does|do)|"
-        r"latest|news|weather|price|stock|compare|review|summarize|"
-        r"explain|article|paper|blog|documentation|wiki|learn|guide|tutorial)\b", re.I
-    ),
-    "system": re.compile(
-        r"\b(system|os|windows|process|kill|restart|shutdown|sleep|"
-        r"battery|disk|memory|cpu|ram|wifi|bluetooth|network|volume|"
-        r"brightness|wallpaper|screenshot|clipboard|notification|"
-        r"install|uninstall|update|driver|registry|service|startup|"
-        r"firewall|antivirus|recycle\s*bin|task\s*manager|terminal|"
-        r"command|powershell|bash|shell|folder|directory|file|"
-        r"git\s*status|git\s*log|git\s*diff|uncommitted|staged|branch)\b", re.I
-    ),
-    "coding": re.compile(
-        r"\b(code|coding|program|script|function|class|module|package|"
-        r"debug|refactor|optimize|test|lint|compile|build|fix\s*(the\s*)?bug|"
-        r"implement|write\s*(a\s*)?(function|script|class|code|program)|"
-        r"git|commit|branch|merge|pull\s*request|review|pr|repo|"
-        r"algorithm|data\s*structure|pattern|architecture|dependency|"
-        r"import|export|type|interface|generic|inheritance)\b", re.I
-    ),
-    "creative": re.compile(
-        r"\b(cook|cooking|recipe|bake|baking|food|meal|dish|ingredient|prepare|how\s*to\s*make|"
-        r"write\s*(a\s*)?(story|poem|essay|letter|email|blog|caption|joke|song|script|speech)|"
-        r"creative|brainstorm|idea|suggest|recommend|design\s*idea|draw|paint|compose|"
-        r"lyrics|fiction|narrative|character|plot|describe\s*(how|what)|craft|art)\b", re.I
-    ),
-    "analysis": re.compile(
-        r"\b(analysis|analyze|investigate|evaluate|review|inspect|audit|"
-        r"profile|diagnostic|metrics|log|logs|chart|plot|graph|report|trend)\b", re.I
-    ),
-    "planning": re.compile(
-        r"\b(planning|plan|design|architecture|roadmap|todo|task\s*list|"
-        r"strategy|milestone|phases|step-by-step|diagram|flowchart|outline)\b", re.I
-    ),
-    "general": re.compile(
-        r"\b(general|chitchat|hello|help|info|status|version|plugins|about|"
-        r"system\s*info|uptime|date|time|volume|brightness|media|spotify)\b", re.I
-    ),
-    "data": re.compile(
-        r"\b(data|database|dataset|sql|json|csv|xml|parquet|dataframe|pandas|"
-        r"numpy|ml|machine\s*learning|train|predict|model|numpy|scipy|tensor|"
-        r"torch|sklearn|cleaning|preprocess|ingest|etl|analytics)\b", re.I
-    ),
-    "devops": re.compile(
-        r"\b(devops|deploy|ci|cd|pipeline|github\s*action|docker|kubernetes|"
-        r"aws|gcp|azure|terraform|ansible|secret|env|environment|nginx|"
-        r"server\s*config|ssh|ssl|cert|build|compile|package|publish)\b", re.I
-    ),
+    d: re.compile(r"\b(" + "|".join(s["verbs"] + s["nouns"]) + r")\b", re.I)
+    for d, s in _DOMAIN_SEMANTICS_RAW.items()
 }
 
 # Complexity signals for tiering
