@@ -76,9 +76,22 @@ def _classify_intent(msg: str) -> dict:
                     if matches > 0:
                         domain_scores[d] = matches
                 domain = max(domain_scores, key=domain_scores.get) if domain_scores else "general"
+                
+                ranked_domains = sorted(
+                    [(d, s) for d, s in domain_scores.items()],
+                    key=lambda x: x[1], reverse=True
+                )
+                secondary_domains = []
+                for d, s in ranked_domains:
+                    if d != domain and s >= 1:
+                        secondary_domains.append(d)
+                        if len(secondary_domains) == 2:
+                            break
                 return {
                     "type": "task",
                     "domain": domain,
+                    "secondary_domains": secondary_domains,
+                    "ranked_domains": ranked_domains,
                     "tier": 1,
                     "is_read_only": True,
                 }
@@ -124,10 +137,15 @@ def _classify_intent(msg: str) -> dict:
 
     # ── Domain classification ──
     domain_scores = {}
-    for domain, pattern in _DOMAIN_KEYWORDS.items():
+    for d, pattern in _DOMAIN_KEYWORDS.items():
         matches = len(pattern.findall(msg))
         if matches > 0:
-            domain_scores[domain] = matches
+            domain_scores[d] = matches
+
+    ranked_domains = sorted(
+        [(d, s) for d, s in domain_scores.items()],
+        key=lambda x: x[1], reverse=True
+    )
 
     if domain_scores:
         max_score = max(domain_scores.values())
@@ -137,6 +155,13 @@ def _classify_intent(msg: str) -> dict:
             domain = max(domain_scores, key=domain_scores.get)
     else:
         domain = "general"
+
+    secondary_domains = []
+    for d, s in ranked_domains:
+        if d != domain and s >= 1:
+            secondary_domains.append(d)
+            if len(secondary_domains) == 2:
+                break
 
     # ── v3 Tier classification — ACTION RISK, not message length ──
     # Step 1: detect read-only (observation) vs state-change (mutation) intent
@@ -217,6 +242,8 @@ def _classify_intent(msg: str) -> dict:
     return {
         "type": "task",
         "domain": domain,
+        "secondary_domains": secondary_domains,
+        "ranked_domains": ranked_domains,
         "tier": tier,
         "is_read_only": (has_read_only and not has_state_change) or is_trivial,
     }

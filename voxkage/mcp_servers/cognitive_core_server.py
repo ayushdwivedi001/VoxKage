@@ -72,7 +72,7 @@ _auto_update_documentation(force=False)
 # ── FastMCP Tool Registrations ───────────────────────────────────────────────
 
 @mcp.tool()
-def start_turn(user_message: str, refresh_only: bool = False) -> str:
+def start_turn(user_message: str, refresh_only: bool = False, suggested_domain: str = "") -> str:
     """
     COGNITIVE CORE — MANDATORY FIRST CALL EVERY SINGLE TURN.
 
@@ -86,6 +86,7 @@ def start_turn(user_message: str, refresh_only: bool = False) -> str:
     Parameters:
       user_message : The user's raw message text for this turn.
       refresh_only : If True, only update the active protocol timestamp to keep the gate open.
+      suggested_domain : Optional. Model hints the correct domain to override classifier.
 
     Returns:
       - If conversation: { type: "conversation" } — respond normally, skip all other cognitive tools.
@@ -101,7 +102,7 @@ def start_turn(user_message: str, refresh_only: bool = False) -> str:
       If this is a follow-up to a recent task ("make it blue", "also add X"),
       returns the previous task_id so you continue the same context.
     """
-    return server.start_turn(user_message, refresh_only=refresh_only)
+    return server.start_turn(user_message, refresh_only=refresh_only, suggested_domain=suggested_domain)
 
 
 @mcp.tool()
@@ -142,7 +143,7 @@ def checkpoint(task_id: str, sub_task: str, status: str, issues: str = "") -> st
 
 
 @mcp.tool()
-def reflect(task_id: str, output_summary: str, checklist_results: str) -> str:
+def reflect(task_id: str, output_summary: str, checklist_results: str, output_type: str = "auto") -> str:
     """
     COGNITIVE CORE — Structured domain-specific critique.
 
@@ -155,10 +156,11 @@ def reflect(task_id: str, output_summary: str, checklist_results: str) -> str:
       output_summary    : Brief summary of what you produced
       checklist_results : Comma-separated results, e.g.:
                           "responsive:pass, accessible:fail:no ARIA labels, error_states:pass"
+      output_type       : NEW: output type to filter applicable checklist items.
 
     Returns structured critique with DELIVER or REFINE recommendation.
     """
-    return server.reflect(task_id, output_summary, checklist_results)
+    return server.reflect(task_id, output_summary, checklist_results, output_type=output_type)
 
 
 @mcp.tool()
@@ -315,6 +317,31 @@ def get_profile(domain: str = "") -> str:
                If empty, show all domains in compact format.
     """
     return server.get_profile(domain)
+
+
+@mcp.tool()
+def evolve_cognitive_rules(
+    domain: str,
+    evolution_type: str,
+    evidence: str,
+    proposed_rule: str,
+    confidence: float = 0.7,
+    observation_count: int = 1,
+    dry_run: bool = True
+) -> str:
+    """
+    COGNITIVE CORE — Proactive self-evolution of rules.
+    Ships permanently with dry_run=True.
+    """
+    return server.evolve_cognitive_rules(
+        domain=domain,
+        evolution_type=evolution_type,
+        evidence=evidence,
+        proposed_rule=proposed_rule,
+        confidence=confidence,
+        observation_count=observation_count,
+        dry_run=dry_run
+    )
 
 
 if __name__ == "__main__":

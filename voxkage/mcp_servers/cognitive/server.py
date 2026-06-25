@@ -22,8 +22,17 @@ from .storage import (
     get_last_start_turn_ts,
     _load_archived_anti_patterns,
     parse_timestamp,
-    _append_task_history
+    _append_task_history,
+    _load_domain_mismatches,
+    _append_domain_mismatch,
+    _store_pending_checklist_item,
+    _promote_pending_checklist_items,
+    _load_recent_task_history,
+    _store_pending_evolved_rule,
+    _load_evolved_rules,
+    _save_evolved_rules
 )
+from .constants import _DOMAIN_KEYWORDS, OUTPUT_TYPE_FILTERS
 from .intent import (
     _classify_intent,
     _detect_followup,
@@ -40,7 +49,11 @@ from .utils import (
 )
 
 
-def start_turn(user_message: str, refresh_only: bool = False) -> str:
+def start_turn(
+    user_message: str,
+    refresh_only: bool = False,
+    suggested_domain: str = ""    # NEW: Model hints the correct domain before classification
+) -> str:
     """
     COGNITIVE CORE — MANDATORY FIRST CALL EVERY SINGLE TURN.
 
@@ -54,6 +67,7 @@ def start_turn(user_message: str, refresh_only: bool = False) -> str:
     Parameters:
       user_message : The user's raw message text for this turn.
       refresh_only : If True, only update the active protocol timestamp to keep the gate open.
+      suggested_domain : Optional. Model hints the correct domain to override classifier.
 
     Returns:
       - If conversation: { type: "conversation" } — respond normally, skip all other cognitive tools.
@@ -95,6 +109,13 @@ def start_turn(user_message: str, refresh_only: bool = False) -> str:
     tier = classification["tier"]
     is_read_only = classification.get("is_read_only", False)
 
+    # NEW: Model-suggested domain override
+    if suggested_domain and suggested_domain in _DOMAIN_KEYWORDS:
+        domain = suggested_domain
+        session["domain_was_suggested"] = True
+        session["classifier_domain"] = classification["domain"]
+        session["model_domain"] = suggested_domain
+
     # Follow-up detection
     is_followup = _detect_followup(user_message, session)
     if is_followup and session.get("last_task"):
@@ -132,8 +153,21 @@ def start_turn(user_message: str, refresh_only: bool = False) -> str:
             deduped_aps.append(ap)
     domain_anti_patterns = deduped_aps[:5]
 
-    # Load baseline checklist
+    # Load baseline checklist and merge secondary domains
+    secondary_domains = classification.get("secondary_domains", [])
     checklist = _load_checklist(domain)
+    existing_ids = {item["id"] for item in checklist}
+    for sec_domain in secondary_domains:
+        for item in _load_checklist(sec_domain):
+            if item["id"] not in existing_ids:
+                checklist.append(item)
+                existing_ids.add(item["id"])
+            else:
+                # Keep highest severity
+                existing = next(i for i in checklist if i["id"] == item["id"])
+                w = {"high": 3, "medium": 2, "low": 1}
+                if w.get(item["severity"], 1) > w.get(existing["severity"], 1):
+                    existing["severity"] = item["severity"]
 
     # Generate task-specific plan items and prepend them to the checklist
     plan_items = _generate_task_plan(user_message, domain)
@@ -173,6 +207,7 @@ def start_turn(user_message: str, refresh_only: bool = False) -> str:
     task_context = {
         "task_id": task_id,
         "domain": domain,
+        "secondary_domains": secondary_domains,
         "tier": tier,
         "is_followup": is_followup,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -191,9 +226,13 @@ def start_turn(user_message: str, refresh_only: bool = False) -> str:
         f"[COGNITIVE] type: task",
         f"  task_id: {task_id}",
         f"  domain: {domain}",
+    ]
+    if secondary_domains:
+        lines.append(f"  secondary_domains: {', '.join(secondary_domains)}")
+    lines.extend([
         f"  tier: {tier} ({'Quick' if tier == 1 else 'Standard' if tier == 2 else 'Complex'})",
         f"  followup: {is_followup}",
-    ]
+    ])
 
     # Profile snapshot
     lines.append(f"\n  Profile — {domain}:")
@@ -208,6 +247,33 @@ def start_turn(user_message: str, refresh_only: bool = False) -> str:
         for ap in domain_anti_patterns[:3]:
             relevance_note = f" (relevance: {round(ap['_relevance_score'], 1)})" if ap.get("_relevance_score", 0) > 0 else ""
             lines.append(f"    • {ap.get('pattern', '?')}{relevance_note}")
+
+    # NEW: P1 Axiom Promotion (capped at 5, 90-day decay)
+    try:
+        now = datetime.now(timezone.utc)
+        decay_days = 90
+        axiom_candidates = []
+        for ap in ap_data.get("anti_patterns", []):
+            if ap.get("times_prevented", 0) >= 5:
+                ts = ap.get("timestamp", "")
+                try:
+                    age = (now - datetime.fromisoformat(ts.replace("Z", "+00:00"))).days
+                except Exception:
+                    age = 0
+                if age <= decay_days:
+                    axiom_candidates.append(ap)
+
+        # Sort by times_prevented descending, cap at 5
+        axiom_candidates.sort(key=lambda x: x.get("times_prevented", 0), reverse=True)
+        axiom_aps = axiom_candidates[:5]
+
+        if axiom_aps:
+            lines.append("\n  🔮 Promoted Axioms (proven in practice):")
+            for ap in axiom_aps:
+                count = ap.get("times_prevented", 0)
+                lines.append(f"    ★ [{count}× prevented] {ap.get('pattern', '?')}")
+    except Exception:
+        pass
 
     # Session elevated checks
     if elevated:
@@ -271,6 +337,7 @@ def start_turn(user_message: str, refresh_only: bool = False) -> str:
     lines.append("    • SELF-CORRECTION: If you make a mistake, acknowledge it, analyze the root cause, and call user_corrected() immediately.")
     lines.append("    • SELF-EVOLUTION: Update your behavior based on the known weak areas and anti-pattern warnings. Proactively avoid repeating past failures.")
     lines.append("    • CRITICAL THINKING: Do not just tick checklists blindly. Perform honest self-critique. If a checklist item fails, fail it and refine.")
+    lines.append("    • DOMAIN REPORTING: If the domain assigned seems wrong for what you're producing, report it in errors_found when calling learn(). Format: \"Domain mismatch: [assigned] on [actual] task — [reason]\" Or pass suggested_domain= to start_turn() upfront to prevent the mismatch entirely.")
 
     return "\n".join(lines)
 
@@ -318,6 +385,8 @@ def pre_mortem(task_id: str, task_summary: str) -> str:
             seen_patterns.add(pattern_str)
             deduped_aps.append(ap)
     relevant_aps = deduped_aps[:5]
+    session["premortem_shown_aps"] = [ap.get("pattern", "") for ap in relevant_aps]
+    _save_session(session)
 
     raw_elevated = session.get("elevated_checks", {})
     if isinstance(raw_elevated, list):
@@ -431,7 +500,12 @@ def checkpoint(task_id: str, sub_task: str, status: str, issues: str = "") -> st
     return guard_warning + "\n".join(lines)
 
 
-def reflect(task_id: str, output_summary: str, checklist_results: str) -> str:
+def reflect(
+    task_id: str,
+    output_summary: str,
+    checklist_results: str,
+    output_type: str = "auto"  # NEW: "auto"|"markdown"|"code"|"command"|"research"|"general"
+) -> str:
     """
     COGNITIVE CORE — Structured domain-specific critique.
 
@@ -444,6 +518,7 @@ def reflect(task_id: str, output_summary: str, checklist_results: str) -> str:
       output_summary    : Brief summary of what you produced
       checklist_results : Comma-separated results, e.g.:
                           "responsive:pass, accessible:fail:no ARIA labels, error_states:pass"
+      output_type       : NEW: output type to filter applicable checklist items.
 
     Returns structured critique with DELIVER or REFINE recommendation.
     """
@@ -460,17 +535,68 @@ def reflect(task_id: str, output_summary: str, checklist_results: str) -> str:
     else:
         elevated = raw_elevated.get(domain, [])
 
-    # Load baseline checklist and active plan
+    # Load baseline checklist and active plan with domain metadata
+    secondary_domains = task.get("secondary_domains", [])
     checklist = _load_checklist(domain)
+    for item in checklist:
+        item["origin_domain"] = domain
+
+    existing_ids = {item["id"] for item in checklist}
+    for sec_domain in secondary_domains:
+        for item in _load_checklist(sec_domain):
+            if item["id"] not in existing_ids:
+                item["origin_domain"] = sec_domain
+                checklist.append(item)
+                existing_ids.add(item["id"])
+            else:
+                existing = next(i for i in checklist if i["id"] == item["id"])
+                w = {"high": 3, "medium": 2, "low": 1}
+                if w.get(item["severity"], 1) > w.get(existing["severity"], 1):
+                    existing["severity"] = item["severity"]
+                    existing["origin_domain"] = sec_domain
+
     active_plan = session.get("active_plan") or []
     
     # Map all valid IDs to their definitions
     checklist_map = {item["id"]: item for item in checklist}
-    plan_map = {item["id"]: item for item in active_plan}
+    
+    plan_map = {}
+    for item in active_plan:
+        item = dict(item)
+        item["origin_domain"] = domain
+        plan_map[item["id"]] = item
     
     combined_items_map = {}
     combined_items_map.update(checklist_map)
     combined_items_map.update(plan_map)
+
+    # NEW: P2 Output-Type Checklist Filtering
+    if output_type == "auto":
+        summary_lower = output_summary.lower()
+        if any(kw in summary_lower for kw in ["markdown", ".md file", "report", "written to", "document"]):
+            output_type = "markdown"
+        elif any(kw in summary_lower for kw in ["ran command", "executed", "shell output", "terminal"]):
+            output_type = "command"
+        elif any(kw in summary_lower for kw in ["research", "web search", "sources", "comparison matrix"]):
+            output_type = "research"
+
+    filters = OUTPUT_TYPE_FILTERS.get(output_type, {})
+    excluded_ids = set(filters.get("exclude", []))
+    downgrade_map = filters.get("downgrade", {})
+
+    filtered_map = {}
+    filter_log = {"excluded": [], "downgraded": []}
+    for item_id, item in combined_items_map.items():
+        if item_id in excluded_ids:
+            filter_log["excluded"].append(item_id)
+            continue
+        if item_id in downgrade_map:
+            item = dict(item)
+            item["severity"] = downgrade_map[item_id]
+            filter_log["downgraded"].append(f"{item_id}→{downgrade_map[item_id]}")
+        filtered_map[item_id] = item
+
+    combined_items_map = filtered_map
     all_valid_ids = set(combined_items_map.keys())
 
     # Parse checklist results — v3: fuzzy/prefix/wildcard matching
@@ -572,13 +698,57 @@ def reflect(task_id: str, output_summary: str, checklist_results: str) -> str:
             
     recommend_deliver = (quality_score >= 0.85) and not high_severity_failed
 
+    # Calculate per-domain scores
+    domain_scores = {}
+    domain_scores[domain] = {"achieved": 0, "possible": 0, "passed_ids": [], "failed_ids": []}
+    for sd in secondary_domains:
+        domain_scores[sd] = {"achieved": 0, "possible": 0, "passed_ids": [], "failed_ids": []}
+
+    for pass_id in passes:
+        item = combined_items_map.get(pass_id)
+        weight = severity_weights.get(item.get("severity", "low") if item else "low", 1)
+        orig_dom = item.get("origin_domain", domain) if item else domain
+        domain_scores.setdefault(orig_dom, {"achieved": 0, "possible": 0, "passed_ids": [], "failed_ids": []})
+        domain_scores[orig_dom]["achieved"] += weight
+        domain_scores[orig_dom]["possible"] += weight
+        domain_scores[orig_dom]["passed_ids"].append(pass_id)
+
+    for fail_item in fails:
+        item = combined_items_map.get(fail_item["id"])
+        weight = severity_weights.get(item.get("severity", "low") if item else "low", 1)
+        orig_dom = item.get("origin_domain", domain) if item else domain
+        domain_scores.setdefault(orig_dom, {"achieved": 0, "possible": 0, "passed_ids": [], "failed_ids": []})
+        domain_scores[orig_dom]["possible"] += weight
+        domain_scores[orig_dom]["failed_ids"].append(fail_item["id"])
+
     lines = [
         f"[COGNITIVE REFLECT] task: {task_id}",
         f"  Domain: {domain}",
-        f"  Output: {output_summary[:150]}",
-        f"  Checklist Quality Score: {quality_score}/1.0 ({quality_percent}%)",
-        "",
     ]
+    if secondary_domains:
+        lines.append(f"  Secondary Domains: {', '.join(secondary_domains)}")
+    lines.append(f"  Output: {output_summary[:150]}")
+    lines.append(f"  Checklist Quality Score: {quality_score}/1.0 ({quality_percent}%)")
+
+    lines.append("\n  Score Breakdown:")
+    for dom_name, d_score in domain_scores.items():
+        pos = d_score["possible"]
+        ach = d_score["achieved"]
+        if pos == 0:
+            lines.append(f"    • {dom_name.capitalize()}: N/A")
+        else:
+            pct = round((ach / pos) * 100)
+            passed_checks = len(d_score["passed_ids"])
+            total_checks = passed_checks + len(d_score["failed_ids"])
+            lines.append(f"    • {dom_name.capitalize()}: {pct}% ({passed_checks}/{total_checks} checks)")
+
+    if output_type != "auto" and (filter_log["excluded"] or filter_log["downgraded"]):
+        lines.append(
+            f"\n  ℹ Output type: {output_type} — "
+            f"{len(filter_log['excluded'])} items excluded, "
+            f"{len(filter_log['downgraded'])} downgraded: {', '.join(filter_log['downgraded'])}"
+        )
+    lines.append("")
 
     plan_passes = [p for p in passes if p.startswith("plan_")]
     chk_passes = [p for p in passes if not p.startswith("plan_")]
@@ -775,20 +945,94 @@ def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found:
 
     # Update domain performance
     dp = gp.get("domain_performance", {})
-    if domain not in dp:
-        dp[domain] = {"tasks": 0, "successes": 0, "common_errors": []}
+    secondary_domains = task.get("secondary_domains", [])
+    all_domains = [domain] + secondary_domains
     
-    dp[domain]["tasks"] = (dp[domain].get("tasks") or 0) + 1
-    if outcome == "success":
-        dp[domain]["successes"] = (dp[domain].get("successes") or 0) + 1
+    for d in all_domains:
+        if d not in dp:
+            dp[d] = {"tasks": 0, "successes": 0, "common_errors": []}
+        dp[d]["tasks"] = (dp[d].get("tasks") or 0) + 1
+        if outcome == "success":
+            dp[d]["successes"] = (dp[d].get("successes") or 0) + 1
 
     # Add errors to common_errors
     if errors_found:
-        for err in errors_found.split(","):
-            err = err.strip()
-            if err and err not in dp[domain]["common_errors"]:
-                dp[domain]["common_errors"].append(err)
+        for d in all_domains:
+            if d not in dp:
+                dp[d] = {"tasks": 0, "successes": 0, "common_errors": []}
+            for err in errors_found.split(","):
+                err = err.strip()
+                if err and err not in dp[d]["common_errors"]:
+                    dp[d]["common_errors"].append(err)
+            dp[d]["common_errors"] = dp[d]["common_errors"][-10:]
         dp[domain]["common_errors"] = dp[domain]["common_errors"][-10:]
+
+        # NEW: P0 Domain Reclassification via errors_found parsing
+        DOMAIN_MISMATCH_KEYWORDS = [
+            "domain mismatch", "wrong checklist", "inapplicable",
+            "domain_override", "not applicable to", "coding checklist on",
+            "wrong domain", "misclassified as", "checklist doesn't apply",
+        ]
+        err_lower = errors_found.lower()
+        mismatch_detected = any(kw in err_lower for kw in DOMAIN_MISMATCH_KEYWORDS)
+        if mismatch_detected:
+            corrected_domain = None
+            for d in _DOMAIN_KEYWORDS.keys():
+                if d in err_lower and d != domain:
+                    corrected_domain = d
+                    break
+            if corrected_domain:
+                _append_domain_mismatch({
+                    "task_id": task_id,
+                    "assigned_domain": domain,
+                    "corrected_domain": corrected_domain,
+                    "errors_found_excerpt": errors_found[:200],
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "outcome": outcome,
+                })
+                # Update profile for corrected domain
+                if corrected_domain not in dp:
+                    dp[corrected_domain] = {"tasks": 0, "successes": 0, "common_errors": []}
+                dp[corrected_domain]["tasks"] = dp[corrected_domain].get("tasks", 0) + 1
+                if outcome == "success":
+                    dp[corrected_domain]["successes"] = dp[corrected_domain].get("successes", 0) + 1
+
+        # NEW: P3 Checklist Self-Evolution via learn()
+        STRUCTURAL_GAP_PATTERNS = [
+            (r"domain[\s_](?:mismatch|applicability|filter)", "domain_applicability"),
+            (r"checklist[\s_](?:wrong|inapplicable|missing)", "checklist_mismatch"),
+            (r"no[\s_]check[\s_]for\s+(.{5,40})", None),       # dynamic label from match
+            (r"missing[\s_](?:check|validation)\s+for\s+(.{5,40})", None),
+        ]
+        for pattern, fixed_label in STRUCTURAL_GAP_PATTERNS:
+            match = re.search(pattern, errors_found, re.I)
+            if match:
+                label = fixed_label or re.sub(r'\s+', '_', match.group(1).strip().lower()[:30])
+                label = re.sub(r'[^a-zA-Z0-9_]', '', label)
+                candidate = {
+                    "id": f"evolved_{label}",
+                    "check": f"Self-evolved: Did we verify — {match.group(0).strip()}?",
+                    "severity": "medium",
+                    "source": "learn_evolution",
+                    "first_seen": datetime.now(timezone.utc).isoformat(),
+                }
+                _store_pending_checklist_item(domain, candidate)
+                break
+
+    # NEW: P0.5 classifier override logging
+    if session.get("domain_was_suggested"):
+        classifier_domain = session.get("classifier_domain")
+        model_domain = session.get("model_domain")
+        if classifier_domain != model_domain:
+            _append_domain_mismatch({
+                "task_id": task_id,
+                "assigned_domain": classifier_domain,
+                "corrected_domain": model_domain,
+                "errors_found_excerpt": f"Suggested domain override: {model_domain}",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "outcome": outcome,
+                "correction_source": "suggested_domain"
+            })
 
     # Update error categories from reflection data
     reflection = session.get("last_reflection", {})
@@ -869,6 +1113,21 @@ def learn(task_id: str, outcome: str, confidence_was: float = 0.5, errors_found:
         "errors": errors_found,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
+
+    # Increment times_prevented for shown anti-patterns on task success
+    session_premortem_aps = session.get("premortem_shown_aps", [])
+    if outcome == "success" and session_premortem_aps:
+        try:
+            ap_data = _load_anti_patterns()
+            ap_changed = False
+            for ap in ap_data.get("anti_patterns", []):
+                if ap.get("pattern", "") in session_premortem_aps:
+                    ap["times_prevented"] = ap.get("times_prevented", 0) + 1
+                    ap_changed = True
+            if ap_changed:
+                _save_anti_patterns(ap_data)
+        except Exception:
+            pass
 
     # Update session
     session["last_task"] = task
@@ -1147,6 +1406,20 @@ def user_corrected(task_id: str, correction: str, error_category: str = "") -> s
     )
 
 
+def _days_since(ts_str: str) -> float:
+    if not ts_str:
+        return 999.0
+    try:
+        ts_clean = ts_str.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(ts_clean)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        return (now - dt).total_seconds() / 86400.0
+    except Exception:
+        return 999.0
+
+
 def optimize_cognitive_core() -> str:
     """
     COGNITIVE CORE — Proactive self-optimization and cleaning.
@@ -1173,16 +1446,126 @@ def optimize_cognitive_core() -> str:
         _consolidate_soul()
         
         ap_data = _load_anti_patterns()
-        aps_count = len(ap_data.get("anti_patterns", []))
+        
+        # NEW: P1 Stale Rule Auto-Archival
+        now = datetime.now(timezone.utc)
+        active, to_archive = [], []
+        for ap in ap_data.get("anti_patterns", []):
+            times_prevented = ap.get("times_prevented", 0)
+            ts = ap.get("timestamp", "")
+            try:
+                ts_clean = ts.replace("Z", "+00:00") if ts else ""
+                age = (now - datetime.fromisoformat(ts_clean)).days
+            except Exception:
+                age = 0
+
+            # Stale: never prevented anything AND older than 60 days
+            if times_prevented == 0 and age > 60:
+                to_archive.append(ap)
+            else:
+                active.append(ap)
+
+        ap_data["anti_patterns"] = active
+        _save_anti_patterns(ap_data)
+
+        stale_count = len(to_archive)
+        if stale_count > 0:
+            archived = _load_archived_anti_patterns()
+            archived.setdefault("anti_patterns", []).extend(to_archive)
+            archived["anti_patterns"] = archived["anti_patterns"][-500:]
+            from .constants import _ARCHIVED_FILE
+            _save_json(_ARCHIVED_FILE, archived)
+
+        aps_count = len(active)
+
+        # NEW: P4 Domain Mismatch Audit
+        mismatches = _load_domain_mismatches()
+        recent_mismatches = [
+            m for m in mismatches.get("mismatches", [])
+            if _days_since(m.get("timestamp", "")) <= 30.0
+        ]
+        
+        mismatch_groups = {}
+        for m in recent_mismatches:
+            orig = m.get("assigned_domain", "unknown")
+            mismatch_groups.setdefault(orig, []).append(m)
+            
+        for orig_domain, entries in mismatch_groups.items():
+            if len(entries) >= 3:
+                _store_pending_evolved_rule({
+                    "domain": orig_domain,
+                    "type": "domain_reclassification",
+                    "evidence": f"{len(entries)} domain mismatches for '{orig_domain}' in 30 days",
+                    "proposed_rule": (
+                        f"Messages classified as '{orig_domain}' may actually be research/general. "
+                        f"Consider checking secondary_domains before applying checklist."
+                    ),
+                    "observation_count": len(entries),
+                    "confidence": min(0.6 + len(entries) * 0.08, 0.90),
+                })
+
+        # NEW: P4 Checklist Promotion
+        pending_promoted = _promote_pending_checklist_items()
+
+        # NEW: P4 Rule Health Check + Rollback
+        evolved_rules = _load_evolved_rules()
+        history = _load_recent_task_history(limit=50)
+        quarantined = []
+        rule_health_checked_domains = set()
+
+        for rule in evolved_rules.get("rules", []):
+            if rule.get("status") == "quarantined":
+                continue
+            rule_applied_at = rule.get("confirmed_at", "")
+            domain_rule = rule.get("domain", "")
+            rule_health_checked_domains.add(domain_rule)
+
+            # Tasks in the same domain AFTER the rule was applied
+            post_rule_tasks = [
+                h for h in history
+                if h.get("domain") == domain_rule
+                and h.get("timestamp", "") > rule_applied_at
+            ]
+
+            if len(post_rule_tasks) >= 5:
+                successes = sum(1 for t in post_rule_tasks if t.get("outcome") == "success")
+                success_rate = successes / len(post_rule_tasks)
+
+                if success_rate < 0.70:
+                    rule["status"] = "quarantined"
+                    rule["quarantine_reason"] = (
+                        f"Success rate dropped to {round(success_rate*100)}% "
+                        f"in {len(post_rule_tasks)} tasks after rule was applied"
+                    )
+                    quarantined.append(rule.get("proposed_rule", "unknown")[:60])
+
+        _save_evolved_rules(evolved_rules)
+
+        # NEW: P4 Self-Audit Score
         total_tasks = gp.get("total_tasks_completed", 0)
+        corrections = gp.get("total_user_corrections", 0)
+        mismatch_rate = len(recent_mismatches) / max(total_tasks, 1)
+        correction_rate = corrections / max(total_tasks, 1)
+        quarantine_penalty = len(quarantined) * 5
+        self_audit_score = max(0, round((1 - mismatch_rate - correction_rate) * 100) - quarantine_penalty)
         
         summary = [
-            "[COGNITIVE OPTIMIZE] Proactive Optimization Complete",
+            "[COGNITIVE OPTIMIZE] Self-Audit Complete",
+            f"  Self-Audit Score: {self_audit_score}/100",
             f"  - Deduplicated force_tier_1_patterns (Count: {len(unique_pats)})",
             f"  - Consolidated Soul History MD file",
             f"  - Verified {aps_count} active anti-patterns",
+            f"  - Archived {stale_count} stale anti-patterns",
+            f"  - Domain mismatches (last 30d): {len(recent_mismatches)}",
+            f"  - Evolved rules health-checked: {len(rule_health_checked_domains)} domains",
+            f"  - Rules quarantined: {len(quarantined)}",
+            f"  - Pending checklist items promoted: {pending_promoted}",
             f"  - Total completed tasks cataloged: {total_tasks}",
         ]
+        if quarantined:
+            summary.append("  ⚠ Quarantined rules:")
+            for q in quarantined:
+                summary.append(f"    • {q}")
         return guard_warning + "\n".join(summary)
     except Exception as e:
         return guard_warning + f"[COGNITIVE OPTIMIZE] Failed: {e}"
@@ -1543,3 +1926,67 @@ def get_profile(domain: str = "") -> str:
         lines.append(f"    Session failures: {', '.join(failures[:3])}")
 
     return "\n".join(lines)
+
+
+def evolve_cognitive_rules(
+    domain: str,
+    evolution_type: str,    # "new_checklist_item" | "domain_rule" | "tier_rule" | "anti_pattern"
+    evidence: str,          # From errors_found or reflection failures
+    proposed_rule: str,     # The rule text
+    confidence: float = 0.7,
+    observation_count: int = 1,   # Guardrail 1: >= 2 required for persistence
+    dry_run: bool = True           # Guardrail 2: Default True, never auto-disabled
+) -> str:
+    """
+    COGNITIVE CORE — Proactive self-evolution of rules.
+    Ships permanently with dry_run=True.
+    """
+    _log_cognitive_call("evolve_cognitive_rules")
+
+    if dry_run:
+        return (
+            f"[COGNITIVE EVOLVE] DRY RUN — Not persisted:\n"
+            f"  Type: {evolution_type}\n"
+            f"  Domain: {domain}\n"
+            f"  Proposed: {proposed_rule[:200]}\n"
+            f"  Evidence: {evidence[:100]}\n"
+            f"  Confidence: {confidence}\n"
+            f"  → Call with dry_run=False and observation_count>=2 to persist."
+        )
+
+    if observation_count < 2:
+        _store_pending_evolved_rule({
+            "domain": domain, "type": evolution_type,
+            "evidence": evidence, "proposed_rule": proposed_rule,
+            "confidence": confidence, "observation_count": observation_count,
+            "first_seen": datetime.now(timezone.utc).isoformat(),
+        })
+        return (
+            f"[COGNITIVE EVOLVE] Observation 1 recorded — pending.\n"
+            f"  Pattern: {proposed_rule[:100]}\n"
+            f"  → Call again with observation_count=2 when pattern repeats."
+        )
+
+    if confidence < 0.7 or len(evidence.strip()) < 20:
+        return (
+            f"[COGNITIVE EVOLVE] Rejected — "
+            f"confidence {confidence} < 0.7 or evidence too short ({len(evidence.strip())} chars)."
+        )
+
+    # All gates passed — persist
+    evolved_rules = _load_evolved_rules()
+    evolved_rules.setdefault("rules", []).append({
+        "domain": domain, "type": evolution_type,
+        "proposed_rule": proposed_rule, "evidence": evidence,
+        "confidence": confidence, "observation_count": observation_count,
+        "confirmed_at": datetime.now(timezone.utc).isoformat(),
+        "status": "active",  # optimize() can set to "quarantined"
+    })
+    _save_evolved_rules(evolved_rules)
+    
+    return (
+        f"[COGNITIVE EVOLVE] ★ Rule persisted to evolved_rules.json\n"
+        f"  Domain: {domain} | Type: {evolution_type}\n"
+        f"  Rule: {proposed_rule[:150]}\n"
+        f"  → optimize_cognitive_core() will health-check this rule after 5+ tasks."
+    )

@@ -30,6 +30,10 @@ _CHECKLISTS_DIR = os.path.join(_ROOT, "data", "checklists")
 _WRITABLE_CHECKLISTS_DIR = os.path.join(_COG_DIR, "checklists")
 _LOCK_FILE = os.path.join(_COG_DIR, "soul.lock")
 _ARCHIVED_FILE = os.path.join(_COG_DIR, "anti_patterns_archived.json")
+_DOMAIN_MISMATCHES_FILE = os.path.join(_COG_DIR, "domain_mismatches.json")
+_EVOLVED_RULES_FILE = os.path.join(_COG_DIR, "evolved_rules.json")
+_EVOLVED_RULES_PENDING_FILE = os.path.join(_COG_DIR, "evolved_rules_pending.json")
+_CHECKLISTS_PENDING_FILE = os.path.join(_COG_DIR, "checklists_pending.json")
 
 # Create necessary directories
 os.makedirs(_COG_DIR, exist_ok=True)
@@ -180,3 +184,22 @@ _CODE_CHECKLIST_KEYWORDS = re.compile(
     r"\b(sql|injection|database|query|parameterized|api|endpoint|http|cors|"
     r"migration|auth|jwt|hardcoded|secrets|lint|imports|typescript|node\b)\b", re.I
 )
+
+OUTPUT_TYPE_FILTERS = {
+    "markdown": {
+        "exclude":   ["imports_correct", "types_correct", "lint_clean", "tests_exist"],
+        "downgrade": {"security": "low", "error_handling": "low"},
+    },
+    "command": {
+        "exclude":   ["imports_correct", "types_correct", "responsive", "accessible"],
+        "downgrade": {},
+    },
+    "research": {
+        "exclude":   ["imports_correct", "types_correct", "lint_clean", "tests_exist"],
+        "downgrade": {"security": "low", "error_handling": "low"},
+    },
+    "general": {
+        "exclude":   ["imports_correct", "types_correct", "lint_clean", "tests_exist"],
+        "downgrade": {"security": "low", "error_handling": "low"},
+    },
+}

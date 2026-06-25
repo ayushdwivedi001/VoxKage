@@ -165,5 +165,65 @@ class TestCognitiveCoreRecurrent(unittest.TestCase):
         res = start_turn("ignored", refresh_only=True)
         self.assertEqual(res, "[COGNITIVE] Protocol window refreshed.")
 
+    def test_suggested_domain_override(self):
+        from voxkage.mcp_servers.cognitive_core_server import start_turn, _load_session
+        from voxkage.mcp_servers.cognitive.storage import _save_session
+        session = _load_session()
+        session["last_task"] = None
+        session["active_task"] = None
+        session["domain_was_suggested"] = False
+        _save_session(session)
+
+        start_turn("write some coding work", suggested_domain="research")
+        session = _load_session()
+        active_task = session.get("active_task") or {}
+        self.assertEqual(active_task.get("domain"), "research")
+        self.assertTrue(session.get("domain_was_suggested"))
+        
+    def test_domain_mismatch_logging_in_learn(self):
+        from voxkage.mcp_servers.cognitive_core_server import start_turn, learn
+        from voxkage.mcp_servers.cognitive.storage import _load_domain_mismatches, _load_session, _save_session
+        
+        session = _load_session()
+        session["last_task"] = None
+        session["active_task"] = None
+        session["domain_was_suggested"] = False
+        _save_session(session)
+
+        start_turn("write some python code")
+        learn(task_id="test_mismatch_task", outcome="success", errors_found="Domain mismatch: coding checklist on research task")
+        
+        mismatches = _load_domain_mismatches()
+        m_list = mismatches.get("mismatches", [])
+        self.assertTrue(len(m_list) > 0)
+        self.assertEqual(m_list[-1]["corrected_domain"], "research")
+        
+    def test_reflect_output_type_filtering(self):
+        from voxkage.mcp_servers.cognitive_core_server import start_turn, reflect
+        from voxkage.mcp_servers.cognitive.storage import _load_session, _save_session
+        
+        session = _load_session()
+        session["last_task"] = None
+        session["active_task"] = None
+        session["domain_was_suggested"] = False
+        _save_session(session)
+
+        start_turn("write some code", suggested_domain="coding")
+        res = reflect(task_id="test_filter_task", output_summary="markdown report", checklist_results="imports_correct:fail", output_type="markdown")
+        self.assertIn("items excluded", res)
+        
+    def test_evolve_cognitive_rules_dry_run(self):
+        from voxkage.mcp_servers.cognitive_core_server import evolve_cognitive_rules
+        res = evolve_cognitive_rules(
+            domain="coding",
+            evolution_type="anti_pattern",
+            evidence="Too many consecutive view_file calls",
+            proposed_rule="Avoid calling view_file consecutively on same path",
+            confidence=0.8,
+            observation_count=1,
+            dry_run=True
+        )
+        self.assertIn("DRY RUN — Not persisted", res)
+
 if __name__ == "__main__":
     unittest.main()

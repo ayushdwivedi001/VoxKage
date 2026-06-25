@@ -20,7 +20,11 @@ from .constants import (
     _ARCHIVED_FILE,
     _HISTORY_FILE,
     _CODE_CHECKLIST_KEYWORDS,
-    _GUARD_WINDOWS
+    _GUARD_WINDOWS,
+    _DOMAIN_MISMATCHES_FILE,
+    _EVOLVED_RULES_FILE,
+    _EVOLVED_RULES_PENDING_FILE,
+    _CHECKLISTS_PENDING_FILE
 )
 
 _local_lock_depth = threading.local()
@@ -385,3 +389,114 @@ def _log_cognitive_call(tool_name: str):
         _save_session(session)
     except Exception:
         pass
+
+def _load_domain_mismatches() -> dict:
+    return _load_json(_DOMAIN_MISMATCHES_FILE, lambda: {"mismatches": []})
+
+def _append_domain_mismatch(entry: dict):
+    mismatches = _load_domain_mismatches()
+    mismatches.setdefault("mismatches", []).append(entry)
+    _save_json(_DOMAIN_MISMATCHES_FILE, mismatches)
+
+def _store_pending_checklist_item(domain: str, item: dict):
+    data = _load_json(_CHECKLISTS_PENDING_FILE, lambda: {"pending": []})
+    pending_list = data.setdefault("pending", [])
+    
+    found = False
+    for p in pending_list:
+        if p.get("domain") == domain and p.get("id") == item["id"]:
+            p["observation_count"] = p.get("observation_count", 1) + 1
+            found = True
+            break
+            
+    if not found:
+        item = dict(item)
+        item["domain"] = domain
+        item["observation_count"] = 1
+        pending_list.append(item)
+        
+    _save_json(_CHECKLISTS_PENDING_FILE, data)
+
+def _promote_pending_checklist_items() -> int:
+    data = _load_json(_CHECKLISTS_PENDING_FILE, lambda: {"pending": []})
+    pending_list = data.setdefault("pending", [])
+    
+    still_pending = []
+    promoted_count = 0
+    
+    # Group by domain
+    by_domain = {}
+    for p in pending_list:
+        if p.get("observation_count", 0) >= 2:
+            domain = p.get("domain")
+            by_domain.setdefault(domain, []).append(p)
+            promoted_count += 1
+        else:
+            still_pending.append(p)
+            
+    for domain, items in by_domain.items():
+        checklist_items = _load_checklist(domain)
+        existing_ids = {item["id"] for item in checklist_items}
+        for item in items:
+            if item["id"] not in existing_ids:
+                checklist_items.append({
+                    "id": item["id"],
+                    "check": item["check"],
+                    "severity": item.get("severity", "medium"),
+                    "source": item.get("source", "learn_evolution")
+                })
+        _save_checklist(domain, checklist_items)
+        
+    data["pending"] = still_pending
+    _save_json(_CHECKLISTS_PENDING_FILE, data)
+    return promoted_count
+
+def _load_recent_task_history(limit: int = 50) -> list:
+    """Load up to limit recent task summaries from recent.jsonl, newest first."""
+    _acquire_lock()
+    try:
+        entries = []
+        if os.path.exists(_HISTORY_FILE):
+            try:
+                with open(_HISTORY_FILE, encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            try:
+                                entries.append(json.loads(line))
+                            except json.JSONDecodeError:
+                                pass
+            except OSError:
+                pass
+        # recent.jsonl is appended to, so last items are newest.
+        # Reverse to get newest first.
+        entries.reverse()
+        return entries[:limit]
+    finally:
+        _release_lock()
+
+def _store_pending_evolved_rule(rule: dict):
+    data = _load_json(_EVOLVED_RULES_PENDING_FILE, lambda: {"pending": []})
+    pending_list = data.setdefault("pending", [])
+    
+    found = False
+    for p in pending_list:
+        if p.get("proposed_rule") == rule.get("proposed_rule") and p.get("domain") == rule.get("domain"):
+            p["observation_count"] = p.get("observation_count", 1) + 1
+            found = True
+            break
+            
+    if not found:
+        rule = dict(rule)
+        if "observation_count" not in rule:
+            rule["observation_count"] = 1
+        pending_list.append(rule)
+        
+    _save_json(_EVOLVED_RULES_PENDING_FILE, data)
+
+def _load_evolved_rules() -> dict:
+    return _load_json(_EVOLVED_RULES_FILE, lambda: {"rules": []})
+
+def _save_evolved_rules(rules: dict):
+    _save_json(_EVOLVED_RULES_FILE, rules)
+
