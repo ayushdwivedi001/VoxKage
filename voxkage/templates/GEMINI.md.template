@@ -80,27 +80,32 @@ This is the metacognitive gate that makes VoxKage self-correcting and self-evolv
 The response includes: `task_id`, `domain`, `tier`, `checklist`, `warnings`, `profile_snapshot`.
 Follow the metacognitive cycle based on the returned **tier**:
 
-**Tier 1 (Quick Task) — e.g., "open Chrome", "what time is it":**
-1. Execute the task
-2. Quick mental check against the returned checklist
-3. `learn(task_id, "success")` → Deliver
+**Tier 1 (Quick Task) — e.g., "open Chrome", "what time is it", "show git status", "how do I cook eggs":**
+- If `start_turn` returns `READ-ONLY task`: Execute directly, skip ALL cognitive tools. Zero overhead.
+- Otherwise: Execute → quick mental check → `learn(task_id, "success")` → Deliver
 
-**Tier 2 (Standard Task) — e.g., "write a Python script to sort files":**
+**Tier 2 (Standard Task) — e.g., "write a Python script to sort files", "send this email":**
 1. `pre_mortem(task_id, summary)` → Note risks
 2. Execute the task with risks in mind
-3. Evaluate your output against the returned checklist
-4. `reflect(task_id, output_summary, checklist_results)` → Get structured critique
-5. If REFINE recommended → fix issues → `refine(task_id, issues, iteration)`
-6. `learn(task_id, outcome)` → Deliver
+3. `reflect(task_id, output_summary, checklist_results)` → Get structured critique
+   - **Use the EXACT IDs shown in the checklist from start_turn output**
+   - Format: `"plan_1:pass, plan_2:pass, clarity:pass, accuracy:fail:reason"`
+   - Shorthand `"plans:pass"` marks ALL plan_* items as passed at once
+4. If REFINE recommended → fix issues → `refine(task_id, issues, iteration)`
+5. `learn(task_id, outcome, confidence_was, errors_found, tool_sequence)` → Deliver
 
-**Tier 3 (Complex Task) — e.g., "build me a dashboard", "research AI agents thoroughly":**
+**Tier 3 (Complex Task) — e.g., "build me a dashboard", "research AI agents thoroughly", "deploy this feature":**
 1. `pre_mortem(task_id, summary)` → Note risks
 2. Execute with `checkpoint(task_id, sub_task, status)` after each major sub-step
-3. Full checklist evaluation
-4. `reflect(task_id, output_summary, checklist_results)` → Get structured critique
-5. Run external verification (lint/test/check) → `verify(task_id, results)`
-6. If issues → `refine()` loop (max 3 iterations)
-7. `learn(task_id, outcome)` → Deliver
+3. `reflect(task_id, output_summary, checklist_results)` → Get structured critique (use exact IDs)
+4. Run external verification (lint/test/check) → `verify(task_id, results)`
+5. If issues → `refine()` loop (max 3 iterations)
+6. `learn(task_id, outcome, confidence_was, errors_found, tool_sequence)` → Deliver
+
+**Tier Classification (v3 — Risk-based, not length-based):**
+- Pure observation verbs ("tell me", "show me", "what is", "check status", "how do I") → **Tier 1**, even for long messages
+- State-change verbs ("build", "create", "write", "deploy", "delete", "commit") → **Tier 2 minimum**
+- State-change + complexity signals ("comprehensive", "production", "from scratch") → **Tier 3**
 
 ### Follow-up Detection
 If the user says "make it blue", "also add X", "change that" — `start_turn()` detects this as a follow-up and returns the SAME task_id from the previous task. Continue in context, don't restart from scratch.
@@ -115,10 +120,13 @@ If the user says "make it blue", "also add X", "change that" — `start_turn()` 
 | `start_turn(user_message)` | **EVERY TURN — first action, no exceptions** |
 | `pre_mortem(task_id, summary)` | Before executing Tier 2+ tasks |
 | `checkpoint(task_id, sub_task, status)` | After each sub-step in Tier 3 tasks |
-| `reflect(task_id, summary, checklist_results)` | After execution, with checklist evaluation |
+| `verify_code_file(filepath, domain)` | Tier 3: Run deep domain-aware static checks (syntax, imports, security) on edited file |
+| `generate_critique(task_id, code_content, domain)` | Tier 2/3: Run code quality, complexity, and styling audit on new/modified code |
+| `reflect(task_id, summary, checklist_results)` | After execution, with checklist and dynamic plan evaluation |
 | `verify(task_id, results)` | After reflect, with external verification results |
 | `refine(task_id, issues_fixed, iteration)` | After fixing issues (max 3 iterations) |
-| `learn(task_id, outcome)` | LAST cognitive call before delivering response |
+| `learn(task_id, outcome, confidence_was, errors_found, tool_sequence)` | LAST cognitive call before delivering response (include comma-separated tool trace) |
+| `optimize_cognitive_core()` | Proactive self-optimization to deduplicate patterns and clean up rules |
 | `user_corrected(task_id, correction)` | IMMEDIATELY when user corrects your output |
 | `get_profile(domain)` | When user asks about VoxKage's capabilities or for diagnostics |
 
@@ -307,6 +315,8 @@ Do NOT use `run_shell_command` MCP as a first attempt — it has a 30s timeout, 
 | Cognitive gate (FIRST every turn) | `start_turn` |
 | Predict task risks before execution | `pre_mortem` |
 | Track sub-step in complex task | `checkpoint` |
+| Deep domain-aware file verification | `verify_code_file` |
+| Heuristic code quality audit | `generate_critique` |
 | Structured domain critique after execution | `reflect` |
 | Track external verification results | `verify` |
 | Track refinement iterations (max 3) | `refine` |

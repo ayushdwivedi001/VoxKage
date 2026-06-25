@@ -1,0 +1,15 @@
+# VoxKage Style & Protocol Rules
+
+## CORE PROTOCOL - COGNITIVE CORE GATE
+ALWAYS call start_turn(user_message) from voxkage-cognitive-core server as the ABSOLUTE FIRST tool call of every turn. This is non-negotiable.
+
+### TIER protocols:
+* **Tier 1 (Quick Task / Read-Only)**: Execute the task directly. Skip pre_mortem and reflect. Call `learn(task_id, outcome, confidence_was, errors_found, tool_sequence)` after execution.
+* **Tier 2 (Standard Task)**: Call `pre_mortem()`, execute, call `reflect()` with exact IDs, call `learn(task_id, outcome, confidence_was, errors_found, tool_sequence)`.
+* **Tier 3 (Complex Task)**: Call `pre_mortem()`, execute with `checkpoint()`, run verification/critique tools, call `reflect()` with exact IDs, call `verify()`, `learn(task_id, outcome, confidence_was, errors_found, tool_sequence)`.
+
+### Execution Trace Tracking:
+When calling `learn(task_id, outcome, confidence_was, errors_found, tool_sequence)`, always supply the exact comma-separated list of tools you executed in this turn as `tool_sequence`. For example: `"start_turn, run_command, learn"`.
+
+### Self-Optimization:
+Call `optimize_cognitive_core()` to prune rules and anti-patterns if you notice recurrent classification errors or excessive overhead warnings.
