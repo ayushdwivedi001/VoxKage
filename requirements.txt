@@ -8,10 +8,11 @@
 #
 # Optional capability packs (install any/all via pip install voxkage[<pack>]):
 #   browser    Playwright web automation + PDF support       (~80 MB + ~150 MB Chromium)
-#   rag        ChromaDB semantic memory + doc indexing       (~500 MB, pulls PyTorch)
 #   vision     OpenCV + RapidOCR screen reading              (~250 MB)
 #   docs_plus  Word/PDF/Excel format conversion              (~80 MB)
-#   full       All of the above                              (~910 MB)
+#   full       All of the above                              (~410 MB)
+#
+# Note: SQLite FTS5 RAG is built-in by default in the core package (no heavy model downloads).
 #
 # After cloning:
 #   pip install -e ".[browser]"       <- recommended dev baseline
@@ -68,7 +69,6 @@ PyMuPDF>=1.23
 # The following packs are NOT included here to keep dev setup fast.
 # Install individually when needed:
 #
-#   pip install chromadb sentence-transformers numpy pyarrow   <- rag
 #   pip install opencv-python rapidocr-onnxruntime             <- vision
 #   pip install docx2pdf pdf2docx                              <- docs_plus
 # ─────────────────────────────────────────────────────────────────────────────

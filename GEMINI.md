@@ -60,7 +60,6 @@ Use these facts to guide your decisions and personalize your responses immediate
 - **Prefers (main_resume_path)**: C:\Ayush files\AyushResume.pdf
 - **Prefers (daily_workflow_protocol)**: When requested for the usual daily workflow, execute: 1) Latest global AI news, 2) Latest AI models (especially free ones), 3) Latest general news, 4) Email inbox report, 5) Weather forecast for Kovaya Gujarat, 6) Daily Japanese word/phrase JLPT N4 level, 7) Trending AI repos on GitHub. Excludes system health check and all driver/update checks.
 - **Prefers (weather_location)**: Kovaya, Gujarat, India
-- **Prefers (file_explanation_workflow)**: When asked how a file works, use query_rag first for semantic context, then get_code_skeleton for structure. Only read the full file if those aren't sufficient, and announce before doing so.
 - **Habit**: music_trigger: When taking breaks, says play my usual songs = means scenarios playlist on Spotify
 - **Habit**: file_search_priority: When searching for files, prioritize Desktop and background running apps/files unless a specific directory is provided. Do not default to the codebase directory.
 - **Habit**: execution_style: turn-by-turn
@@ -117,23 +116,23 @@ Use these facts to guide your decisions and personalize your responses immediate
 **Domain Metrics**:
 - **FRONTEND**: 98.9% success rate (93/94 tasks)
   - Common Weaknesses: dependency_issue, In agent_loop.py, used lowercase 'false' instead of Python's capitalized 'False'
-- **BACKEND**: 96.6% success rate (56/58 tasks)
-  - Common Weaknesses: Folder locked by python http.server 8000 process, None — all specs cross-verified against 8+ independent sources (morphllm
-- **RESEARCH**: 98.8% success rate (79/80 tasks)
+- **BACKEND**: 96.4% success rate (54/56 tasks)
+  - Common Weaknesses: etc.) are inapplicable to a design document. The spec contains no backend code. General or planning would have been more appropriate., Folder locked by python http.server 8000 process
+- **RESEARCH**: 98.7% success rate (78/79 tasks)
   - Common Weaknesses: Wikipedia, Spheron
 - **SYSTEM**: 97.7% success rate (43/44 tasks)
   - Common Weaknesses: Ensure we verify the system disk before deletion, api_payload_error
 - **CODING**: 95.0% success rate (132/139 tasks)
   - Common Weaknesses: None — all claims cross-verified across 4+ independent sources (Sakana AI official site, sakutto.ai
-- **GENERAL**: 98.0% success rate (50/51 tasks)
-  - Common Weaknesses: Domain mismatch: CODING secondary domain triggered 12 coding-specific checklist items (syntax_valid, imports_correct
-- **ANALYSIS**: 100.0% success rate (8/8 tasks)
+- **GENERAL**: 100.0% success rate (49/49 tasks)
+  - Common Weaknesses: Domain mismatch: coding checklist on research task, Domain mismatch: CODING secondary domain triggered 12 coding-specific checklist items (syntax_valid
+- **ANALYSIS**: 100.0% success rate (7/7 tasks)
   - Common Weaknesses: Domain classification mismatch: Cognitive core classified task as 'coding' when actual work was RESEARCH (primary) → GENERAL (synthesis). 8 coding-specific checklist items were excluded as inapplicable to markdown output. Minor: visualization checklist item reported as failed though visualizations are not applicable to text/markdown reports. The verification phase revealed Claude Opus 4.8 (May 28) had superseded Opus 4.7 during the report generation — caught during cross-check and corrected., None — all claims cross-verified against 8+ independent sources. Minor: initial draft listed Cursor as "most popular" but Claude Code actually holds 54% market share — caught during verification phase and corrected.
-- **PLANNING**: 100.0% success rate (5/5 tasks)
+- **PLANNING**: 100.0% success rate (4/4 tasks)
   - Common Weaknesses: None — all data from live fetched documentation of all 5 platforms, None
 - **DEVOPS**: 100.0% success rate (2/2 tasks)
   - Common Weaknesses: Domain mismatch: coding and devops secondary domains assigned to research task — 16 irrelevant coding-specific checklist items scored against a markdown report, artificially lowering combined score from 93% (research-only) to 47% (combined). The system auto-evolved a fix: exclude coding secondary items when domain is research and output is documentation.
-- **DATA**: 100.0% success rate (4/4 tasks)
+- **DATA**: 100.0% success rate (3/3 tasks)
   - Common Weaknesses: None, None — all data was provided in structured JSON format
 
 **Learned Negative Constraints (Anti-Patterns)**:
@@ -149,9 +148,9 @@ Use these facts to guide your decisions and personalize your responses immediate
 - **SYSTEM**: Avoid repeating: DeepSeek API fails with HTTP 400 because message history contains messages with role 'laptop', which is not a supported API role (should be mapped to 'user' or 'assistant' or skipped).
 
 **Recent Tasks Summary**:
-- [2026-06-27] ANALYSIS: SUCCESS (Confidence: 1.0)
-- [2026-06-27] GENERAL: PARTIAL (Confidence: 0.85)
-- [2026-06-27] RESEARCH: SUCCESS (Confidence: 1.0)
+- [2026-06-27] CODING: SUCCESS (Confidence: 0.95)
+- [2026-06-27] RESEARCH: SUCCESS (Confidence: 0.9)
+- [2026-06-27] RESEARCH: SUCCESS (Confidence: 0.98)
 
 ---
 
@@ -760,6 +759,16 @@ If any tool returns "Path not in workspace" or "Access Denied" when saving:
 - Tell the user where the file was saved
 
 - **Telegram character limit**: Always ensure messages sent to Telegram are under 4096 characters to avoid errors. Truncate or split long reports if necessary.
+
+---
+
+## CODEBASE ANALYSIS & ACE WORKFLOW PROTOCOL
+
+When asked to analyze or explain how a codebase, project, or file works, ALWAYS use the following multi-step workflow instead of reading files directly:
+1. **RAG Sync**: Run `check_and_index()` or `index_directory()` first to ensure the SQLite RAG is completely fresh.
+2. **SQLite RAG Query**: Call `query_rag()` using SQLite FTS5 keyword queries (e.g., search terms instead of conversational questions) to find relevant code chunks.
+3. **Skeleton Mapping**: Call `get_code_skeleton()` from the `voxkage-coding` MCP server to get a high-level overview of classes, methods, and functions. This saves up to 95% of context window tokens.
+4. **Targeted Reading**: ONLY read specific code files or line ranges using `view_file` if you need detailed logic understanding that is not covered by the skeleton or RAG results. Never do broad or blind file reads.
 
 ---
 

@@ -1,13 +1,13 @@
 """
 MCP Server: VoxKage Local Knowledge RAG (voxkage-rag)
 
-Deep document memory powered by ChromaDB + sentence-transformers.
+Deep document memory powered by SQLite FTS5.
 Indexes PDFs, Word docs, Excel, PowerPoint, TXT, and code files.
 Detects file changes via SHA256 hash and auto-reindexes on demand.
 
 Tools:
   index_document(file_path)          — Index or re-index a file into the RAG
-  query_rag(query, top_k, file_filter) — Semantic search across all indexed documents
+  query_rag(query, top_k, file_filter) — Keyword search across all indexed documents
   check_and_index(file_path)         — Auto-index if new/changed, skip if unchanged
   list_indexed_documents()           — Show all indexed files and their metadata
   delete_from_rag(file_path)         — Remove a file from the index
@@ -23,6 +23,7 @@ import json
 import re
 import time
 import logging
+import sqlite3
 from pathlib import Path
 from datetime import datetime
 import contextlib
@@ -66,7 +67,8 @@ from voxkage.paths import rag_dir, brain_dir
 
 # ── Storage Paths ─────────────────────────────────────────────────────────────
 _RAG_DIR   = str(rag_dir())
-_META_FILE = os.path.join(_RAG_DIR, "index_meta.json")
+_DB_FILE   = os.path.join(_RAG_DIR, "rag_database.db")
+_META_FILE = os.path.join(_RAG_DIR, "index_meta.json")  # Keep reference if needed
 os.makedirs(_RAG_DIR, exist_ok=True)
 
 # ── Supported file extensions ─────────────────────────────────────────────────
@@ -96,46 +98,65 @@ _SKIP_FILES = {
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# INTERNAL HELPERS
+# INTERNAL HELPERS & DB SETUP
 # ═════════════════════════════════════════════════════════════════════════════
 
-# ── Module-level singletons (lazy-initialized, shared across all tool calls) ───
-_chroma_client = None
-_chroma_collection = None
+@contextlib.contextmanager
+def _get_db():
+    """Context manager for SQLite database connection."""
+    conn = sqlite3.connect(_DB_FILE, timeout=30.0)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
-def _get_collection():
-    """Return the ChromaDB collection (lazy-initialized, module-level singleton)."""
-    global _chroma_client, _chroma_collection
-    if _chroma_collection is not None:
-        return _chroma_collection
-    import chromadb
-    from chromadb.config import Settings
-    with suppress_stdout():
-        _chroma_client = chromadb.PersistentClient(
-            path=_RAG_DIR,
-            settings=Settings(anonymized_telemetry=False),
-        )
-        _chroma_collection = _chroma_client.get_or_create_collection(
-            name="voxkage_knowledge",
-            metadata={"hnsw:space": "cosine"},
-        )
-    return _chroma_collection
+def _init_db():
+    """Initialize SQLite database with WAL mode and necessary tables."""
+    os.makedirs(_RAG_DIR, exist_ok=True)
+    with sqlite3.connect(_DB_FILE) as conn:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        
+        # Create metadata table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS file_meta (
+                file_path TEXT PRIMARY KEY,
+                hash TEXT NOT NULL,
+                indexed_at TEXT NOT NULL,
+                chunks_count INTEGER NOT NULL,
+                file_name TEXT NOT NULL,
+                file_ext TEXT NOT NULL,
+                file_size_kb REAL NOT NULL
+            )
+        """)
+        
+        # Create chunks FTS5 virtual table
+        conn.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(
+                content,
+                file_path UNINDEXED,
+                file_name UNINDEXED,
+                chunk_index UNINDEXED
+            )
+        """)
 
 
-def _get_embedder():
-    """Return a sentence-transformer model (lazy-initialized, cached)."""
-    if not hasattr(_get_embedder, "_model"):
-        import warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            from sentence_transformers import SentenceTransformer
-            import torch
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            # Load model outside of strict suppress so downloads don't silently block forever
-            with suppress_stdout():
-                _get_embedder._model = SentenceTransformer("all-MiniLM-L6-v2", device=device)
-    return _get_embedder._model
+# Initialize DB on import
+_init_db()
+
+
+def _sanitize_fts_query(query: str) -> str:
+    """
+    Sanitize natural language queries for SQLite FTS5.
+    Extracts words (treating underscores and dots as separators) and formats them with prefix wildcards joined by OR.
+    """
+    query_clean = query.replace("_", " ").replace(".", " ")
+    words = re.findall(r'\b\w+\b', query_clean)
+    if not words:
+        return ""
+    return " OR ".join(f"{w}*" for w in words)
 
 
 def _get_ocr():
@@ -162,21 +183,52 @@ def _sha256(file_path: str) -> str:
 
 
 def _load_meta() -> dict:
-    """Load the metadata registry {file_path -> {hash, indexed_at, chunks}}."""
+    """Load the metadata registry {file_path -> {hash, indexed_at, chunks}} from DB."""
     try:
-        if os.path.exists(_META_FILE):
-            with open(_META_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return {}
+        meta = {}
+        with _get_db() as conn:
+            rows = conn.execute("""
+                SELECT file_path, hash, indexed_at, chunks_count, file_name, file_ext, file_size_kb
+                FROM file_meta
+            """).fetchall()
+            for r in rows:
+                meta[r["file_path"]] = {
+                    "hash": r["hash"],
+                    "indexed_at": r["indexed_at"],
+                    "chunks": r["chunks_count"],
+                    "file_name": r["file_name"],
+                    "file_ext": r["file_ext"],
+                    "file_size_kb": r["file_size_kb"]
+                }
+        return meta
+    except Exception as e:
+        logger.warning(f"Failed to load RAG meta: {e}")
+        return {}
 
 
 def _save_meta(meta: dict):
-    """Persist the metadata registry."""
+    """Save metadata registry dict to DB (for backward compatibility)."""
     try:
-        with open(_META_FILE, "w", encoding="utf-8") as f:
-            json.dump(meta, f, indent=2, ensure_ascii=False)
+        with _get_db() as conn:
+            conn.execute("BEGIN TRANSACTION;")
+            try:
+                for file_path, info in meta.items():
+                    conn.execute("""
+                        INSERT OR REPLACE INTO file_meta (file_path, hash, indexed_at, chunks_count, file_name, file_ext, file_size_kb)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        file_path,
+                        info.get("hash", ""),
+                        info.get("indexed_at", ""),
+                        info.get("chunks", 0),
+                        info.get("file_name", os.path.basename(file_path)),
+                        info.get("file_ext", Path(file_path).suffix),
+                        info.get("file_size_kb", 0.0)
+                    ))
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                raise e
     except Exception as e:
         logger.warning(f"Failed to save RAG meta: {e}")
 
@@ -333,7 +385,7 @@ def _smart_chunk(text: str, file_path: str, chunk_size: int = 800, overlap: int 
 
 
 def _safe_id(file_path: str, chunk_idx: int) -> str:
-    """Generate a stable, ChromaDB-safe document ID."""
+    """Generate a stable, ChromaDB-safe document ID (kept for signature compatibility)."""
     key = f"{file_path}::chunk_{chunk_idx}"
     return hashlib.md5(key.encode()).hexdigest()
 
@@ -370,87 +422,80 @@ def _do_index(file_path: str, force: bool = False) -> dict:
             }
 
     current_hash = _sha256(file_path)
-    meta = _load_meta()
-    existing = meta.get(file_path, {})
+    
+    # Query file_meta for hash check
+    existing = None
+    try:
+        with _get_db() as conn:
+            row = conn.execute(
+                "SELECT hash, indexed_at, chunks_count, file_name FROM file_meta WHERE file_path = ?",
+                (file_path,)
+            ).fetchone()
+            if row:
+                existing = {
+                    "hash": row["hash"],
+                    "indexed_at": row["indexed_at"],
+                    "chunks": row["chunks_count"],
+                    "file_name": row["file_name"]
+                }
+    except Exception as e:
+        logger.warning(f"Database error during hash check: {e}")
 
-    if not force and existing.get("hash") == current_hash:
+    if not force and existing and existing["hash"] == current_hash:
         return {
             "status": "unchanged",
-            "message": f"File unchanged since {existing.get('indexed_at', 'unknown')}. Using cached index.",
-            "chunks": existing.get("chunks", 0),
-            "file": os.path.basename(file_path),
+            "message": f"File unchanged since {existing['indexed_at']}. Using cached index.",
+            "chunks": existing["chunks"],
+            "file": existing["file_name"],
         }
 
     text = _extract_text(file_path)
-    if not text or "Error extracting" in text or "Unsupported file" in text:
+    if not text:
+        return {"status": "error", "message": "No content extracted from file"}
+    if text.startswith("Error extracting text:") or text.startswith("[RAG] PDF reading requires") or text.startswith("Unsupported file type:"):
         return {"status": "error", "message": text}
 
     chunks = _smart_chunk(text, file_path)
     if not chunks:
         return {"status": "error", "message": "No content extracted from file"}
 
-    # Cap chunks to prevent sentence-transformer overhead and db locks
+    # Cap chunks to prevent index size explosion
     if len(chunks) > 250:
         chunks = chunks[:250]
 
-    # Time tracking to avoid timeout issues
+    # Time tracking
     start_time = time.time()
-    
-    embedder = _get_embedder()
-    with suppress_all_output():
-        embeddings = embedder.encode(
-            chunks,
-            show_progress_bar=False,
-            batch_size=32,
-        ).tolist()
-
-    collection = _get_collection()
-    old_chunk_count = existing.get("chunks", 0)
-    if old_chunk_count > 0:
-        old_ids = [_safe_id(file_path, i) for i in range(old_chunk_count + 10)]
-        try:
-            collection.delete(ids=old_ids)
-        except Exception:
-            pass
-
     file_name = os.path.basename(file_path)
-    file_size = os.path.getsize(file_path)
     now = datetime.now().isoformat()
 
-    chunk_ids = []
-    metadatas = []
-    for i, chunk in enumerate(chunks):
-        cid = _safe_id(file_path, i)
-        chunk_ids.append(cid)
-        metadatas.append({
-            "file_path": file_path,
-            "file_name": file_name,
-            "file_ext": ext,
-            "chunk_index": i,
-            "total_chunks": len(chunks),
-            "indexed_at": now,
-            "file_hash": current_hash,
-            "file_size_kb": round(file_size / 1024, 1),
-        })
-
-    collection.upsert(
-        ids=chunk_ids,
-        embeddings=embeddings,
-        documents=chunks,
-        metadatas=metadatas,
-    )
+    try:
+        with _get_db() as conn:
+            conn.execute("BEGIN TRANSACTION;")
+            try:
+                # Delete old chunks
+                conn.execute("DELETE FROM chunks WHERE file_path = ?", (file_path,))
+                
+                # Insert new chunks
+                for i, chunk in enumerate(chunks):
+                    conn.execute(
+                        "INSERT INTO chunks (content, file_path, file_name, chunk_index) VALUES (?, ?, ?, ?)",
+                        (chunk, file_path, file_name, i)
+                    )
+                
+                # Upsert file_meta
+                conn.execute("""
+                    INSERT OR REPLACE INTO file_meta (file_path, hash, indexed_at, chunks_count, file_name, file_ext, file_size_kb)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (file_path, current_hash, now, len(chunks), file_name, ext, round(file_size / 1024, 1)))
+                
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                raise e
+    except Exception as e:
+        return {"status": "error", "message": f"Database indexing failed: {e}"}
 
     action = "reindexed" if existing else "indexed"
-    meta[file_path] = {
-        "hash": current_hash,
-        "indexed_at": now,
-        "chunks": len(chunks),
-        "file_name": file_name,
-        "file_ext": ext,
-        "file_size_kb": round(file_size / 1024, 1),
-    }
-    _save_meta(meta)
-
     duration = round(time.time() - start_time, 2)
     return {
         "status": "success",
@@ -515,7 +560,7 @@ def query_rag(
     file_filter: str = "",
 ) -> str:
     """
-    RAG MEMORY: Semantic search across all indexed documents.
+    RAG MEMORY: Keyword search across all indexed documents using SQLite FTS5.
 
     Use this to answer questions about ANY file VoxKage has seen before,
     without needing to re-read the file.
@@ -524,66 +569,106 @@ def query_rag(
       query       : Natural language question or keyword search
       top_k       : Number of results to return (default 5)
       file_filter : Optional — restrict search to files matching this name/path substring
-
-    Examples:
-      query_rag("what is the tax rate in the invoices")
-      query_rag("how did we handle API fallbacks", file_filter="web_agent")
-      query_rag("find the authentication section", file_filter="auth")
     """
+    query_sanitized = _sanitize_fts_query(query)
+    if not query_sanitized:
+        return "[RAG] Query contains no valid search terms."
+
     try:
-        collection = _get_collection()
-        count = collection.count()
-        if count == 0:
-            return "[RAG] No documents indexed yet. Use index_document() or check_and_index() first."
+        with _get_db() as conn:
+            # Check if any documents are indexed
+            total_chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+            if total_chunks == 0:
+                return "[RAG] No documents indexed yet. Use index_document() or check_and_index() first."
 
-        embedder = _get_embedder()
-        query_embedding = embedder.encode([query], show_progress_bar=False).tolist()[0]
+            # Generate dynamic summing filename boost
+            query_clean = query.replace("_", " ").replace(".", " ")
+            words = re.findall(r'\b\w+\b', query_clean)
+            boost_sql = []
+            boost_params = []
+            for w in words:
+                if len(w) > 2:
+                    boost_sql.append("CASE WHEN c.file_name LIKE ? THEN 50.0 ELSE 0.0 END")
+                    boost_params.append(f"%{w}%")
 
-        where_filter = None
-        if file_filter:
-            pass
+            boost_clause = ""
+            if boost_sql:
+                boost_clause = f" - ({' + '.join(boost_sql)})"
 
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=min(top_k * 2, count),
-            include=["documents", "metadatas", "distances"],
-        )
+            # Construct SQL query
+            sql = f"""
+                SELECT c.content, c.file_path, c.file_name, c.chunk_index, 
+                       (c.rank{boost_clause}) as rank, f.chunks_count
+                FROM chunks c
+                JOIN file_meta f ON c.file_path = f.file_path
+                WHERE chunks MATCH ?
+            """
+            params = boost_params + [query_sanitized]
 
-        docs = results.get("documents", [[]])[0]
-        metas = results.get("metadatas", [[]])[0]
-        distances = results.get("distances", [[]])[0]
-
-        if not docs:
-            return "[RAG] No relevant results found for that query."
-
-        filtered = []
-        for doc, meta, dist in zip(docs, metas, distances):
             if file_filter:
-                fp = meta.get("file_path", "").lower()
-                fn = meta.get("file_name", "").lower()
-                if file_filter.lower() not in fp and file_filter.lower() not in fn:
-                    continue
-            filtered.append((doc, meta, dist))
-            if len(filtered) >= top_k:
-                break
+                sql += " AND (f.file_path LIKE ? OR f.file_name LIKE ?)"
+                params.extend([f"%{file_filter}%", f"%{file_filter}%"])
 
-        if not filtered:
-            return f"[RAG] No results matching file_filter='{file_filter}'. Try without the filter."
+            sql += " ORDER BY rank LIMIT ?"
+            params.append(top_k)
 
-        lines = [f"[RAG] Found {len(filtered)} relevant chunk(s) for: \"{query}\"\n"]
-        for i, (doc, meta, dist) in enumerate(filtered, 1):
-            confidence = round((1 - dist) * 100, 1)
-            fn = meta.get("file_name", "unknown")
-            chunk_n = meta.get("chunk_index", 0)
-            total = meta.get("total_chunks", 1)
-            lines.append(f"--- Result {i} | {fn} (chunk {chunk_n + 1}/{total}) | {confidence}% relevance ---")
-            lines.append(doc.strip())
-            lines.append("")
+            rows = conn.execute(sql, params).fetchall()
 
-        return "\n".join(lines)
+    except sqlite3.OperationalError:
+        # Fallback query if MATCH query syntax fails
+        try:
+            query_clean = query.replace("_", " ").replace(".", " ")
+            words = re.findall(r'\b\w+\b', query_clean)
+            simple_query = " OR ".join(words)
+            
+            boost_sql = []
+            boost_params = []
+            for w in words:
+                if len(w) > 2:
+                    boost_sql.append("CASE WHEN c.file_name LIKE ? THEN 50.0 ELSE 0.0 END")
+                    boost_params.append(f"%{w}%")
 
+            boost_clause = ""
+            if boost_sql:
+                boost_clause = f" - ({' + '.join(boost_sql)})"
+
+            with _get_db() as conn:
+                sql = f"""
+                    SELECT c.content, c.file_path, c.file_name, c.chunk_index, 
+                           (c.rank{boost_clause}) as rank, f.chunks_count
+                    FROM chunks c
+                    JOIN file_meta f ON c.file_path = f.file_path
+                    WHERE chunks MATCH ?
+                """
+                params = boost_params + [simple_query]
+
+                if file_filter:
+                    sql += " AND (f.file_path LIKE ? OR f.file_name LIKE ?)"
+                    params.extend([f"%{file_filter}%", f"%{file_filter}%"])
+
+                sql += " ORDER BY rank LIMIT ?"
+                params.append(top_k)
+
+                rows = conn.execute(sql, params).fetchall()
+        except Exception as e2:
+            return f"[RAG ERROR] Query failed: {e2}"
     except Exception as e:
         return f"[RAG ERROR] Query failed: {e}"
+
+    if not rows:
+        return "[RAG] No relevant results found for that query."
+
+    lines = [f"[RAG] Found {len(rows)} relevant chunk(s) for: \"{query}\"\n"]
+    for i, row in enumerate(rows, 1):
+        score = round(-row["rank"], 2)
+        fn = row["file_name"]
+        chunk_n = row["chunk_index"]
+        total = row["chunks_count"]
+        lines.append(f"--- Result {i} | {fn} (chunk {chunk_n + 1}/{total}) | Match Score: {score} ---")
+        lines.append(row["content"].strip())
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 @mcp.tool()
@@ -594,24 +679,34 @@ def list_indexed_documents() -> str:
     Shows: file name, size, chunk count, when indexed, and whether the file has
     changed on disk since it was last indexed (needs reindex if so).
     """
-    meta = _load_meta()
-    if not meta:
+    try:
+        with _get_db() as conn:
+            rows = conn.execute("""
+                SELECT file_path, hash, indexed_at, chunks_count, file_name, file_ext, file_size_kb
+                FROM file_meta
+                ORDER BY indexed_at DESC
+            """).fetchall()
+    except Exception as e:
+        return f"[RAG ERROR] Failed to list documents: {e}"
+
+    if not rows:
         return "[RAG] No documents indexed yet. Use index_document() to start building your knowledge base."
 
-    lines = [f"[RAG] VoxKage Knowledge Base — {len(meta)} indexed document(s)\n"]
+    lines = [f"[RAG] VoxKage Knowledge Base — {len(rows)} indexed document(s)\n"]
     lines.append(f"{'File':<45} {'Chunks':>6}  {'Size KB':>8}  {'Indexed At':<22}  {'Status'}")
     lines.append("-" * 110)
 
-    for file_path, info in sorted(meta.items(), key=lambda x: x[1].get("indexed_at", ""), reverse=True):
-        fn = info.get("file_name", os.path.basename(file_path))[:44]
-        chunks = info.get("chunks", "?")
-        size_kb = info.get("file_size_kb", "?")
-        indexed_at = info.get("indexed_at", "unknown")[:19]
+    for row in rows:
+        file_path = row["file_path"]
+        fn = row["file_name"][:44]
+        chunks = row["chunks_count"]
+        size_kb = row["file_size_kb"]
+        indexed_at = row["indexed_at"][:19]
 
         status = "[OK] current"
         if not os.path.exists(file_path):
             status = "[!!] FILE MISSING"
-        elif _sha256(file_path) != info.get("hash", ""):
+        elif _sha256(file_path) != row["hash"]:
             status = "[!!] CHANGED -- needs reindex"
 
         lines.append(f"{fn:<45} {str(chunks):>6}  {str(size_kb):>8}  {indexed_at:<22}  {status}")
@@ -626,25 +721,28 @@ def delete_from_rag(file_path: str) -> str:
     Use this if a file has been deleted or you no longer want it indexed.
     """
     file_path = os.path.normpath(os.path.abspath(file_path))
-    meta = _load_meta()
+    
+    with _get_db() as conn:
+        row = conn.execute(
+            "SELECT file_name, chunks_count FROM file_meta WHERE file_path = ?", 
+            (file_path,)
+        ).fetchone()
+        if not row:
+            return f"[RAG] '{os.path.basename(file_path)}' is not in the index."
 
-    if file_path not in meta:
-        return f"[RAG] '{os.path.basename(file_path)}' is not in the index."
+        file_name = row["file_name"]
+        chunk_count = row["chunks_count"]
 
-    info = meta[file_path]
-    chunk_count = info.get("chunks", 0)
+        conn.execute("BEGIN TRANSACTION;")
+        try:
+            conn.execute("DELETE FROM chunks WHERE file_path = ?", (file_path,))
+            conn.execute("DELETE FROM file_meta WHERE file_path = ?", (file_path,))
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            return f"[RAG ERROR] Failed to delete '{file_name}': {e}"
 
-    try:
-        collection = _get_collection()
-        ids_to_delete = [_safe_id(file_path, i) for i in range(chunk_count + 10)]
-        collection.delete(ids=ids_to_delete)
-    except Exception as e:
-        logger.warning(f"ChromaDB delete error: {e}")
-
-    del meta[file_path]
-    _save_meta(meta)
-
-    return f"[RAG] Removed '{info.get('file_name', os.path.basename(file_path))}' and its {chunk_count} chunks from the knowledge base."
+    return f"[RAG] Removed '{file_name}' and its {chunk_count} chunks from the knowledge base."
 
 
 @mcp.tool()
@@ -669,9 +767,9 @@ def index_directory(
     if not os.path.isdir(directory):
         return f"[RAG ERROR] Not a directory: {directory}"
 
-    if extensions:
+    if extensions and isinstance(extensions, str) and extensions.strip():
         target_exts = {e.strip().lower() if e.strip().startswith(".") else f".{e.strip().lower()}"
-                       for e in extensions.split(",")}
+                       for e in extensions.split(",") if e.strip()}
         target_exts = target_exts & _ALL_EXTS
     else:
         target_exts = _TEXT_EXTS
@@ -694,14 +792,9 @@ def index_directory(
 
     results = {"indexed": 0, "reindexed": 0, "unchanged": 0, "skipped": 0, "errors": 0}
     processed = []
-    progress_log = [f"[RAG] Starting index of {total_files} files..."]
 
     for idx, fpath in enumerate(all_target_files, 1):
         fname = os.path.basename(fpath)
-        
-        if idx == 1 or idx % 10 == 0 or idx == total_files:
-            progress_log.append(f"[RAG] Indexing {idx}/{total_files} files... ({int(idx/total_files*100)}%)")
-        
         try:
             result = _do_index(fpath, force=False)
             status = result.get("status", "error")

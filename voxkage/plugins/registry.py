@@ -140,10 +140,10 @@ def _load_all_plugins():
         ),
         CoreMcpServerPlugin(
             "rag", "RAG Memory",
-            "Local semantic memory database using ChromaDB and sentence-transformers.",
+            "Local FTS5 full-text search database indexing and retrieval.",
             "voxkage-rag", "mcp_servers/rag_server.py",
-            ["chromadb", "sentence_transformers", "numpy", "pyarrow"],
-            ["chromadb>=1.5", "sentence-transformers>=3.0", "numpy>=1.24", "pyarrow>=14.0"]
+            [],
+            []
         ),
         CoreMcpServerPlugin(
             "system", "System Control",
