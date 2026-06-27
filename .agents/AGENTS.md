@@ -27,7 +27,7 @@ Call `optimize_cognitive_core()` to prune rules and anti-patterns if you notice 
   - Common Weaknesses: Ensure we verify the system disk before deletion
 - **CODING**: 75.0% success rate (6/8 tasks)
   - Common Weaknesses: Domain mismatch: coding checklist on research task
-- **ANALYSIS**: 0% success rate (0/0 tasks)
+- **ANALYSIS**: 100.0% success rate (1/1 tasks)
 - **PLANNING**: 0% success rate (0/0 tasks)
 - **GENERAL**: 0% success rate (0/0 tasks)
 - **DATA**: 0% success rate (0/0 tasks)
@@ -43,5 +43,5 @@ Call `optimize_cognitive_core()` to prune rules and anti-patterns if you notice 
 **Recent Tasks Summary**:
 - [2026-06-27] FRONTEND: SUCCESS (Confidence: 0.5)
 - [2026-06-27] CODING: SUCCESS (Confidence: 0.5)
-- [2026-06-27] CODING: SUCCESS (Confidence: 0.9)
+- [2026-06-27] CODING: SUCCESS (Confidence: 0.95)
 <!-- SOUL_HISTORY_END -->

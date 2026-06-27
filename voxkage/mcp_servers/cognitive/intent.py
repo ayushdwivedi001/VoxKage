@@ -129,7 +129,7 @@ def _score_domains(msg: str) -> tuple:
             reason_codes.append("coding_negation: -20.0")
 
     # 5. Context-aware overrides (e.g. report about coding is research)
-    report_signals = re.compile(r"\b(report|summary|article|comparison|matrix|comparison matrix|review|list|paper|essay|poem|guide|tutorial|weather|news)\b", re.I)
+    report_signals = re.compile(r"\b(report|summary|article|comparison|matrix|comparison matrix|review|paper|guide|tutorial|weather|news)\b", re.I)
     if report_signals.search(preprocessed_msg):
         if "research" in domain_scores:
             domain_scores["research"] = domain_scores.get("research", 0.0) + 8.0
@@ -142,6 +142,28 @@ def _score_domains(msg: str) -> tuple:
         if not code_dev_signals.search(preprocessed_msg) and "coding" in domain_scores:
             domain_scores["coding"] = max(0.0, domain_scores["coding"] - 12.0)
             reason_codes.append("coding_report_penalty: -12.0")
+
+    # 5.5. Boost specialized domains when highly unique topic terms are present
+    special_boosts = [
+        # DevOps
+        (re.compile(r"\b(github\s*action|workflow|pipeline|docker|kubernetes|terraform|ansible|nginx|reverse proxy|ssl|certbot|deploy)\b", re.I), "devops", 20.0),
+        # Backend
+        (re.compile(r"\b(postgres|mysql|sqlite|mongodb|redis|database|api|endpoint|controller|middleware|jwt|oauth|express|django|flask|fastapi)\b", re.I), "backend", 12.0),
+        # Frontend
+        (re.compile(r"\b(tailwind|flexbox|flex|grid|css|html|align|styling|style|modern look|responsive|modal|card|button|navbar)\b", re.I), "frontend", 12.0),
+        # Data
+        (re.compile(r"\b(pandas|dataframe|dataset|numpy|scikit-learn|machine learning|sklearn)\b", re.I), "data", 15.0),
+        # Planning
+        (re.compile(r"\b(roadmap|gantt|milestones|phases|todo list|todo|schema\s*design|map\s*out|architecture)\b", re.I), "planning", 15.0),
+        # Creative
+        (re.compile(r"\b(poem|lyrics|joke|story|recipe|welcome\s*email|caption|song)\b", re.I), "creative", 20.0),
+        # Analysis
+        (re.compile(r"\b(performance\s*metrics|metrics|logs|diagnostics|inspect\s*logs)\b", re.I), "analysis", 15.0)
+    ]
+    for pattern, target_domain, boost in special_boosts:
+        if pattern.search(preprocessed_msg):
+            domain_scores[target_domain] = domain_scores.get(target_domain, 0.0) + boost
+            reason_codes.append(f"special_boost_{target_domain}: +{boost:.1f}")
 
     # 6. LAYER 1.5: Similarity-based adjustments
     try:
@@ -236,20 +258,6 @@ def _classify_intent(msg: str) -> dict:
     declared_domains = []
     declared_tier = None
 
-    # v8: Structural task header detection — forces Tier 3 immediately
-    # These patterns appear in well-specified task prompts and are unambiguous task signals
-    _STRUCTURAL_TASK_HEADERS = re.compile(
-        r"\b(task\s*breakdown|phase\s*\d|step\s*\d|requirements?:|phases:|steps:|breakdown:|"
-        r"objective:|goal:|instructions?:|sub[\s-]?tasks?:|deliverables?:)\b",
-        re.I
-    )
-    if _STRUCTURAL_TASK_HEADERS.search(msg_stripped):
-        domain_scores, domain, secondary_domains, reason_codes = _score_domains(msg_stripped)
-        ranked_domains = sorted(
-            [(d, s) for d, s in domain_scores.items()], key=lambda x: x[1], reverse=True
-        )
-        return _make_task_response(domain, secondary_domains, ranked_domains, 3, False, reason_codes, msg_stripped)
-
     for line in msg_lines:
         dom_match = re.search(r"^\s*(?:Domains?|Categories|Domain):\s*([a-zA-Z\s,;➔→\-\(\)>]+)", line, re.I)
         if dom_match:
@@ -282,6 +290,21 @@ def _classify_intent(msg: str) -> dict:
             [f"declared_header: {primary_domain}"],
             msg_stripped
         )
+
+    # v8: Structural task header detection — forces Tier 3 immediately
+    # These patterns appear in well-specified task prompts and are unambiguous task signals
+    _STRUCTURAL_TASK_HEADERS = re.compile(
+        r"\b(task\s*breakdown|phase\s*\d|step\s*\d|requirements?:|phases:|steps:|breakdown:|"
+        r"objective:|goal:|instructions?:|sub[\s-]?tasks?:|deliverables?:)\b",
+        re.I
+    )
+    if _STRUCTURAL_TASK_HEADERS.search(msg_stripped):
+        domain_scores, domain, secondary_domains, reason_codes = _score_domains(msg_stripped)
+        ranked_domains = sorted(
+            [(d, s) for d, s in domain_scores.items()], key=lambda x: x[1], reverse=True
+        )
+        return _make_task_response(domain, secondary_domains, ranked_domains, 3, False, reason_codes, msg_stripped)
+
 
     # Load dynamic rules
     rules = _load_dynamic_rules()
@@ -325,8 +348,9 @@ def _classify_intent(msg: str) -> dict:
         task_score += 1
     if _URL_PATTERN.search(msg):
         task_score += 1
-    # Questions asking for information/action
-    if re.match(r"^(what|how|where|when|why|can\s*you|could\s*you|please|show|tell\s*me)\b", msg_stripped, re.I):
+    # Questions asking for information/action (strip greetings first)
+    msg_cleaned_prefix = re.sub(r"^(?:hey|hi|hello|yo|sup|jarvis|voxkage|sir|\s+)+\b\s*", "", msg_stripped, flags=re.I).strip()
+    if re.match(r"^(what|how|where|when|why|can\s*you|could\s*you|please|show|tell\s*me)\b", msg_cleaned_prefix, re.I):
         task_score += 1
 
     # v8: Informal human speech task patterns
@@ -365,7 +389,7 @@ def _classify_intent(msg: str) -> dict:
     if task_score > 0 and conv_score > 0:
         task_score += 1  # bias toward task
 
-    if task_score <= conv_score:
+    if task_score <= conv_score and conv_score > 0:
         return {"type": "conversation"}
 
     # ── Domain classification ──

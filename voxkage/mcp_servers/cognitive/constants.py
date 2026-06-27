@@ -46,7 +46,9 @@ _DOMAIN_NEGATION_PATTERNS = re.compile(
 _VERB_NOUN_DOMAIN_MAP = [
     (re.compile(r"\b(build|write|create|make|generate)\b", re.I), re.compile(r"\b(report|summary|article|matrix|comparison|doc|document|text|notes)\b", re.I), "research"),
     (re.compile(r"\b(build|write|create|make|generate|implement)\b", re.I), re.compile(r"\b(code|function|class|script|program|app|application|server|mcp|tool|backend|frontend)\b", re.I), "coding"),
-    (re.compile(r"\b(search|find|look\s+up|research|fetch|get|scrape|query)\b", re.I), re.compile(r".*"), "research"),
+    (re.compile(r"\b(search|find|look\s+up|research|fetch|get|scrape|query)\b", re.I), 
+     re.compile(r"^(?!.*\b(code|function|class|script|program|app|application|server|mcp|tool|backend|frontend|api|route|database|postgres|redis|mongodb|docker|github|workflow|pipeline|pandas|dataframe|dataset|logs|trace|leak|wallpaper|microphone|volume|brightness|nginx|reverse proxy|ssl|certbot|recipe|welcome email|email|poem|story|names|names for|brainstorm|typescript|javascript|python|js|ts|rust|golang|go|java|c\+\+|algorithm|binary)\b).*$", re.I), 
+     "research"),
     (re.compile(r"\b(analyze|audit|check|evaluate|inspect)\b", re.I), re.compile(r"\b(codebase|repo|file|quality|bug|error|issue|warning|lint|mismatch|performance|trace)\b", re.I), "analysis"),
 ]
 
@@ -83,7 +85,8 @@ _ACTION_VERBS = re.compile(
     r"add|remove|start|stop|restart|kill|close|browse|scrape|scan|compress|"
     r"extract|convert|generate|explain|research|compare|summarize|refactor|"
     r"optimize|sort|clean|format|index|commit|push|pull|merge|clone|log|"
-    r"schedule|connect|disconnect|ping|monitor|backup|restore)\b", re.I
+    r"schedule|connect|disconnect|ping|monitor|backup|restore|look|preprocess|"
+    r"mute|brainstorm|inspect)\b", re.I
 )
 _CODE_KEYWORDS = re.compile(
     r"\b(function|class|method|api|endpoint|database|server|frontend|backend|"
@@ -125,7 +128,7 @@ _DOMAIN_SEMANTICS_RAW = {
     },
     "backend": {
         "verbs": ["serve", "route", "authenticate", "cache", "query", "connect", "listen"],
-        "nouns": ["backend", "back-end", "api", "server", "endpoint", "database", "express", "django", "flask", "fastapi", "node", "rest", "graphql", "grpc", "auth", "middleware", "session", "jwt", "oauth", "microservice", "docker", "nginx", "kubernetes", "lambda", "serverless"]
+        "nouns": ["backend", "back-end", "api", "server", "endpoint", "database", "express", "django", "flask", "fastapi", "node", "rest", "graphql", "grpc", "auth", "middleware", "session", "jwt", "oauth", "microservice", "docker", "nginx", "kubernetes", "lambda", "serverless", "controller", "upload", "uploading"]
     },
     "research": {
         "verbs": ["search", "research", "find\\s*(out|info|about)", "look\\s*up", "compare", "review", "summarize", "explain", "learn", "investigate", "browse", "scrape", "fetch", "query", "check\\s*out"],
@@ -137,15 +140,15 @@ _DOMAIN_SEMANTICS_RAW = {
     },
     "coding": {
         "verbs": ["code", "program", "script", "debug", "refactor", "optimize", "test", "lint", "compile", "build", "fix\\s*(the\\s*)?bug", "implement", "write\\s*(a\\s*)?(function|script|class|code|program)", "develop", "commit", "push", "pull", "merge", "clone"],
-        "nouns": ["variable", "constant", "class", "function", "method", "interface", "generic", "inheritance", "algorithm", "data\\s*structure", "bug", "error", "exception", "crash", "syntax", "repo", "pr", "pull\\s*request", "dependency", "import", "export"]
+        "nouns": ["variable", "constant", "class", "function", "method", "interface", "generic", "inheritance", "algorithm", "data\\s*structure", "bug", "error", "exception", "crash", "syntax", "repo", "pr", "pull\\s*request", "dependency", "import", "export", "loop", "looping"]
     },
     "creative": {
-        "verbs": ["cook", "bake", "write\\s*(a\\s*)?(story|poem|essay|letter|email|blog|caption|joke|song|script|speech)", "brainstorm", "draft", "imagine", "compose"],
-        "nouns": ["recipe", "food", "meal", "dish", "ingredient", "story", "poem", "essay", "song", "lyrics", "art", "craft", "creative", "idea", "fiction", "narrative", "character", "plot"]
+        "verbs": ["cook", "bake", "write\\s+(?:[a-zA-Z0-9'\"\\s]+\\s+)?(story|poem|essay|letter|email|blog|caption|joke|song|script|speech|recipe|welcome)", "brainstorm", "draft", "imagine", "compose"],
+        "nouns": ["recipe", "food", "meal", "dish", "ingredient", "story", "poem", "essay", "song", "lyrics", "art", "craft", "creative", "idea", "fiction", "narrative", "character", "plot", "names"]
     },
     "analysis": {
         "verbs": ["analyze", "evaluate", "inspect", "audit", "profile", "diagnose", "graph", "plot", "measure"],
-        "nouns": ["analysis", "metrics", "logs", "diagnostics", "profile", "report", "trend", "performance", "chart", "plot", "graph"]
+        "nouns": ["analysis", "metrics", "logs", "diagnostics", "profile", "report", "trend", "performance", "chart", "plot", "graph", "leak", "trace", "traces"]
     },
     "planning": {
         "verbs": ["plan", "design", "outline", "map", "schedule", "roadmap"],
@@ -153,7 +156,7 @@ _DOMAIN_SEMANTICS_RAW = {
     },
     "general": {
         "verbs": ["help", "greet", "chat", "socialize"],
-        "nouns": ["general", "chitchat", "info", "status", "version", "plugins", "about", "uptime", "date", "time", "spotify", "media"]
+        "nouns": ["general", "chitchat", "info", "status", "version", "plugins", "about", "uptime", "date", "time", "spotify", "media", "mute"]
     },
     "data": {
         "verbs": ["clean", "preprocess", "predict", "train", "etl", "ingest"],
