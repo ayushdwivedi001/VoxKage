@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "voxkage"
-version = "1.1.12"
+version = "1.1.13"
 description = "VoxKage - OS-level Agentic AI Assistant. Autonomous, Persistent, Aware."
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -34,7 +34,9 @@ classifiers = [
 # CORE - installed with pipx install voxkage  (~80 MB)
 #
 # Fast first install that makes VoxKage feel IMMEDIATELY powerful.
-# Heavy ML packs (RAG ~500MB, Vision ~250MB) are optional extras
+# Includes the SQLite FTS5 RAG engine (Python stdlib â€” no downloads).
+# This powers the cognitive workflow, ACE engine, and codebase indexing.
+# Heavy ML packs (Vision ~250MB, Browser ~80MB) are optional extras
 # installed via voxkage init or voxkage install <pack>.
 # All MCP servers guard optional deps with try/except ImportError.
 # ---------------------------------------------------------

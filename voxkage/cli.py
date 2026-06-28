@@ -516,9 +516,9 @@ def cmd_status():
     # Capability Packs
     print(f"  CAPABILITY PACKS")
     print(f"    {_ok}  Core AI + OS Control       (always on)")
+    print(f"    {_ok}  RAG Memory (SQLite FTS5)   (always on — built-in, no downloads)")
 
     pack_checks = [
-        ("RAG Memory",       "chromadb",              "rag"),
         ("Vision & OCR",     "cv2",                   "vision"),
         ("Browser Engine",   "playwright",            "browser"),
         ("PDF Conversion",   "fitz",                  "docs_plus"),
@@ -685,9 +685,9 @@ def cmd_init():
 
     pack_defs = [
         # (letter, pack_key, label, sentinel_module, size_note)
-        ("B", "rag",       "RAG Memory     ", "chromadb",             "~450 MB"),
-        ("C", "vision",    "Vision & OCR   ", "cv2",                  "~250 MB"),
-        ("D", "docs_plus", "PDF Conversion ", "docx2pdf",             " ~80 MB"),
+        # RAG is built-in (SQLite FTS5) — no entry needed here
+        ("B", "vision",    "Vision & OCR   ", "cv2",                  "~250 MB"),
+        ("C", "docs_plus", "PDF Conversion ", "docx2pdf",             " ~80 MB"),
     ]
 
     _ok = f"{_c(34,197,94)}✓{RST}"

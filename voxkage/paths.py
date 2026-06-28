@@ -84,7 +84,7 @@ def browser_dir() -> Path:
     return d
 
 def rag_dir() -> Path:
-    """~/.voxkage/data/rag/ — chromadb store."""
+    """~/.voxkage/data/rag/ — SQLite FTS5 index store."""
     d = data_dir() / "rag"
     d.mkdir(parents=True, exist_ok=True)
     return d

@@ -12,7 +12,8 @@
 #   docs_plus  Word/PDF/Excel format conversion              (~80 MB)
 #   full       All of the above                              (~410 MB)
 #
-# Note: SQLite FTS5 RAG is built-in by default in the core package (no heavy model downloads).
+# Note: SQLite FTS5 RAG is built-in (Python stdlib) — no extra packages required.
+# Note: Cognitive core, ACE engine, and all MCP servers share the same RAG database.
 #
 # After cloning:
 #   pip install -e ".[browser]"       <- recommended dev baseline
@@ -27,6 +28,7 @@ requests>=2.31
 python-dotenv>=1.0
 ddgs>=9.14.4
 trafilatura>=2.0.0
+lxml_html_clean>=0.1.0
 aiohttp
 
 # ── Core: OS Integration (Cross-Platform) ────────────────────────────────────
