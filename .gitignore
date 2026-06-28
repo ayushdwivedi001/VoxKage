@@ -137,3 +137,12 @@ Desktop.ini
 
 # Temporary Scratch Files
 scratch*.py
+
+# Root-level engine configs (generated from templates)
+GEMINI.md
+
+# Backup/archive artifacts
+*.pre_voxkage
+
+# One-off test scripts (kept locally for testing)
+test_cognitive_recurrent.py
